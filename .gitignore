@@ -1,0 +1,81 @@
+# ==================================================
+# Go build output
+# ==================================================
+bin/
+build/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.out
+coverage.html
+
+# ==================================================
+# Go workspace / vendor optional
+# ==================================================
+go.work
+go.work.sum
+
+# Kalau Anda pakai vendor dan ingin commit vendor, hapus baris ini.
+vendor/
+
+# ==================================================
+# Environment / secrets
+# ==================================================
+.env
+.env.*
+!.env.example
+
+# ==================================================
+# cryptobroV3 storage runtime files
+# ==================================================
+storage/*.json
+storage/backtest_runs/
+storage/tmp/
+logs/
+tmp/
+
+# Keep folder structure if needed
+!storage/.gitkeep
+!logs/.gitkeep
+!tmp/.gitkeep
+
+# ==================================================
+# Swagger generated docs
+# ==================================================
+# Pilih salah satu:
+# 1. Kalau ingin docs Swagger ikut repo, JANGAN ignore docs/
+# 2. Kalau ingin generate lokal saja, uncomment baris berikut:
+docs/
+
+# ==================================================
+# IDE / OS files
+# ==================================================
+.DS_Store
+Thumbs.db
+
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# ==================================================
+# Test/cache
+# ==================================================
+*.log
+*.tmp
+*.bak
+*.swp
+
+# Go test cache biasanya di luar project, tapi ini aman untuk file lokal
+.testcache/
+
+# ==================================================
+# Air live reload
+# ==================================================
+tmp/
+.air.toml
