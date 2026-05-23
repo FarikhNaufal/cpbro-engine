@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 )
 
 type PlaybookEligibilityUsecase struct{}
@@ -155,8 +156,8 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 		}
 
 		// 1. Trend direction check (H4/H1 trend must match direction)
-		h4Trend := CalculateH4Trend(GetClosedCandlesOnly(data.H4Candles), 200)
-		h1Trend := CalculateH4Trend(GetClosedCandlesOnly(data.H1Candles), 50)
+		h4Trend := CalculateH4Trend(GetClosedCandlesOnly(data.H4Candles, 4*time.Hour), 200)
+		h1Trend := CalculateH4Trend(GetClosedCandlesOnly(data.H1Candles, time.Hour), 50)
 
 		expectedTrend := "BULLISH"
 		if sel.Direction == SHORT {
@@ -173,7 +174,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 		}
 
 		// 1.5. Pullback to value area
-		m15Closed := GetClosedCandlesOnly(data.M15Candles)
+		m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
 		if len(m15Closed) >= 50 {
 			ema20s := CalculateEMA(m15Closed, 20)
 			ema50s := CalculateEMA(m15Closed, 50)
@@ -215,7 +216,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 		}
 
 		// 3. ADX threshold check
-		adx := tech.IndicatorValues["ADX"]
+		adx := tech.IndicatorValues[IndicatorADX]
 		minADX := policy.MinADXExecute
 		if minADX == 0 {
 			minADX = 20.0
@@ -314,7 +315,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 				}
 			}
 
-			m15Closed := GetClosedCandlesOnly(data.M15Candles)
+			m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
 			if len(m15Closed) >= 21 {
 				lowest20 := LowestLow(m15Closed[:len(m15Closed)-1], 20)
 				lastClose := m15Closed[len(m15Closed)-1].Close
@@ -338,7 +339,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 				}
 			}
 
-			m15Closed := GetClosedCandlesOnly(data.M15Candles)
+			m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
 			if len(m15Closed) >= 21 {
 				highest20 := HighestHigh(m15Closed[:len(m15Closed)-1], 20)
 				lastClose := m15Closed[len(m15Closed)-1].Close
@@ -459,7 +460,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 		}
 
 		// 2. Breakout close valid & Retest check
-		m15Closed := GetClosedCandlesOnly(data.M15Candles)
+		m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
 		if len(m15Closed) >= 20 {
 			_, upperBands, lowerBands := CalculateBollingerBands(m15Closed, 20, 2.0)
 			if len(upperBands) > 0 && len(lowerBands) > 0 {
@@ -615,7 +616,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 		}
 
 		// 1.5. ADX not expanding strongly check
-		adx := tech.IndicatorValues["ADX"]
+		adx := tech.IndicatorValues[IndicatorADX]
 		if adx > 30.0 {
 			return PlaybookEligibilityResult{
 				Playbook: playbook,

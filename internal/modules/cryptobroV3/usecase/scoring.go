@@ -23,18 +23,18 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 	rawScore := 0.0
 	tech := quant.TechnicalSnapshot
 	rsi := tech.RSI
-	adxVal := tech.IndicatorValues["ADX"]
+	adxVal := tech.IndicatorValues[IndicatorADX]
 
 	// Flags from TechnicalSnapshot
-	sweepLow := tech.IndicatorValues["sweep_low"]
-	sweepHigh := tech.IndicatorValues["sweep_high"]
-	wickRejection := tech.IndicatorValues["wick_rejection"]
-	volumeSpike := tech.IndicatorValues["volume_spike"]
-	contraction := tech.IndicatorValues["contraction"]
-	nearRangeEdge := tech.IndicatorValues["near_range_edge"]
-	extremeFunding := tech.IndicatorValues["extreme_funding"]
-	extremeOI := tech.IndicatorValues["extreme_oi"]
-	paRejection := tech.IndicatorValues["pa_rejection"]
+	sweepLow := tech.IndicatorValues[IndicatorSweepLow]
+	sweepHigh := tech.IndicatorValues[IndicatorSweepHigh]
+	wickRejection := tech.IndicatorValues[IndicatorWickRejection]
+	volumeSpike := tech.IndicatorValues[IndicatorVolumeSpike]
+	contraction := tech.IndicatorValues[IndicatorContraction]
+	nearRangeEdge := tech.IndicatorValues[IndicatorNearRangeEdge]
+	extremeFunding := tech.IndicatorValues[IndicatorExtremeFunding]
+	extremeOI := tech.IndicatorValues[IndicatorExtremeOI]
+	paRejection := tech.IndicatorValues[IndicatorPARejection]
 
 	// Calculate RR (Risk-to-Reward)
 	rr := 1.0

@@ -115,7 +115,9 @@ func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy
 	// Perform robust field mappings & derivations at the usecase layer
 	res.Symbol = symbol
 	res.IsApproved = (res.Decision == "CONFIRM")
-	res.Reasoning = res.Reason
+	if strings.TrimSpace(res.Reasoning) == "" {
+		res.Reasoning = res.Reason
+	}
 
 	// Derive Sentiment
 	if res.Decision == "CONFIRM" {
@@ -146,7 +148,7 @@ func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy
 		res.IsApproved = false
 		res.Decision = "REJECT"
 		res.SuggestedAction = "REJECT"
-		res.Reasoning = "AI rejected due to direction conflict with bot: " + res.Reason
+		res.Reasoning = "AI rejected due to direction conflict with bot: " + res.Reasoning
 	}
 
 	// 2. Ignore any suggested target levels from AI to protect the quant bot plan parameters

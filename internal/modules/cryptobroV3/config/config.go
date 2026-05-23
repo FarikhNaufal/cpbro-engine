@@ -42,6 +42,7 @@ type MonitoringConfig struct {
 type EvaluationConfig struct {
 	Enabled          bool `json:"enabled"`
 	AutoRun          bool `json:"auto_run"`
+	AutoApply        bool `json:"auto_apply"`
 	IntervalMinutes  int  `json:"interval_minutes"`
 	MinSampleWarning int  `json:"min_sample_warning"`
 	MinSampleMedium  int  `json:"min_sample_medium"`
@@ -69,10 +70,16 @@ type GeminiConfig struct {
 
 // TelegramConfig dispatch details for trade execution alerts
 type TelegramConfig struct {
-	Enabled               bool   `json:"enabled"`
-	BotToken              string `json:"-"`
-	ChatID                string `json:"-"`
-	RequestTimeoutSeconds int    `json:"request_timeout_seconds"`
+	Enabled       bool   `json:"enabled"`
+	SignalEnabled bool   `json:"signal_enabled"`
+	StatusEnabled bool   `json:"status_enabled"`
+	BotToken      string `json:"-"`
+	// Backward-compat: TELEGRAM_CHAT_ID maps to SignalChatID if SignalChatID is empty.
+	ChatID                        string `json:"-"`
+	SignalChatID                  string `json:"-"`
+	StatusChatID                  string `json:"-"`
+	StatusAllowSignalChatFallback bool   `json:"status_allow_signal_chat_fallback"`
+	RequestTimeoutSeconds         int    `json:"request_timeout_seconds"`
 }
 
 // ConcurrencyConfig rate limits for parallel execution loops
@@ -97,6 +104,7 @@ type StorageConfig struct {
 type SafetyConfig struct {
 	AlertOnly                    bool `json:"alert_only"`
 	BinanceReadOnly              bool `json:"binance_readonly"`
+	AllowBinanceWrite            bool `json:"allow_binance_write"`
 	DisableBinanceOrderEndpoints bool `json:"disable_binance_order_endpoints"`
 	DisableAutoExecution         bool `json:"disable_auto_execution"`
 	DisableAutoThresholdApply    bool `json:"disable_auto_threshold_apply"`
@@ -186,6 +194,7 @@ func LoadConfigFromEnv() (*Config, error) {
 		Evaluation: EvaluationConfig{
 			Enabled:          getEnvBool("EVALUATION_ENABLED", true),
 			AutoRun:          getEnvBool("EVALUATION_AUTO_RUN", false),
+			AutoApply:        getEnvBool("EVALUATION_AUTO_APPLY", false),
 			IntervalMinutes:  getEnvInt("EVALUATION_INTERVAL_MINUTES", 360),
 			MinSampleWarning: getEnvInt("EVALUATION_MIN_SAMPLE_WARNING", 10),
 			MinSampleMedium:  getEnvInt("EVALUATION_MIN_SAMPLE_MEDIUM", 20),
@@ -207,10 +216,15 @@ func LoadConfigFromEnv() (*Config, error) {
 			MaxCandidatesDefault:  getEnvInt("MAX_AI_CANDIDATES_DEFAULT", 3),
 		},
 		Telegram: TelegramConfig{
-			Enabled:               getEnvBool("TELEGRAM_ENABLED", true),
-			BotToken:              getEnv("TELEGRAM_BOT_TOKEN", ""),
-			ChatID:                getEnv("TELEGRAM_CHAT_ID", ""),
-			RequestTimeoutSeconds: getEnvInt("TELEGRAM_REQUEST_TIMEOUT_SECONDS", 10),
+			Enabled:                       getEnvBool("TELEGRAM_ENABLED", true),
+			SignalEnabled:                 getEnvBool("TELEGRAM_SIGNAL_ENABLED", true),
+			StatusEnabled:                 getEnvBool("TELEGRAM_STATUS_ENABLED", true),
+			BotToken:                      getEnv("TELEGRAM_BOT_TOKEN", ""),
+			ChatID:                        getEnv("TELEGRAM_CHAT_ID", ""),
+			SignalChatID:                  getEnv("TELEGRAM_SIGNAL_CHAT_ID", ""),
+			StatusChatID:                  getEnv("TELEGRAM_STATUS_CHAT_ID", ""),
+			StatusAllowSignalChatFallback: getEnvBool("TELEGRAM_STATUS_ALLOW_SIGNAL_CHAT_FALLBACK", false),
+			RequestTimeoutSeconds:         getEnvInt("TELEGRAM_REQUEST_TIMEOUT_SECONDS", 10),
 		},
 		Concurrency: ConcurrencyConfig{
 			MaxMarketDataConcurrency: getEnvInt("MAX_MARKETDATA_CONCURRENCY", 10),
@@ -229,6 +243,7 @@ func LoadConfigFromEnv() (*Config, error) {
 		Safety: SafetyConfig{
 			AlertOnly:                    getEnvBool("ALERT_ONLY", true),
 			BinanceReadOnly:              getEnvBool("BINANCE_READ_ONLY", true),
+			AllowBinanceWrite:            getEnvBool("ALLOW_BINANCE_WRITE", false),
 			DisableBinanceOrderEndpoints: getEnvBool("DISABLE_BINANCE_ORDER_ENDPOINTS", true),
 			DisableAutoExecution:         getEnvBool("DISABLE_AUTO_EXECUTION", true),
 			DisableAutoThresholdApply:    getEnvBool("DISABLE_AUTO_THRESHOLD_APPLY", true),
@@ -251,6 +266,11 @@ func LoadConfigFromEnv() (*Config, error) {
 			SwaggerHost:                 getEnv("SWAGGER_HOST", "localhost:"+getEnv("HTTP_PORT", "8080")),
 			SwaggerBasePath:             getEnv("SWAGGER_BASE_PATH", "/api/v3"),
 		},
+	}
+
+	// Telegram backward compatibility: TELEGRAM_CHAT_ID acts as TELEGRAM_SIGNAL_CHAT_ID if the new var is empty.
+	if strings.TrimSpace(cfg.Telegram.SignalChatID) == "" {
+		cfg.Telegram.SignalChatID = cfg.Telegram.ChatID
 	}
 
 	return cfg, nil
@@ -300,11 +320,47 @@ func ValidateConfig(cfg *Config) error {
 	if !cfg.Safety.BinanceReadOnly {
 		return fmt.Errorf("CRITICAL SAFETY VIOLATION: BINANCE_READ_ONLY must be true")
 	}
+	if cfg.Safety.AllowBinanceWrite {
+		return fmt.Errorf("CRITICAL SAFETY VIOLATION: ALLOW_BINANCE_WRITE must be false")
+	}
 	if !cfg.Safety.DisableBinanceOrderEndpoints {
 		return fmt.Errorf("CRITICAL SAFETY VIOLATION: DISABLE_BINANCE_ORDER_ENDPOINTS must be true")
 	}
 	if !cfg.Safety.DisableAutoExecution {
 		return fmt.Errorf("CRITICAL SAFETY VIOLATION: DISABLE_AUTO_EXECUTION must be true")
+	}
+	if !cfg.Safety.DisableAutoThresholdApply {
+		return fmt.Errorf("CRITICAL SAFETY VIOLATION: DISABLE_AUTO_THRESHOLD_APPLY must be true")
+	}
+	if !cfg.Safety.RequireAIHighForExecute {
+		return fmt.Errorf("CRITICAL SAFETY VIOLATION: REQUIRE_AI_HIGH_FOR_EXECUTE must be true")
+	}
+	if !cfg.Safety.RequireFreshEntryForExecute {
+		return fmt.Errorf("CRITICAL SAFETY VIOLATION: REQUIRE_FRESH_ENTRY_FOR_EXECUTE must be true")
+	}
+	if cfg.Evaluation.AutoApply {
+		return fmt.Errorf("CRITICAL SAFETY VIOLATION: EVALUATION_AUTO_APPLY must be false")
+	}
+
+	// Production hardening: if AI audit is disabled while execute requires AI HIGH, fail fast.
+	if strings.EqualFold(cfg.App.Env, "production") && !cfg.Safety.AIAuditEnabled && cfg.Safety.RequireAIHighForExecute {
+		return fmt.Errorf("CRITICAL SAFETY VIOLATION: AI_AUDIT_ENABLED must be true in production when REQUIRE_AI_HIGH_FOR_EXECUTE=true")
+	}
+
+	// Telegram validation (best-effort; do not panic)
+	if cfg.Telegram.Enabled {
+		if (cfg.Telegram.SignalEnabled || cfg.Telegram.StatusEnabled) && strings.TrimSpace(cfg.Telegram.BotToken) == "" {
+			return fmt.Errorf("TELEGRAM_BOT_TOKEN must be set when Telegram is enabled")
+		}
+		if cfg.Telegram.SignalEnabled && strings.TrimSpace(cfg.Telegram.SignalChatID) == "" {
+			return fmt.Errorf("TELEGRAM_SIGNAL_CHAT_ID (or TELEGRAM_CHAT_ID) must be set when TELEGRAM_SIGNAL_ENABLED=true")
+		}
+
+		if cfg.Telegram.StatusEnabled && strings.TrimSpace(cfg.Telegram.StatusChatID) == "" && !cfg.Telegram.StatusAllowSignalChatFallback {
+			// Status sender is disabled silently at runtime, but we emit a warning and disable here as well.
+			fmt.Fprintln(os.Stderr, "WARN: TELEGRAM_STATUS_ENABLED=true but TELEGRAM_STATUS_CHAT_ID is empty and TELEGRAM_STATUS_ALLOW_SIGNAL_CHAT_FALLBACK=false; disabling status notifications")
+			cfg.Telegram.StatusEnabled = false
+		}
 	}
 
 	return nil
@@ -338,6 +394,7 @@ func SafeConfigView(cfg *Config) map[string]any {
 		"evaluation": map[string]any{
 			"enabled":            cfg.Evaluation.Enabled,
 			"auto_run":           cfg.Evaluation.AutoRun,
+			"auto_apply":         cfg.Evaluation.AutoApply,
 			"interval_minutes":   cfg.Evaluation.IntervalMinutes,
 			"min_sample_warning": cfg.Evaluation.MinSampleWarning,
 			"min_sample_medium":  cfg.Evaluation.MinSampleMedium,
@@ -358,10 +415,14 @@ func SafeConfigView(cfg *Config) map[string]any {
 			"api_key_set":             cfg.Gemini.APIKey != "",
 		},
 		"telegram": map[string]any{
-			"enabled":                 cfg.Telegram.Enabled,
-			"request_timeout_seconds": cfg.Telegram.RequestTimeoutSeconds,
-			"bot_token_set":           cfg.Telegram.BotToken != "",
-			"chat_id_set":             cfg.Telegram.ChatID != "",
+			"enabled":                           cfg.Telegram.Enabled,
+			"signal_enabled":                    cfg.Telegram.SignalEnabled,
+			"status_enabled":                    cfg.Telegram.StatusEnabled,
+			"request_timeout_seconds":           cfg.Telegram.RequestTimeoutSeconds,
+			"bot_token_set":                     cfg.Telegram.BotToken != "",
+			"signal_chat_id_set":                cfg.Telegram.SignalChatID != "" || cfg.Telegram.ChatID != "",
+			"status_chat_id_set":                cfg.Telegram.StatusChatID != "",
+			"status_allow_signal_chat_fallback": cfg.Telegram.StatusAllowSignalChatFallback,
 		},
 		"concurrency": map[string]any{
 			"max_marketdata_concurrency": cfg.Concurrency.MaxMarketDataConcurrency,
@@ -380,6 +441,7 @@ func SafeConfigView(cfg *Config) map[string]any {
 		"safety": map[string]any{
 			"alert_only":                      cfg.Safety.AlertOnly,
 			"binance_readonly":                cfg.Safety.BinanceReadOnly,
+			"allow_binance_write":             cfg.Safety.AllowBinanceWrite,
 			"disable_binance_order_endpoints": cfg.Safety.DisableBinanceOrderEndpoints,
 			"disable_auto_execution":          cfg.Safety.DisableAutoExecution,
 			"disable_auto_threshold_apply":    cfg.Safety.DisableAutoThresholdApply,

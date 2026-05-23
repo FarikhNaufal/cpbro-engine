@@ -29,7 +29,7 @@ func TestScoring_PlaybookCalculations(t *testing.T) {
 			TechnicalSnapshot: TechnicalSnapshot{
 				RSI: 45.0,
 				IndicatorValues: map[string]float64{
-					"ADX":          25.0,
+					IndicatorADX:   25.0,
 					"volume_spike": 1.0,
 				},
 			},
@@ -97,7 +97,7 @@ func TestScoring_PlaybookCalculations(t *testing.T) {
 			TechnicalSnapshot: TechnicalSnapshot{
 				RSI: 50.0,
 				IndicatorValues: map[string]float64{
-					"ADX":             20.0,
+					IndicatorADX:      20.0,
 					"near_range_edge": 1.0,
 					"wick_rejection":  1.0,
 				},
@@ -150,7 +150,7 @@ func TestScoring_Penalties(t *testing.T) {
 			TechnicalSnapshot: TechnicalSnapshot{
 				RSI: 45.0,
 				IndicatorValues: map[string]float64{
-					"ADX": 25.0,
+					IndicatorADX: 25.0,
 				},
 			},
 		}
@@ -175,7 +175,7 @@ func TestScoring_Penalties(t *testing.T) {
 			TechnicalSnapshot: TechnicalSnapshot{
 				RSI: 45.0,
 				IndicatorValues: map[string]float64{
-					"ADX": 25.0,
+					IndicatorADX: 25.0,
 				},
 			},
 		}

@@ -47,6 +47,10 @@ func (m *complianceStorageRepo) SaveSignalJournal(j []SignalJournal) error {
 	m.journal = j
 	return nil
 }
+func (m *complianceStorageRepo) AppendSignalJournal(entry SignalJournal) error {
+	m.journal = append(m.journal, entry)
+	return nil
+}
 func (m *complianceStorageRepo) LoadAIAuditCache() (*entity.AIAuditCache, error) {
 	return &entity.AIAuditCache{CacheMap: make(map[string]entity.CachedAudit)}, nil
 }
@@ -68,6 +72,13 @@ func (m *complianceStorageRepo) LoadDecisionAudits() ([]DecisionAudit, error) {
 }
 func (m *complianceStorageRepo) SaveDecisionAudits(a []DecisionAudit) error {
 	m.audits = a
+	return nil
+}
+func (m *complianceStorageRepo) AppendDecisionAudit(entry DecisionAudit) error {
+	m.audits = append(m.audits, entry)
+	if len(m.audits) > 1000 {
+		m.audits = m.audits[len(m.audits)-1000:]
+	}
 	return nil
 }
 
@@ -110,14 +121,16 @@ func (m *complianceAIAuditor) AuditCandidate(ctx context.Context, req dto.AIAudi
 
 type complianceNotification struct {
 	calledTimes int
+	lastMsg     string
 }
 
-func (m *complianceNotification) SendFinalExecuteAlert(ctx context.Context, signal dto.SignalResponse) error {
+func (m *complianceNotification) SendSignalMessage(ctx context.Context, msg string) error {
 	m.calledTimes++
+	m.lastMsg = msg
 	return nil
 }
-func (m *complianceNotification) SendTelegramMessage(ctx context.Context, msg string) error {
-	m.calledTimes++
+
+func (m *complianceNotification) SendOpsMessage(ctx context.Context, msg string) error {
 	return nil
 }
 
@@ -436,29 +449,9 @@ func TestConflictResolverCompliance(t *testing.T) {
 
 // 8. TEST NOTIFICATION
 func TestNotificationCompliance(t *testing.T) {
-	tgMock := &complianceNotification{}
-	uc := NewNotificationUsecase(tgMock)
-
-	t.Run("Send execute alert calls TG client", func(t *testing.T) {
-		signal := dto.SignalResponse{
-			Symbol:         "SOLUSDT",
-			Strategy:       "TREND_PULLBACK",
-			Direction:      "LONG",
-			Score:          8.0,
-			TriggerPrice:   10.0,
-			TakeProfit:     12.0,
-			StopLoss:       9.0,
-			IsFinalExecute: true,
-		}
-
-		err := uc.Send(context.Background(), signal)
-		assert.NoError(t, err)
-		assert.True(t, tgMock.calledTimes > 0)
-	})
-
-	t.Run("SendV3 only transmits FINAL_EXECUTE with high confidence", func(t *testing.T) {
+	t.Run("SendV3Signals only transmits FINAL_EXECUTE with HIGH+FRESH", func(t *testing.T) {
 		tgMock2 := &complianceNotification{}
-		uc2 := NewNotificationUsecase(tgMock2)
+		uc2 := NewSignalNotificationUsecase(tgMock2)
 
 		reqs := []SignalNotificationRequest{
 			{
@@ -520,8 +513,7 @@ func TestNotificationCompliance(t *testing.T) {
 			},
 		}
 
-		err := uc2.SendV3(context.Background(), reqs, MarketPolicy{Reason: "NORMAL"}, ScannerSummaryV3{ActiveRegime: "NORMAL"})
-		assert.NoError(t, err)
+		uc2.SendV3Signals(context.Background(), reqs, MarketPolicy{Reason: "NORMAL"}, ScannerSummaryV3{ActiveRegime: "NORMAL"})
 		// Only BTCUSDT (1 message) should have been sent to Telegram message channel
 		assert.Equal(t, 1, tgMock2.calledTimes)
 	})
@@ -624,7 +616,8 @@ func TestOrchestratorCompliance(t *testing.T) {
 	stalenessUC := NewStalenessUsecase(30 * time.Minute)
 	finalGateUC := NewFinalGateUsecase()
 	conflictResolverUC := NewConflictResolverUsecase()
-	notificationUC := NewNotificationUsecase(mockNotif)
+	signalNotificationUC := NewSignalNotificationUsecase(mockNotif)
+	opsNotificationUC := NewOpsNotificationUsecase(mockNotif)
 	monitoringUC := NewMonitoringUsecase(mockData, storageUC)
 	feedbackUC := NewFeedbackUsecase(storageUC)
 
@@ -644,7 +637,8 @@ func TestOrchestratorCompliance(t *testing.T) {
 		stalenessUC,
 		finalGateUC,
 		conflictResolverUC,
-		notificationUC,
+		signalNotificationUC,
+		opsNotificationUC,
 		monitoringUC,
 		feedbackUC,
 		storageUC,

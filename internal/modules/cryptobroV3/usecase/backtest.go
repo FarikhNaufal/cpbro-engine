@@ -697,7 +697,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 				}
 			}
 
-			planReview := uc.planReconciliationUsecase.Reconcile(qResult, auditResponse, policy)
+			planReview := uc.planReconciliationUsecase.Reconcile(qResult, auditResponse)
 			stalenessRes := uc.stalenessUsecase.Evaluate(qResult, planReview, policy, latestPrice)
 
 			finalDecision := uc.finalGateUsecase.Evaluate(

@@ -84,6 +84,46 @@ func TestConfig_ValidationSafetyDisableBinanceOrderEndpoints(t *testing.T) {
 	}
 }
 
+func TestConfig_ValidationSafetyDisableAutoThresholdApply(t *testing.T) {
+	cfg, _ := LoadConfigFromEnv()
+	cfg.Safety.DisableAutoThresholdApply = false
+	if err := ValidateConfig(cfg); err == nil {
+		t.Errorf("Expected validation error for DISABLE_AUTO_THRESHOLD_APPLY=false, got nil")
+	}
+}
+
+func TestConfig_ValidationSafetyRequireAIHighForExecute(t *testing.T) {
+	cfg, _ := LoadConfigFromEnv()
+	cfg.Safety.RequireAIHighForExecute = false
+	if err := ValidateConfig(cfg); err == nil {
+		t.Errorf("Expected validation error for REQUIRE_AI_HIGH_FOR_EXECUTE=false, got nil")
+	}
+}
+
+func TestConfig_ValidationSafetyRequireFreshEntryForExecute(t *testing.T) {
+	cfg, _ := LoadConfigFromEnv()
+	cfg.Safety.RequireFreshEntryForExecute = false
+	if err := ValidateConfig(cfg); err == nil {
+		t.Errorf("Expected validation error for REQUIRE_FRESH_ENTRY_FOR_EXECUTE=false, got nil")
+	}
+}
+
+func TestConfig_ValidationSafetyAllowBinanceWriteMustBeFalse(t *testing.T) {
+	cfg, _ := LoadConfigFromEnv()
+	cfg.Safety.AllowBinanceWrite = true
+	if err := ValidateConfig(cfg); err == nil {
+		t.Errorf("Expected validation error for ALLOW_BINANCE_WRITE=true, got nil")
+	}
+}
+
+func TestConfig_ValidationSafetyEvaluationAutoApplyMustBeFalse(t *testing.T) {
+	cfg, _ := LoadConfigFromEnv()
+	cfg.Evaluation.AutoApply = true
+	if err := ValidateConfig(cfg); err == nil {
+		t.Errorf("Expected validation error for EVALUATION_AUTO_APPLY=true, got nil")
+	}
+}
+
 func TestConfig_SafeConfigViewRedaction(t *testing.T) {
 	cfg := &Config{}
 	cfg.Binance.APIKey = "binance-secret-key"
@@ -154,5 +194,49 @@ func TestConfig_ValidationEmptyStoragePath(t *testing.T) {
 	err := ValidateConfig(cfg)
 	if err == nil {
 		t.Errorf("Expected validation error for empty StoragePath, got nil")
+	}
+}
+
+func TestConfig_TelegramBackwardCompatChatIDActsAsSignalChatID(t *testing.T) {
+	t.Setenv("TELEGRAM_CHAT_ID", "123")
+	t.Setenv("TELEGRAM_SIGNAL_CHAT_ID", "")
+
+	cfg, _ := LoadConfigFromEnv()
+	cfg.Telegram.Enabled = true
+	cfg.Telegram.SignalEnabled = true
+	cfg.Telegram.BotToken = "token"
+
+	if cfg.Telegram.SignalChatID == "" {
+		t.Fatalf("expected SignalChatID to be derived from ChatID for backward compatibility")
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Fatalf("expected telegram backward compat config to validate, got: %v", err)
+	}
+}
+
+func TestConfig_TelegramStatusMissingChatIDDisablesStatus(t *testing.T) {
+	cfg, _ := LoadConfigFromEnv()
+	cfg.Telegram.Enabled = true
+	cfg.Telegram.SignalEnabled = false
+	cfg.Telegram.StatusEnabled = true
+	cfg.Telegram.BotToken = "token"
+	cfg.Telegram.StatusChatID = ""
+	cfg.Telegram.StatusAllowSignalChatFallback = false
+
+	if err := ValidateConfig(cfg); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if cfg.Telegram.StatusEnabled {
+		t.Fatalf("expected StatusEnabled to be disabled when StatusChatID is empty and fallback is false")
+	}
+}
+
+func TestConfig_ProductionDisallowsAIDisabledWhenAIHighRequired(t *testing.T) {
+	cfg, _ := LoadConfigFromEnv()
+	cfg.App.Env = "production"
+	cfg.Safety.AIAuditEnabled = false
+	cfg.Safety.RequireAIHighForExecute = true
+	if err := ValidateConfig(cfg); err == nil {
+		t.Fatalf("expected validation error in production when AI audit disabled but AI HIGH required")
 	}
 }

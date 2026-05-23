@@ -3,8 +3,11 @@ package usecase
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 )
@@ -38,9 +41,9 @@ func (uc *PlaybookQuantEngineUsecase) RunEngine(
 	policy MarketPolicy,
 ) QuantResult {
 	// Filter to strictly closed candles for indicators (excluding open candle at index len-1)
-	m15Closed := GetClosedCandlesOnly(data.M15Candles)
-	h1Closed := GetClosedCandlesOnly(data.H1Candles)
-	h4Closed := GetClosedCandlesOnly(data.H4Candles)
+	m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
+	h1Closed := GetClosedCandlesOnly(data.H1Candles, time.Hour)
+	h4Closed := GetClosedCandlesOnly(data.H4Candles, 4*time.Hour)
 
 	if len(m15Closed) < 14 {
 		return QuantResult{
@@ -49,14 +52,6 @@ func (uc *PlaybookQuantEngineUsecase) RunEngine(
 			Status:       PLAYBOOK_REJECTED,
 			Reason:       "Insufficient closed M15 candles available for indicator calculations (minimum 14 required)",
 			IndicatorMet: false,
-		}
-	}
-
-	// Verify indicator inputs (Latest Price not mixed as candle close indicator)
-	if !VerifyIndicatorInput(m15Closed, data.LatestPrice) {
-		// Slice it if it matches the latest price to ensure zero pollution
-		if len(m15Closed) > 0 && m15Closed[len(m15Closed)-1].Close == data.LatestPrice {
-			m15Closed = m15Closed[:len(m15Closed)-1]
 		}
 	}
 
@@ -193,7 +188,7 @@ func (uc *PlaybookQuantEngineUsecase) RunEngine(
 			break
 		}
 		midPrice := (HighestHigh(m15Closed, 40) + LowestLow(m15Closed, 40)) / 2.0
-		adxVal := techSnap.IndicatorValues["ADX"]
+		adxVal := techSnap.IndicatorValues[IndicatorADX]
 
 		if direction == LONG {
 			if adxVal > 30.0 && h4Trend == "BEARISH" {
@@ -308,6 +303,11 @@ func (uc *PlaybookQuantEngineUsecase) RunEngine(
 }
 
 func (uc *PlaybookQuantEngineUsecase) saveM15RawKlines(symbol string, candles []dto.Candle) {
+	// Debug-only raw kline dump (disabled by default).
+	if strings.TrimSpace(strings.ToLower(os.Getenv("DEBUG_SAVE_RAW_KLINES"))) != "true" {
+		return
+	}
+
 	if len(candles) == 0 {
 		return
 	}
@@ -317,10 +317,22 @@ func (uc *PlaybookQuantEngineUsecase) saveM15RawKlines(symbol string, candles []
 	}
 	closedCandles := candles[len(candles)-limit:]
 
-	dir := "storage"
-	_ = os.MkdirAll(dir, 0755)
+	dir := strings.TrimSpace(os.Getenv("RAW_KLINES_DEBUG_DIR"))
+	if dir == "" {
+		dir = "debug/klines"
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		slog.Warn("failed to create raw klines debug dir", "dir", dir, "error", err)
+		return
+	}
 	filePath := filepath.Join(dir, fmt.Sprintf("raw_klines_%s.json", symbol))
 
-	bytes, _ := json.MarshalIndent(closedCandles, "", "  ")
-	_ = os.WriteFile(filePath, bytes, 0644)
+	bytes, err := json.MarshalIndent(closedCandles, "", "  ")
+	if err != nil {
+		slog.Warn("failed to marshal raw klines debug", "symbol", symbol, "error", err)
+		return
+	}
+	if err := os.WriteFile(filePath, bytes, 0644); err != nil {
+		slog.Warn("failed to write raw klines debug file", "file", filePath, "error", err)
+	}
 }

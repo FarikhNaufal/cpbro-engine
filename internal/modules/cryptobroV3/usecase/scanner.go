@@ -31,7 +31,8 @@ type ScannerUsecase struct {
 	stalenessUsecase           *StalenessUsecase
 	finalGateUsecase           *FinalGateUsecase
 	conflictResolverUsecase    *ConflictResolverUsecase
-	notificationUsecase        *NotificationUsecase
+	signalNotificationUsecase  *SignalNotificationUsecase
+	opsNotificationUsecase     *OpsNotificationUsecase
 	monitoringUsecase          *MonitoringUsecase
 	feedbackUsecase            *FeedbackUsecase
 	storageUsecase             *StorageUsecase
@@ -53,7 +54,8 @@ func NewScannerUsecase(
 	staleness *StalenessUsecase,
 	finalGate *FinalGateUsecase,
 	conflictResolver *ConflictResolverUsecase,
-	notification *NotificationUsecase,
+	signalNotification *SignalNotificationUsecase,
+	opsNotification *OpsNotificationUsecase,
 	monitoring *MonitoringUsecase,
 	feedback *FeedbackUsecase,
 	storage *StorageUsecase,
@@ -74,7 +76,8 @@ func NewScannerUsecase(
 		stalenessUsecase:           staleness,
 		finalGateUsecase:           finalGate,
 		conflictResolverUsecase:    conflictResolver,
-		notificationUsecase:        notification,
+		signalNotificationUsecase:  signalNotification,
+		opsNotificationUsecase:     opsNotification,
 		monitoringUsecase:          monitoring,
 		feedbackUsecase:            feedback,
 		storageUsecase:             storage,
@@ -82,8 +85,12 @@ func NewScannerUsecase(
 }
 
 func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.ScanResult, error) {
-	startTime := time.Now()
-	scanID := startTime.Format("20060102150405")
+	scanStart := time.Now()
+	scanBoundary := req.TriggerTime
+	if scanBoundary.IsZero() {
+		scanBoundary = scanStart
+	}
+	scanID := scanBoundary.Format("20060102150405")
 
 	slog.Info("Starting AnalyzeMarketV3 Scan", "scan_id", scanID)
 
@@ -106,7 +113,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	if err != nil {
 		slog.Error("Failed to fetch futures tickers", "error", err)
 		GetGlobalMetrics().IncrementScanFail()
-		GetGlobalMetrics().SetLastScanTime(startTime)
+		GetGlobalMetrics().SetLastScanTime(scanStart)
 		GetGlobalMetrics().IncrementMarketDataError()
 		return dto.ScanResult{}, fmt.Errorf("binance ticker total fail: %w", err)
 	}
@@ -235,6 +242,11 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	totalStrategySelected := 0
 	totalPlaybookEligible := 0
 
+	tickerLastPrice := make(map[string]float64, len(tickers))
+	for _, t := range tickers {
+		tickerLastPrice[t.Symbol] = t.LastPrice
+	}
+
 	for _, candidate := range candidates {
 		pair := candidate.Symbol
 		cache, exists := candlesMap[pair]
@@ -257,13 +269,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		}
 
 		// Choose strategy playbooks
-		var latestPrice float64
-		for _, t := range tickers {
-			if t.Symbol == pair {
-				latestPrice = t.LastPrice
-				break
-			}
-		}
+		latestPrice := tickerLastPrice[pair]
 		if latestPrice == 0 && len(cache.m15) > 0 {
 			latestPrice = cache.m15[len(cache.m15)-1].Close
 		}
@@ -377,19 +383,16 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			var auditErr error
 
 			if os.Getenv("AI_AUDIT_ENABLED") == "false" {
-				sentiment := "BULLISH"
-				if qr.Direction == SHORT {
-					sentiment = "BEARISH"
-				}
 				auditResponse = dto.AIAuditResponse{
 					Symbol:          pair,
-					Decision:        "CONFIRM",
-					IsApproved:      true,
-					Sentiment:       sentiment,
-					Confidence:      "HIGH",
-					ConfidenceScore: 0.9,
-					Reasoning:       "AI Audit disabled by configuration",
+					Decision:        "WAIT",
+					IsApproved:      false,
+					Sentiment:       "NEUTRAL",
+					Confidence:      "LOW",
+					ConfidenceScore: 0.3,
+					Reasoning:       "AI_AUDIT_DISABLED: AI audit disabled by configuration; forcing non-executable WATCH verdict",
 					Reason:          "AI_AUDIT_DISABLED",
+					SuggestedAction: "WATCH_ONLY",
 				}
 			} else {
 				auditResponse, auditErr = uc.aiAuditorUsecase.Audit(ctx, qr, policy, cache.m15, cache.h1, cache.h4)
@@ -399,7 +402,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 			aiMu.Lock()
 			if os.Getenv("AI_AUDIT_ENABLED") == "false" {
-				totalAIConfirm++
+				totalAIWait++
 			} else if auditErr != nil {
 				totalAIError++
 				if ctx.Err() == context.DeadlineExceeded || strings.Contains(strings.ToLower(auditErr.Error()), "timeout") || strings.Contains(strings.ToLower(auditErr.Error()), "deadline exceeded") {
@@ -473,7 +476,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			}
 		}
 
-		planReview := uc.planReconciliationUsecase.Reconcile(qResult, auditResponse, policy)
+		planReview := uc.planReconciliationUsecase.Reconcile(qResult, auditResponse)
 
 		latestPrice := 0.0
 		if t, exists := tickerMap[pair]; exists {
@@ -717,8 +720,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	summary := ScannerSummaryV3{
 		TotalScanned:                   len(candidates),
 		CandidatesFound:                len(decisions),
-		StartTime:                      startTime,
-		Duration:                       time.Since(startTime).String(),
+		StartTime:                      scanStart,
+		Duration:                       time.Since(scanStart).String(),
 		ActiveRegime:                   policy.Reason,
 		BtcTrend:                       btcTrend,
 		TotalTickers:                   totalTickers,
@@ -754,11 +757,30 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		})
 	}
 
-	_ = uc.notificationUsecase.SendV3(ctx, notificationReqs, policy, summary)
+	// OPS: optional admin warning for AI_ERROR_REVIEW (must NOT be sent via SIGNAL channel).
+	if uc.opsNotificationUsecase != nil {
+		for _, dec := range resolvedDecisions {
+			if dec.Status == AI_ERROR_REVIEW {
+				uc.opsNotificationUsecase.SendAdminWarningAIError(
+					ctx,
+					scanID,
+					dec.Symbol,
+					string(dec.Playbook),
+					string(dec.Status),
+					dec.Reason,
+				)
+			}
+		}
+	}
+
+	// SIGNAL: only actionable FINAL_EXECUTE after conflict resolution.
+	if uc.signalNotificationUsecase != nil {
+		uc.signalNotificationUsecase.SendV3Signals(ctx, notificationReqs, policy, summary)
+	}
 
 	// Save latest scan results
 	latestResult := &entity.LatestResult{
-		GeneratedAt:                    startTime,
+		GeneratedAt:                    scanStart,
 		ConfigVersion:                  GetGlobalConfigRegistry().GetVersion(),
 		ScanID:                         scanID,
 		MarketPolicy:                   policy.Reason,
@@ -785,8 +807,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		ThresholdProfileSummary:        thresholdProfileSummary,
 		EvaluationDataCompletenessHint: "has_decision_audit: true",
 
-		LastScanTime: startTime,
-		Duration:     time.Since(startTime).String(),
+		LastScanTime: scanStart,
+		Duration:     time.Since(scanStart).String(),
 		Signals:      finalSignals,
 	}
 
@@ -794,11 +816,11 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		slog.Error("Failed to save latest scan result to storage", "error", err)
 	}
 
-	duration := time.Since(startTime)
+	duration := time.Since(scanStart)
 	GetGlobalMetrics().SetLastScanDuration(duration)
-	GetGlobalMetrics().SetLastScanTime(startTime)
+	GetGlobalMetrics().SetLastScanTime(scanStart)
 	GetGlobalMetrics().IncrementScanSuccess()
-	GetGlobalMetrics().SetLastSuccessScan(startTime)
+	GetGlobalMetrics().SetLastSuccessScan(scanStart)
 	GetGlobalMetrics().AddTotalTickers(uint64(totalTickers))
 	GetGlobalMetrics().AddUniversePass(uint64(len(candidates)))
 	GetGlobalMetrics().AddUniverseReject(uint64(totalTickers - len(candidates)))
@@ -810,8 +832,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	slog.Info("AnalyzeMarketV3 Scan Completed", "scan_id", scanID, "found_signals", len(finalSignals))
 
 	return dto.ScanResult{
-		Timestamp: startTime,
-		Duration:  time.Since(startTime).String(),
+		Timestamp: scanStart,
+		Duration:  time.Since(scanStart).String(),
 		Found:     len(finalSignals),
 		Signals:   finalSignals,
 	}, nil

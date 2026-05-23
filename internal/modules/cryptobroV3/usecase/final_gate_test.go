@@ -34,7 +34,7 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 		IndicatorMet: true,
 		TechnicalSnapshot: TechnicalSnapshot{
 			IndicatorValues: map[string]float64{
-				"ADX":            25.0,
+				IndicatorADX:     25.0,
 				"wick_rejection": 0.0,
 			},
 		},
@@ -220,7 +220,7 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 		q := baseQuant
 		q.Playbook = RANGE_EDGE_REVERSAL
 		q.TechnicalSnapshot.IndicatorValues = map[string]float64{
-			"ADX":             35.0,
+			IndicatorADX:      35.0,
 			"wick_rejection":  1.0,
 			"near_range_edge": 1.0,
 		}

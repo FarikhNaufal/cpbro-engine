@@ -9,23 +9,41 @@ import (
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 )
 
-type NotificationUsecase struct {
-	notifier NotificationService
+type SignalNotificationUsecase struct {
+	notifier SignalNotificationService
 }
 
-func NewNotificationUsecase(notifier NotificationService) *NotificationUsecase {
-	return &NotificationUsecase{
+func NewSignalNotificationUsecase(notifier SignalNotificationService) *SignalNotificationUsecase {
+	return &SignalNotificationUsecase{
 		notifier: notifier,
 	}
 }
 
-// Send broadcasts the signal to the external notifier (Telegram).
+// SendSignal broadcasts the signal to the external notifier (Telegram SIGNAL channel).
 // Must verify that IsFinalExecute is true.
-func (uc *NotificationUsecase) Send(ctx context.Context, signal dto.SignalResponse) error {
+func (uc *SignalNotificationUsecase) SendSignal(ctx context.Context, signal dto.SignalResponse) error {
 	if !signal.IsFinalExecute {
-		return fmt.Errorf("signal did not pass final gate validation")
+		return fmt.Errorf("refusing to send signal: IsFinalExecute must be true")
 	}
-	err := uc.notifier.SendFinalExecuteAlert(ctx, signal)
+	msg := fmt.Sprintf(
+		"[CRYPTOBRO V3 SIGNAL]\n\n"+
+			"*Symbol:* %s\n"+
+			"*Strategy:* %s\n"+
+			"*Direction:* %s\n"+
+			"*Score:* %.2f\n"+
+			"*Entry:* %.4f\n"+
+			"*SL:* %.4f\n"+
+			"*TP:* %.4f\n\n"+
+			"*Mode:* Alert-only, manual execution.",
+		signal.Symbol,
+		signal.Strategy,
+		signal.Direction,
+		signal.Score,
+		signal.TriggerPrice,
+		signal.StopLoss,
+		signal.TakeProfit,
+	)
+	err := uc.notifier.SendSignalMessage(ctx, msg)
 	if err != nil {
 		GetGlobalMetrics().IncrementTelegramFail()
 	} else {
@@ -34,43 +52,19 @@ func (uc *NotificationUsecase) Send(ctx context.Context, signal dto.SignalRespon
 	return err
 }
 
-// SendV3 processes final decisions, checks Telegram criteria, and dispatches messages and optional admin warnings.
-func (uc *NotificationUsecase) SendV3(
+// SendV3Signals transmits ONLY actionable FINAL_EXECUTE signals (post FinalGate + ConflictResolver).
+// It must never transmit FINAL_WATCH, FINAL_REJECT, or AI_ERROR_REVIEW.
+func (uc *SignalNotificationUsecase) SendV3Signals(
 	ctx context.Context,
 	reqs []SignalNotificationRequest,
 	policy MarketPolicy,
 	summary ScannerSummaryV3,
-) error {
+) {
 	for _, req := range reqs {
 		dec := req.Decision
 		audit := req.AuditResponse
 
-		// Optional admin warning for AI_ERROR_REVIEW status
-		if dec.Status == Status("AI_ERROR_REVIEW") {
-			adminMsg := fmt.Sprintf(
-				"⚠️ *[ADMIN WARNING]*\n"+
-					"*AI audit error for symbol:* %s\n"+
-					"*Status:* AI_ERROR_REVIEW\n"+
-					"*Reasoning:* %s",
-				dec.Symbol,
-				audit.Reasoning,
-			)
-			if err := uc.notifier.SendTelegramMessage(ctx, adminMsg); err != nil {
-				slog.Error("failed to send Telegram admin warning message", "symbol", dec.Symbol, "error", err)
-				GetGlobalMetrics().IncrementTelegramFail()
-			} else {
-				GetGlobalMetrics().IncrementTelegramSuccess()
-			}
-			continue
-		}
-
-		// Strictly check execution criteria:
-		// - status == FINAL_EXECUTE
-		// - IsExecutable == true
-		// - StalenessStatus == FRESH
-		// - AIConfidence == HIGH
-		// - Reason is valid (not empty)
-		// - TradePlan is valid (EntryPrice > 0, StopLoss > 0, TakeProfit > 0)
+		// Strict execution-only gate for SIGNAL channel.
 		if dec.Status != FINAL_EXECUTE || !dec.IsExecutable {
 			continue
 		}
@@ -124,9 +118,9 @@ func (uc *NotificationUsecase) SendV3(
 			aiRisk = "Standard regime risk level."
 		}
 
-		// Build Telegram signal message payload
+		// SIGNAL payload. Contains entry/SL/TP and is the only actionable channel.
 		message := fmt.Sprintf(
-			"🔔 *[CRYPTOBRO V3 SIGNAL]*\n\n"+
+			"[CRYPTOBRO V3 SIGNAL]\n\n"+
 				"*Symbol:* %s\n"+
 				"*Direction:* %s\n"+
 				"*Playbook:* %s\n"+
@@ -142,9 +136,7 @@ func (uc *NotificationUsecase) SendV3(
 				"*AI Sentiment:* %s (HIGH)\n"+
 				"*AI Reason:* %s\n"+
 				"*AI Risk:* %s\n"+
-				"*Staleness:* %s\n"+
-				"*Invalidation:* Price breaks Stop Loss (%.4f)\n"+
-				"*Max Hold:* 8 candle M15 / 120 menit\n\n"+
+				"*Staleness:* %s\n\n"+
 				"*Mode:* Alert-only, manual execution.",
 			dec.Symbol,
 			dec.Direction,
@@ -165,28 +157,13 @@ func (uc *NotificationUsecase) SendV3(
 			aiReason,
 			aiRisk,
 			dec.StalenessStatus,
-			dec.StopLoss,
 		)
 
-		// Dispatch signal alert. Any transmission failure is logged and does NOT crash the scanner.
-		if err := uc.notifier.SendTelegramMessage(ctx, message); err != nil {
-			slog.Error("failed to send Telegram signal alert message", "symbol", dec.Symbol, "error", err)
+		if err := uc.notifier.SendSignalMessage(ctx, message); err != nil {
+			slog.Error("failed to send Telegram SIGNAL message", "symbol", dec.Symbol, "error", err)
 			GetGlobalMetrics().IncrementTelegramFail()
 		} else {
 			GetGlobalMetrics().IncrementTelegramSuccess()
 		}
 	}
-
-	return nil
-}
-
-// SendStatus sends an informational status message (startup, scan started, etc).
-// It is intentionally best-effort and must never crash the app.
-func (uc *NotificationUsecase) SendStatus(ctx context.Context, msg string) {
-	if err := uc.notifier.SendTelegramMessage(ctx, msg); err != nil {
-		slog.Error("failed to send Telegram status message", "error", err)
-		GetGlobalMetrics().IncrementTelegramFail()
-		return
-	}
-	GetGlobalMetrics().IncrementTelegramSuccess()
 }

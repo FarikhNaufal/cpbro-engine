@@ -61,9 +61,11 @@ func (uc *StorageUsecase) SaveSignalJournal(journal []SignalJournal) error {
 }
 
 func (uc *StorageUsecase) SaveSignalToJournal(sig SignalJournal) error {
-	journal, _ := uc.repo.LoadSignalJournal()
-	journal = append(journal, sig)
-	return uc.repo.SaveSignalJournal(journal)
+	err := uc.repo.AppendSignalJournal(sig)
+	if err != nil {
+		GetGlobalMetrics().IncrementStorageWriteFail()
+	}
+	return err
 }
 
 func (uc *StorageUsecase) LoadAIAuditCache() (*entity.AIAuditCache, error) {
@@ -103,10 +105,9 @@ func (uc *StorageUsecase) SaveDecisionAudits(audits []DecisionAudit) error {
 }
 
 func (uc *StorageUsecase) SaveDecisionAudit(audit DecisionAudit) error {
-	audits, _ := uc.repo.LoadDecisionAudits()
-	audits = append(audits, audit)
-	if len(audits) > 1000 {
-		audits = audits[len(audits)-1000:]
+	err := uc.repo.AppendDecisionAudit(audit)
+	if err != nil {
+		GetGlobalMetrics().IncrementStorageWriteFail()
 	}
-	return uc.repo.SaveDecisionAudits(audits)
+	return err
 }

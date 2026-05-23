@@ -47,6 +47,11 @@ func (m *mockFeedbackStorageRepo) SaveSignalJournal(journal []usecase.SignalJour
 	return nil
 }
 
+func (m *mockFeedbackStorageRepo) AppendSignalJournal(entry usecase.SignalJournal) error {
+	m.journal = append(m.journal, entry)
+	return nil
+}
+
 func (m *mockFeedbackStorageRepo) LoadEvaluationReport() (*usecase.EvaluationReport, error) {
 	return m.report, nil
 }
@@ -62,6 +67,14 @@ func (m *mockFeedbackStorageRepo) LoadDecisionAudits() ([]usecase.DecisionAudit,
 
 func (m *mockFeedbackStorageRepo) SaveDecisionAudits(audits []usecase.DecisionAudit) error {
 	m.audits = audits
+	return nil
+}
+
+func (m *mockFeedbackStorageRepo) AppendDecisionAudit(entry usecase.DecisionAudit) error {
+	m.audits = append(m.audits, entry)
+	if len(m.audits) > 1000 {
+		m.audits = m.audits[len(m.audits)-1000:]
+	}
 	return nil
 }
 

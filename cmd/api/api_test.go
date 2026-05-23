@@ -52,6 +52,10 @@ func (m *mockAPIStorageRepo) SaveSignalJournal(journal []usecase.SignalJournal) 
 	m.journal = journal
 	return nil
 }
+func (m *mockAPIStorageRepo) AppendSignalJournal(entry usecase.SignalJournal) error {
+	m.journal = append(m.journal, entry)
+	return nil
+}
 func (m *mockAPIStorageRepo) LoadAIAuditCache() (*entity.AIAuditCache, error) {
 	return nil, nil
 }
@@ -73,6 +77,13 @@ func (m *mockAPIStorageRepo) LoadDecisionAudits() ([]usecase.DecisionAudit, erro
 }
 func (m *mockAPIStorageRepo) SaveDecisionAudits(audits []usecase.DecisionAudit) error {
 	m.audits = audits
+	return nil
+}
+func (m *mockAPIStorageRepo) AppendDecisionAudit(entry usecase.DecisionAudit) error {
+	m.audits = append(m.audits, entry)
+	if len(m.audits) > 1000 {
+		m.audits = m.audits[len(m.audits)-1000:]
+	}
 	return nil
 }
 
@@ -106,10 +117,10 @@ func (m *mockAPITestAIAuditor) AuditCandidate(ctx context.Context, req dto.AIAud
 
 type mockAPINotification struct{}
 
-func (m *mockAPINotification) SendFinalExecuteAlert(ctx context.Context, signal dto.SignalResponse) error {
+func (m *mockAPINotification) SendSignalMessage(ctx context.Context, msg string) error {
 	return nil
 }
-func (m *mockAPINotification) SendTelegramMessage(ctx context.Context, msg string) error {
+func (m *mockAPINotification) SendOpsMessage(ctx context.Context, msg string) error {
 	return nil
 }
 
@@ -150,7 +161,8 @@ func TestAPIRoutes(t *testing.T) {
 	stalenessUC := usecase.NewStalenessUsecase(30 * time.Minute)
 	finalGateUC := usecase.NewFinalGateUsecase()
 	conflictResolverUC := usecase.NewConflictResolverUsecase()
-	notificationUC := usecase.NewNotificationUsecase(&mockAPINotification{})
+	signalNotificationUC := usecase.NewSignalNotificationUsecase(&mockAPINotification{})
+	opsNotificationUC := usecase.NewOpsNotificationUsecase(&mockAPINotification{})
 	monitoringUC := usecase.NewMonitoringUsecase(&mockAPIMarketDataProvider{}, storageUC)
 	feedbackUC := usecase.NewFeedbackUsecase(storageUC)
 
@@ -170,7 +182,8 @@ func TestAPIRoutes(t *testing.T) {
 		stalenessUC,
 		finalGateUC,
 		conflictResolverUC,
-		notificationUC,
+		signalNotificationUC,
+		opsNotificationUC,
 		monitoringUC,
 		feedbackUC,
 		storageUC,
@@ -345,7 +358,8 @@ func TestSwaggerRouteEnabled(t *testing.T) {
 		usecase.NewStalenessUsecase(30*time.Minute),
 		usecase.NewFinalGateUsecase(),
 		usecase.NewConflictResolverUsecase(),
-		usecase.NewNotificationUsecase(&mockAPINotification{}),
+		usecase.NewSignalNotificationUsecase(&mockAPINotification{}),
+		usecase.NewOpsNotificationUsecase(&mockAPINotification{}),
 		usecase.NewMonitoringUsecase(&mockAPIMarketDataProvider{}, storageUC),
 		feedbackUC,
 		storageUC,
@@ -414,7 +428,8 @@ func TestSwaggerRouteDisabled(t *testing.T) {
 		usecase.NewStalenessUsecase(30*time.Minute),
 		usecase.NewFinalGateUsecase(),
 		usecase.NewConflictResolverUsecase(),
-		usecase.NewNotificationUsecase(&mockAPINotification{}),
+		usecase.NewSignalNotificationUsecase(&mockAPINotification{}),
+		usecase.NewOpsNotificationUsecase(&mockAPINotification{}),
 		usecase.NewMonitoringUsecase(&mockAPIMarketDataProvider{}, storageUC),
 		feedbackUC,
 		storageUC,

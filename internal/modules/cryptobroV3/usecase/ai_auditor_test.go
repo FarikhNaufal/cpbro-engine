@@ -49,6 +49,10 @@ func (m *mockStorageRepository) SaveSignalJournal(journal []SignalJournal) error
 	return nil
 }
 
+func (m *mockStorageRepository) AppendSignalJournal(entry SignalJournal) error {
+	return nil
+}
+
 func (m *mockStorageRepository) LoadAIAuditCache() (*entity.AIAuditCache, error) {
 	if m.cache == nil {
 		return &entity.AIAuditCache{CacheMap: make(map[string]entity.CachedAudit)}, nil
@@ -74,6 +78,10 @@ func (m *mockStorageRepository) LoadDecisionAudits() ([]DecisionAudit, error) {
 }
 
 func (m *mockStorageRepository) SaveDecisionAudits(audits []DecisionAudit) error {
+	return nil
+}
+
+func (m *mockStorageRepository) AppendDecisionAudit(entry DecisionAudit) error {
 	return nil
 }
 

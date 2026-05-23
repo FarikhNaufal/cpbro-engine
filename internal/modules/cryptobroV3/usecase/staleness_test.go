@@ -17,7 +17,7 @@ func TestStalenessCheck_Evaluate(t *testing.T) {
 			},
 			TechnicalSnapshot: TechnicalSnapshot{
 				IndicatorValues: map[string]float64{
-					"ATR": 10.0,
+					IndicatorATR: 10.0,
 				},
 			},
 		}
@@ -53,7 +53,7 @@ func TestStalenessCheck_Evaluate(t *testing.T) {
 			},
 			TechnicalSnapshot: TechnicalSnapshot{
 				IndicatorValues: map[string]float64{
-					"ATR": 10.0,
+					IndicatorATR: 10.0,
 				},
 			},
 		}
@@ -83,7 +83,7 @@ func TestStalenessCheck_Evaluate(t *testing.T) {
 			},
 			TechnicalSnapshot: TechnicalSnapshot{
 				IndicatorValues: map[string]float64{
-					"ATR": 10.0,
+					IndicatorATR: 10.0,
 				},
 			},
 		}

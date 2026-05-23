@@ -559,9 +559,12 @@ type AIAuditorService interface {
 	AuditCandidate(ctx context.Context, req dto.AIAuditRequest) (*dto.AIAuditResponse, error)
 }
 
-type NotificationService interface {
-	SendFinalExecuteAlert(ctx context.Context, signal dto.SignalResponse) error
-	SendTelegramMessage(ctx context.Context, msg string) error
+type SignalNotificationService interface {
+	SendSignalMessage(ctx context.Context, msg string) error
+}
+
+type OpsNotificationService interface {
+	SendOpsMessage(ctx context.Context, msg string) error
 }
 
 type StorageRepository interface {
@@ -573,6 +576,7 @@ type StorageRepository interface {
 
 	LoadSignalJournal() ([]SignalJournal, error)
 	SaveSignalJournal(journal []SignalJournal) error
+	AppendSignalJournal(entry SignalJournal) error
 
 	LoadAIAuditCache() (*entity.AIAuditCache, error)
 	SaveAIAuditCache(cache *entity.AIAuditCache) error
@@ -582,4 +586,5 @@ type StorageRepository interface {
 
 	LoadDecisionAudits() ([]DecisionAudit, error)
 	SaveDecisionAudits(audits []DecisionAudit) error
+	AppendDecisionAudit(entry DecisionAudit) error
 }

@@ -73,14 +73,14 @@ type SREMetrics struct {
 type ObservabilityUsecase struct {
 	provider   MarketDataProvider
 	aiService  AIAuditorService
-	notifier   NotificationService
+	notifier   any
 	storageDir string
 }
 
 func NewObservabilityUsecase(
 	provider MarketDataProvider,
 	aiService AIAuditorService,
-	notifier NotificationService,
+	notifier any,
 	storageDir string,
 ) *ObservabilityUsecase {
 	return &ObservabilityUsecase{

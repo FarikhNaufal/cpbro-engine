@@ -83,15 +83,17 @@ func (m *mockAIAuditor) AuditCandidate(ctx context.Context, req dto.AIAuditReque
 }
 
 type mockNotification struct {
-	sentCount int
+	signalMsgs []string
+	opsMsgs    []string
 }
 
-func (m *mockNotification) SendFinalExecuteAlert(ctx context.Context, signal dto.SignalResponse) error {
-	m.sentCount++
+func (m *mockNotification) SendSignalMessage(ctx context.Context, msg string) error {
+	m.signalMsgs = append(m.signalMsgs, msg)
 	return nil
 }
 
-func (m *mockNotification) SendTelegramMessage(ctx context.Context, msg string) error {
+func (m *mockNotification) SendOpsMessage(ctx context.Context, msg string) error {
+	m.opsMsgs = append(m.opsMsgs, msg)
 	return nil
 }
 
@@ -137,6 +139,11 @@ func (m *mockStorageRepo) SaveSignalJournal(journal []SignalJournal) error {
 	return nil
 }
 
+func (m *mockStorageRepo) AppendSignalJournal(entry SignalJournal) error {
+	m.journal = append(m.journal, entry)
+	return nil
+}
+
 func (m *mockStorageRepo) LoadAIAuditCache() (*entity.AIAuditCache, error) {
 	return m.auditCache, nil
 }
@@ -161,6 +168,14 @@ func (m *mockStorageRepo) LoadDecisionAudits() ([]DecisionAudit, error) {
 
 func (m *mockStorageRepo) SaveDecisionAudits(audits []DecisionAudit) error {
 	m.audits = audits
+	return nil
+}
+
+func (m *mockStorageRepo) AppendDecisionAudit(entry DecisionAudit) error {
+	m.audits = append(m.audits, entry)
+	if len(m.audits) > 1000 {
+		m.audits = m.audits[len(m.audits)-1000:]
+	}
 	return nil
 }
 
@@ -282,7 +297,8 @@ func TestScannerUsecase_Run(t *testing.T) {
 	stalenessUC := NewStalenessUsecase(30 * time.Minute)
 	finalGateUC := NewFinalGateUsecase()
 	conflictResolverUC := NewConflictResolverUsecase()
-	notificationUC := NewNotificationUsecase(mockNotify)
+	signalNotificationUC := NewSignalNotificationUsecase(mockNotify)
+	opsNotificationUC := NewOpsNotificationUsecase(mockNotify)
 	monitoringUC := NewMonitoringUsecase(mockProvider, NewStorageUsecase(mockStorage))
 	feedbackUC := NewFeedbackUsecase(NewStorageUsecase(mockStorage))
 	storageUC := NewStorageUsecase(mockStorage)
@@ -303,7 +319,8 @@ func TestScannerUsecase_Run(t *testing.T) {
 		stalenessUC,
 		finalGateUC,
 		conflictResolverUC,
-		notificationUC,
+		signalNotificationUC,
+		opsNotificationUC,
 		monitoringUC,
 		feedbackUC,
 		storageUC,
@@ -358,6 +375,31 @@ func TestScannerUsecase_Run(t *testing.T) {
 		})
 		if err == nil {
 			t.Errorf("expected scanner to fail when tickers are nil")
+		}
+	})
+
+	t.Run("AI_AUDIT_ENABLED=false cannot produce FINAL_EXECUTE", func(t *testing.T) {
+		t.Setenv("AI_AUDIT_ENABLED", "false")
+		// Ensure mocks remain populated for the second run.
+		mockProvider.tickers = tickers
+
+		ctx := context.Background()
+		_, err := uc.Run(ctx, dto.ScanRequest{
+			TriggerTime: time.Now(),
+		})
+		if err != nil {
+			t.Fatalf("scanner run failed: %v", err)
+		}
+
+		latest, err := storageUC.LoadLatestResult()
+		if err != nil {
+			t.Fatalf("failed to load latest result: %v", err)
+		}
+		if latest.TotalFinalExecute != 0 {
+			t.Fatalf("expected TotalFinalExecute=0 when AI is disabled, got %d", latest.TotalFinalExecute)
+		}
+		if latest.TotalAIConfirm != 0 {
+			t.Fatalf("expected TotalAIConfirm=0 when AI is disabled, got %d", latest.TotalAIConfirm)
 		}
 	})
 }

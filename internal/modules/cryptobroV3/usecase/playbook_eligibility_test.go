@@ -20,19 +20,20 @@ func TestPlaybookEligibility_TrendPullback(t *testing.T) {
 		AllowedTiers: []Tier{TierA},
 	}
 
-	// 202 candles for H4 trend (needs 200 EMA + 1 open candle to slice off)
-	h4Candles := make([]dto.Candle, 202)
-	for i := 0; i < 202; i++ {
+	// Closed-only candles (no extra open kline).
+	// 200 candles for H4 EMA(200) trend.
+	h4Candles := make([]dto.Candle, 200)
+	for i := 0; i < 200; i++ {
 		h4Candles[i] = dto.Candle{Close: 100.0}
 	}
-	h4Candles[200].Close = 105.0 // H4 trend Bullish after slicing
+	h4Candles[199].Close = 105.0 // H4 trend Bullish
 
-	// 52 candles for H1 trend (needs 50 EMA + 1 open candle to slice off)
-	h1Candles := make([]dto.Candle, 52)
-	for i := 0; i < 52; i++ {
+	// 50 candles for H1 EMA(50) trend.
+	h1Candles := make([]dto.Candle, 50)
+	for i := 0; i < 50; i++ {
 		h1Candles[i] = dto.Candle{Close: 100.0}
 	}
-	h1Candles[50].Close = 105.0 // H1 trend Bullish after slicing
+	h1Candles[49].Close = 105.0 // H1 trend Bullish
 
 	// M15 candles for value area check (needs 50 candles to calculate EMA20/50)
 	// We want the last close to pull back between EMA20 and EMA50.
@@ -46,8 +47,7 @@ func TestPlaybookEligibility_TrendPullback(t *testing.T) {
 	for i := 50; i < 58; i++ {
 		m15Candles[i].Close = 110.0
 	}
-	m15Candles[58].Close = 104.0 // Last closed candle is inside value area
-	m15Candles[59].Close = 104.0 // Open candle to be sliced off
+	m15Candles[59].Close = 104.0 // Last closed candle is inside value area (closed-only input)
 
 	data := MarketData{
 		Symbol:     "BTCUSDT",
@@ -59,7 +59,7 @@ func TestPlaybookEligibility_TrendPullback(t *testing.T) {
 	tech := &TechnicalSnapshot{
 		RSI: 50.0,
 		IndicatorValues: map[string]float64{
-			"ADX": 25.0,
+			IndicatorADX: 25.0,
 		},
 	}
 
@@ -73,11 +73,11 @@ func TestPlaybookEligibility_TrendPullback(t *testing.T) {
 
 	// Test 2: H4 Trend not aligned
 	dataWrongTrend := data
-	dataWrongTrend.H4Candles = make([]dto.Candle, 202)
-	for i := 0; i < 202; i++ {
+	dataWrongTrend.H4Candles = make([]dto.Candle, 200)
+	for i := 0; i < 200; i++ {
 		dataWrongTrend.H4Candles[i] = dto.Candle{Close: 100.0}
 	}
-	dataWrongTrend.H4Candles[200].Close = 95.0 // H4 Bearish, but direction is LONG
+	dataWrongTrend.H4Candles[199].Close = 95.0 // H4 Bearish, but direction is LONG
 
 	resWrongTrend := uc.CheckEligibility(sel, policy, dataWrongTrend, tech, structure)
 	if resWrongTrend.Eligible {
@@ -176,7 +176,7 @@ func TestPlaybookEligibility_LiquiditySweepReversal(t *testing.T) {
 		}
 	}
 	dataBreakout.M15Candles[23].Low = 90.0
-	dataBreakout.M15Candles[23].Close = 92.0 // closed below lowest20 (95.0)
+	dataBreakout.M15Candles[24].Close = 88.0 // last closed at/below lowest20 (should reject)
 
 	resBreakout := uc.CheckEligibility(sel, policy, dataBreakout, tech, structure)
 	if resBreakout.Eligible {
@@ -203,7 +203,7 @@ func TestPlaybookEligibility_RangeEdgeReversal(t *testing.T) {
 	tech := &TechnicalSnapshot{
 		RSI: 50.0,
 		IndicatorValues: map[string]float64{
-			"ADX":             20.0, // low ADX (not trending)
+			IndicatorADX:      20.0, // low ADX (not trending)
 			"near_range_edge": 1.0,
 			"wick_rejection":  1.0,
 		},
@@ -221,7 +221,7 @@ func TestPlaybookEligibility_RangeEdgeReversal(t *testing.T) {
 	techHighADX := &TechnicalSnapshot{
 		RSI: 50.0,
 		IndicatorValues: map[string]float64{
-			"ADX":             35.0, // strong ADX trend
+			IndicatorADX:      35.0, // strong ADX trend
 			"near_range_edge": 1.0,
 			"wick_rejection":  1.0,
 		},
@@ -235,7 +235,7 @@ func TestPlaybookEligibility_RangeEdgeReversal(t *testing.T) {
 	techNoRej := &TechnicalSnapshot{
 		RSI: 50.0,
 		IndicatorValues: map[string]float64{
-			"ADX":             20.0,
+			IndicatorADX:      20.0,
 			"near_range_edge": 1.0,
 			"wick_rejection":  -1.0,
 		},
@@ -314,16 +314,16 @@ func TestPlaybookEligibility_CompressionBreakoutRetest(t *testing.T) {
 		AllowedTiers: []Tier{TierA},
 	}
 
-	// 26 candles: GetClosedCandlesOnly will yield 25 candles (indices 0 to 24)
-	m15Candles := make([]dto.Candle, 26)
-	for i := 0; i < 26; i++ {
+	// Closed-only candles (no extra open kline).
+	m15Candles := make([]dto.Candle, 25)
+	for i := 0; i < 25; i++ {
 		m15Candles[i] = dto.Candle{Close: 100.0, Vol: 10.0}
 	}
-	// Index 22 is len(closed)-3. We set a breakout close.
-	m15Candles[22].Close = 105.0
-	// Index 24 is len(closed)-1. Retesting upper band or basis.
+	// Breakout close inside the last 5 candles.
+	m15Candles[20].Close = 105.0
+	// Last candle represents retest/hold with volume expansion.
 	m15Candles[24].Close = 101.0
-	m15Candles[24].Vol = 15.0 // Volume expansion
+	m15Candles[24].Vol = 15.0
 
 	data := MarketData{
 		Symbol:     "BTCUSDT",
@@ -348,8 +348,8 @@ func TestPlaybookEligibility_CompressionBreakoutRetest(t *testing.T) {
 
 	// Test 2: No breakout close in last 5 candles should reject
 	dataNoBreakout := data
-	dataNoBreakout.M15Candles = make([]dto.Candle, 26)
-	for i := 0; i < 26; i++ {
+	dataNoBreakout.M15Candles = make([]dto.Candle, 25)
+	for i := 0; i < 25; i++ {
 		dataNoBreakout.M15Candles[i] = dto.Candle{Close: 100.0, Vol: 10.0}
 	}
 	dataNoBreakout.M15Candles[24].Vol = 15.0

@@ -35,7 +35,7 @@ func (uc *FinalGateUsecase) Validate(signal dto.SignalResponse, policy MarketPol
 	}
 	quant.TechnicalSnapshot = TechnicalSnapshot{
 		IndicatorValues: map[string]float64{
-			"ADX": 25.0, // default passing
+			IndicatorADX: 25.0, // default passing
 		},
 	}
 
@@ -243,10 +243,7 @@ func (uc *FinalGateUsecase) Evaluate(
 	}
 
 	// 13. ADX rule checks
-	adxVal := quant.TechnicalSnapshot.IndicatorValues["ADX"]
-	if adxVal == 0 {
-		adxVal = quant.TechnicalSnapshot.IndicatorValues["adx"]
-	}
+	adxVal := quant.TechnicalSnapshot.IndicatorValues[IndicatorADX]
 	minADX := math.Max(policy.MinADXExecute, profile.MinADX)
 
 	if profile.RequireADX && adxVal < minADX {
@@ -263,8 +260,8 @@ func (uc *FinalGateUsecase) Evaluate(
 	}
 
 	// 14. Rejection requirement checks
-	hasRejection := (quant.TechnicalSnapshot.IndicatorValues["wick_rejection"] == 1.0) ||
-		(quant.TechnicalSnapshot.IndicatorValues["pa_rejection"] == 1.0) ||
+	hasRejection := (quant.TechnicalSnapshot.IndicatorValues[IndicatorWickRejection] == 1.0) ||
+		(quant.TechnicalSnapshot.IndicatorValues[IndicatorPARejection] == 1.0) ||
 		aiAudit.HasRejection ||
 		strings.Contains(strings.ToLower(quant.Reason), "rejection") ||
 		strings.Contains(strings.ToLower(planReview.Reason), "rejection")
@@ -313,7 +310,7 @@ func (uc *FinalGateUsecase) Evaluate(
 	// 17. Volume confirmation checks
 	hasVolumeConfirm := true
 	if profile.RequireVolumeConfirm || quant.Playbook == LIQUIDITY_SWEEP_REVERSAL {
-		hasSpike := (quant.TechnicalSnapshot.IndicatorValues["volume_spike"] == 1.0)
+		hasSpike := (quant.TechnicalSnapshot.IndicatorValues[IndicatorVolumeSpike] == 1.0)
 		if len(m15) > 0 {
 			minVolRatio := profile.MinVolumeRatio
 			if minVolRatio <= 0 {
@@ -326,9 +323,9 @@ func (uc *FinalGateUsecase) Evaluate(
 		}
 	}
 	if quant.Playbook == COMPRESSION_BREAKOUT_RETEST {
-		hasExpansion := (quant.TechnicalSnapshot.IndicatorValues["volume_spike"] == 1.0) ||
-			(quant.TechnicalSnapshot.IndicatorValues["extreme_oi"] == 1.0) ||
-			(quant.TechnicalSnapshot.IndicatorValues["oi_change"] > 0)
+		hasExpansion := (quant.TechnicalSnapshot.IndicatorValues[IndicatorVolumeSpike] == 1.0) ||
+			(quant.TechnicalSnapshot.IndicatorValues[IndicatorExtremeOI] == 1.0) ||
+			(quant.TechnicalSnapshot.IndicatorValues[IndicatorOIChange] > 0)
 		if !hasExpansion {
 			hasVolumeConfirm = false
 		}
@@ -338,9 +335,9 @@ func (uc *FinalGateUsecase) Evaluate(
 	}
 
 	// 18. Crowding evidence checks
-	hasCrowdingEvidence := (quant.TechnicalSnapshot.IndicatorValues["extreme_funding"] == 1.0) ||
-		(quant.TechnicalSnapshot.IndicatorValues["extreme_oi"] == 1.0) ||
-		(quant.TechnicalSnapshot.IndicatorValues["crowding_score"] >= profile.MinCrowdingScore)
+	hasCrowdingEvidence := (quant.TechnicalSnapshot.IndicatorValues[IndicatorExtremeFunding] == 1.0) ||
+		(quant.TechnicalSnapshot.IndicatorValues[IndicatorExtremeOI] == 1.0) ||
+		(quant.TechnicalSnapshot.IndicatorValues[IndicatorCrowdingScore] >= profile.MinCrowdingScore)
 	if profile.RequireCrowdingEvidence || quant.Playbook == CROWDED_POSITIONING_SQUEEZE {
 		if !hasCrowdingEvidence {
 			rejectReasons = append(rejectReasons, "Crowded funding/OI positioning evidence missing")
@@ -425,15 +422,15 @@ func (uc *FinalGateUsecase) Evaluate(
 
 	if quant.Playbook == LIQUIDITY_SWEEP_REVERSAL {
 		isSweep := strings.Contains(strings.ToLower(quant.Reason), "sweep") ||
-			quant.TechnicalSnapshot.IndicatorValues["sweep_low"] == 1.0 ||
-			quant.TechnicalSnapshot.IndicatorValues["sweep_high"] == 1.0
+			quant.TechnicalSnapshot.IndicatorValues[IndicatorSweepLow] == 1.0 ||
+			quant.TechnicalSnapshot.IndicatorValues[IndicatorSweepHigh] == 1.0
 		if !isSweep {
 			rejectReasons = append(rejectReasons, "Liquidity sweep setup lacks high/low breakout and reclaim evidence")
 		}
 	}
 
 	if quant.Playbook == RANGE_EDGE_REVERSAL {
-		nearEdge := quant.TechnicalSnapshot.IndicatorValues["near_range_edge"] == 1.0 ||
+		nearEdge := quant.TechnicalSnapshot.IndicatorValues[IndicatorNearRangeEdge] == 1.0 ||
 			strings.Contains(strings.ToLower(quant.Reason), "range")
 		if !nearEdge {
 			rejectReasons = append(rejectReasons, "Not close enough to range edge bounds")
@@ -447,7 +444,7 @@ func (uc *FinalGateUsecase) Evaluate(
 		if quant.Score < 7.8 {
 			rejectReasons = append(rejectReasons, fmt.Sprintf("Crowded squeeze score %0.1f is below mandatory 7.8", quant.Score))
 		}
-		if quant.TechnicalSnapshot.IndicatorValues["extreme_funding"] == 1.0 && !hasConfirmation {
+		if quant.TechnicalSnapshot.IndicatorValues[IndicatorExtremeFunding] == 1.0 && !hasConfirmation {
 			rejectReasons = append(rejectReasons, "Crowded squeeze has extreme funding but lacks confirmation candle")
 		}
 	}

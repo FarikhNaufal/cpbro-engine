@@ -29,6 +29,7 @@ func (m *mockStorageRepo) SaveEvaluationReport(report *usecase.EvaluationReport)
 
 func (m *mockStorageRepo) LoadDecisionAudits() ([]usecase.DecisionAudit, error)    { return nil, nil }
 func (m *mockStorageRepo) SaveDecisionAudits(audits []usecase.DecisionAudit) error { return nil }
+func (m *mockStorageRepo) AppendDecisionAudit(entry usecase.DecisionAudit) error   { return nil }
 
 func (m *mockStorageRepo) LoadSignalJournal() ([]usecase.SignalJournal, error) {
 	return m.journal, nil
@@ -36,6 +37,12 @@ func (m *mockStorageRepo) LoadSignalJournal() ([]usecase.SignalJournal, error) {
 
 func (m *mockStorageRepo) SaveSignalJournal(journal []usecase.SignalJournal) error {
 	m.journal = journal
+	m.saved = true
+	return nil
+}
+
+func (m *mockStorageRepo) AppendSignalJournal(entry usecase.SignalJournal) error {
+	m.journal = append(m.journal, entry)
 	m.saved = true
 	return nil
 }

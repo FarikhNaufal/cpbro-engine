@@ -61,7 +61,7 @@ func TestPlaybookThresholdProfile_Scenarios(t *testing.T) {
 			IndicatorValues: map[string]float64{
 				"adx":            25.0,
 				"wick_rejection": 1.0,
-				"ATR":            10.0,
+				IndicatorATR:     10.0,
 			},
 		},
 	}
@@ -281,7 +281,7 @@ func TestPlaybookThresholdProfile_Scenarios(t *testing.T) {
 		q.TechnicalSnapshot.IndicatorValues = map[string]float64{
 			"adx":            25.0,
 			"wick_rejection": 1.0,
-			"ATR":            10.0,
+			IndicatorATR:     10.0,
 		}
 
 		policyReversalOnly := policyNormal
@@ -302,7 +302,7 @@ func TestPlaybookThresholdProfile_Scenarios(t *testing.T) {
 		q.TechnicalSnapshot.IndicatorValues = map[string]float64{
 			"adx":            25.0,
 			"wick_rejection": 1.0,
-			"ATR":            10.0,
+			IndicatorATR:     10.0,
 		}
 		res := gate.Evaluate(q, policyNormal, m15NoVolumeSpike)
 

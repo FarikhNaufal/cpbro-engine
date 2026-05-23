@@ -11,7 +11,7 @@ func NewPlanReconciliationUsecase() *PlanReconciliationUsecase {
 }
 
 // Reconcile aligns the quant calculations with AI sentiment recommendations according to 11 strict rules.
-func (uc *PlanReconciliationUsecase) Reconcile(quant QuantResult, ai dto.AIAuditResponse, policy MarketPolicy) PlanReview {
+func (uc *PlanReconciliationUsecase) Reconcile(quant QuantResult, ai dto.AIAuditResponse) PlanReview {
 	review := PlanReview{
 		Conflicted:      false,
 		EntryStillValid: true,

@@ -2,15 +2,14 @@ package usecase
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 )
 
 func TestQuantEngineSafetyChecks(t *testing.T) {
-	// Clean up created directories
-	defer os.RemoveAll("storage")
-
 	engine := NewPlaybookQuantEngineUsecase()
 
 	// 1. Check H4 Trend closed candle vs EMA H4
@@ -62,12 +61,13 @@ func TestQuantEngineSafetyChecks(t *testing.T) {
 	}
 
 	// 3. Test that Latest Price is excluded from indicator calculations
-	// If the last closed candle's Close is accidentally equal to data.LatestPrice (which is checked via VerifyIndicatorInput),
-	// it will slice it properly to ensure the latest active price does not pollute calculations.
+	// The in-progress M15 candle (open kline) must not be used for indicator calculations.
+	// GetClosedCandlesOnly should drop it based on candle open-time + timeframe > now.
 	dataWithPollution := MarketData{
 		Symbol: "SOLUSDT",
 		M15Candles: append(m15Candles, dto.Candle{
-			Close: 125.0, // Match the latest price representing active open candle
+			Time:  time.Now(),
+			Close: 125.0, // Active open candle close-like value
 		}),
 		H1Candles:   h4Candles[:50],
 		H4Candles:   h4Candles,
@@ -77,4 +77,46 @@ func TestQuantEngineSafetyChecks(t *testing.T) {
 	if resPollution.TriggerPrice != 100.0 {
 		t.Errorf("Expected trigger price to be 100.0 (excluding the polluted latest price candle), got %f", resPollution.TriggerPrice)
 	}
+}
+
+func TestQuantEngine_DebugSaveRawKlines_DefaultDisabled(t *testing.T) {
+	t.Setenv("DEBUG_SAVE_RAW_KLINES", "false")
+	debugDir := t.TempDir()
+	t.Setenv("RAW_KLINES_DEBUG_DIR", debugDir)
+
+	engine := NewPlaybookQuantEngineUsecase()
+	engine.saveM15RawKlines("BTCUSDT", []dto.Candle{{Time: time.Now().Add(-30 * time.Minute), Close: 100, Vol: 1}})
+
+	_, err := os.Stat(filepath.Join(debugDir, "raw_klines_BTCUSDT.json"))
+	if err == nil {
+		t.Fatalf("expected no debug raw klines file when disabled")
+	}
+}
+
+func TestQuantEngine_DebugSaveRawKlines_EnabledWrites(t *testing.T) {
+	t.Setenv("DEBUG_SAVE_RAW_KLINES", "true")
+	debugDir := t.TempDir()
+	t.Setenv("RAW_KLINES_DEBUG_DIR", debugDir)
+
+	engine := NewPlaybookQuantEngineUsecase()
+	engine.saveM15RawKlines("BTCUSDT", []dto.Candle{{Time: time.Now().Add(-30 * time.Minute), Close: 100, Vol: 1}})
+
+	_, err := os.Stat(filepath.Join(debugDir, "raw_klines_BTCUSDT.json"))
+	if err != nil {
+		t.Fatalf("expected debug raw klines file to be written, got err: %v", err)
+	}
+}
+
+func TestQuantEngine_DebugSaveRawKlines_WriteErrorDoesNotPanic(t *testing.T) {
+	t.Setenv("DEBUG_SAVE_RAW_KLINES", "true")
+
+	// Set RAW_KLINES_DEBUG_DIR to a file path to force mkdir error.
+	filePath := filepath.Join(t.TempDir(), "not_a_dir")
+	if err := os.WriteFile(filePath, []byte("x"), 0644); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+	t.Setenv("RAW_KLINES_DEBUG_DIR", filePath)
+
+	engine := NewPlaybookQuantEngineUsecase()
+	engine.saveM15RawKlines("BTCUSDT", []dto.Candle{{Time: time.Now().Add(-30 * time.Minute), Close: 100, Vol: 1}})
 }

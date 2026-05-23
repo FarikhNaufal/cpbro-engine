@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
@@ -36,7 +35,7 @@ func notificationTime(t time.Time) string {
 // @version         0.1.0
 // @description     cryptobroV3 is an alert-only crypto scanner, AI candle auditor, virtual monitoring, and feedback evaluation API.
 // @description     This API is read-only / alert-only. It does not provide Binance order execution.
-// @termsOfService  https://example.com/terms
+//
 
 // @contact.name   cryptobroV3 Maintainer
 
@@ -84,7 +83,16 @@ func main() {
 		}
 	}
 
-	telegramService := service.NewTelegramService(cfg.Telegram.Enabled)
+	telegramService := service.NewTelegramService(service.TelegramConfig{
+		Enabled:                       cfg.Telegram.Enabled,
+		SignalEnabled:                 cfg.Telegram.SignalEnabled,
+		StatusEnabled:                 cfg.Telegram.StatusEnabled,
+		BotToken:                      cfg.Telegram.BotToken,
+		SignalChatID:                  cfg.Telegram.SignalChatID,
+		StatusChatID:                  cfg.Telegram.StatusChatID,
+		StatusAllowSignalChatFallback: cfg.Telegram.StatusAllowSignalChatFallback,
+		RequestTimeoutSeconds:         cfg.Telegram.RequestTimeoutSeconds,
+	})
 
 	// 4. Initialize Usecases
 	storageUC := usecase.NewStorageUsecase(storageService)
@@ -111,20 +119,24 @@ func main() {
 	stalenessUC := usecase.NewStalenessUsecase(30 * time.Minute)
 	finalGateUC := usecase.NewFinalGateUsecase()
 	conflictResolverUC := usecase.NewConflictResolverUsecase()
-	notificationUC := usecase.NewNotificationUsecase(telegramService)
+	signalNotificationUC := usecase.NewSignalNotificationUsecase(telegramService)
+	opsNotificationUC := usecase.NewOpsNotificationUsecase(telegramService)
 	monitoringUC := usecase.NewMonitoringUsecase(binanceService, storageUC)
 	feedbackUC := usecase.NewFeedbackUsecase(storageUC)
 
 	{
 		startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		notificationUC.SendStatus(
+		opsNotificationUC.SendBootStatus(
 			startCtx,
-			"🤖 *[CRYPTOBRO V3 STARTED]*\n\n"+
-				"*Env:* "+cfg.App.Env+"\n"+
-				"*Version:* "+cfg.App.Version+"\n"+
-				"*HTTP Port:* "+cfg.HTTP.Port+"\n"+
-				"*Time:* "+notificationTime(time.Now()),
+			cfg.App.Name,
+			cfg.App.Env,
+			cfg.App.Version,
+			cfg.HTTP.Port,
+			cfg.Safety.AlertOnly,
+			cfg.Safety.BinanceReadOnly,
+			cfg.Scanner.Enabled,
+			cfg.Monitoring.Enabled,
 		)
 	}
 
@@ -144,7 +156,8 @@ func main() {
 		stalenessUC,
 		finalGateUC,
 		conflictResolverUC,
-		notificationUC,
+		signalNotificationUC,
+		opsNotificationUC,
 		monitoringUC,
 		feedbackUC,
 		storageUC,
@@ -186,8 +199,8 @@ func main() {
 	defer stop()
 
 	// Start Background Scan, Monitoring & Evaluation Workers
-	go startStartupScan(ctx, cfg, scannerUC, storageUC, notificationUC)
-	go startBackgroundWorker(ctx, cfg, scannerUC, storageUC, feedbackUC, notificationUC)
+	go startStartupScan(ctx, cfg, scannerUC, storageUC, opsNotificationUC)
+	go startBackgroundWorker(ctx, cfg, scannerUC, storageUC, feedbackUC, opsNotificationUC)
 	go startMonitoringWorker(ctx, cfg, monitoringUC)
 	go startEvaluationWorker(ctx, cfg, feedbackUC)
 
@@ -218,7 +231,7 @@ func main() {
 	}
 }
 
-func startStartupScan(ctx context.Context, cfg *config.Config, scannerUC *usecase.ScannerUsecase, storageUC *usecase.StorageUsecase, notificationUC *usecase.NotificationUsecase) {
+func startStartupScan(ctx context.Context, cfg *config.Config, scannerUC *usecase.ScannerUsecase, storageUC *usecase.StorageUsecase, opsUC *usecase.OpsNotificationUsecase) {
 	if !cfg.Scanner.Enabled {
 		return
 	}
@@ -237,11 +250,9 @@ func startStartupScan(ctx context.Context, cfg *config.Config, scannerUC *usecas
 		}()
 
 		slog.Info("Startup scan trigger: executing initial scan")
-		notificationUC.SendStatus(
-			ctx,
-			"🟦 *[SCAN STARTED]* (startup)\n"+
-				"*At:* "+notificationTime(time.Now()),
-		)
+		boundary := time.Now().Truncate(15 * time.Minute)
+		scanID := boundary.Format("20060102150405")
+		opsUC.SendScanStarted(ctx, scanID, boundary, "startup M15 close scan")
 
 		if !scannerRunning.CompareAndSwap(false, true) {
 			slog.Warn("Startup scan skipped: scan already in progress")
@@ -252,39 +263,25 @@ func startStartupScan(ctx context.Context, cfg *config.Config, scannerUC *usecas
 		scanCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Scanner.ContextTimeoutSeconds)*time.Second)
 		defer cancel()
 
-		boundary := time.Now().Truncate(15 * time.Minute)
 		_, err := scannerUC.Run(scanCtx, dto.ScanRequest{
 			TriggerTime: boundary,
 		})
 		if err != nil {
 			slog.Error("Startup scan failed", "error", err)
-			notificationUC.SendStatus(
-				ctx,
-				"🟥 *[SCAN FAILED]* (startup)\n"+
-					"*Error:* "+err.Error()+"\n"+
-					"*At:* "+notificationTime(time.Now()),
-			)
+			opsUC.SendScanFailed(ctx, scanID, boundary, err)
 		} else {
 			usecase.GetGlobalMetrics().SetLastScanTime(time.Now())
 			usecase.GetGlobalMetrics().SetLastSuccessScan(time.Now())
 
 			latest, loadErr := storageUC.LoadLatestResult()
 			if loadErr == nil && latest != nil && latest.ScanID != "" {
-				notificationUC.SendStatus(
-					ctx,
-					"✅ *[SCAN DONE]* (startup)\n"+
-						"*ScanID:* "+latest.ScanID+"\n"+
-						fmt.Sprintf("*AI:* confirm=%d wait=%d reject=%d error=%d\n", latest.TotalAIConfirm, latest.TotalAIWait, latest.TotalAIReject, latest.TotalAIError)+
-						fmt.Sprintf("*Final:* execute=%d watch=%d reject=%d\n", latest.TotalFinalExecute, latest.TotalFinalWatch, latest.TotalFinalReject)+
-						fmt.Sprintf("*Signals:* %d\n", len(latest.Signals))+
-						"*At:* "+notificationTime(time.Now()),
-				)
+				opsUC.SendScanDone(ctx, latest)
 			}
 		}
 	}()
 }
 
-func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *usecase.ScannerUsecase, storageUC *usecase.StorageUsecase, feedbackUC *usecase.FeedbackUsecase, notificationUC *usecase.NotificationUsecase) {
+func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *usecase.ScannerUsecase, storageUC *usecase.StorageUsecase, feedbackUC *usecase.FeedbackUsecase, opsUC *usecase.OpsNotificationUsecase) {
 	if !cfg.Scanner.Enabled {
 		slog.Info("Scan worker disabled by config")
 		return
@@ -320,12 +317,8 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 					}()
 
 					slog.Info("Background worker trigger: executing M15 scan", "boundary", boundary.Format("15:04:05"))
-					notificationUC.SendStatus(
-						ctx,
-						"🟦 *[SCAN STARTED]* (M15 close)\n"+
-							"*Boundary:* "+notificationTime(boundary)+"\n"+
-							"*At:* "+notificationTime(time.Now()),
-					)
+					scanID := boundary.Format("20060102150405")
+					opsUC.SendScanStarted(ctx, scanID, boundary, "M15 close scan")
 
 					if !scannerRunning.CompareAndSwap(false, true) {
 						slog.Warn("Scan worker skipped: scan already in progress")
@@ -341,29 +334,14 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 					})
 					if err != nil {
 						slog.Error("Background scan failed", "error", err)
-						notificationUC.SendStatus(
-							ctx,
-							"🟥 *[SCAN FAILED]* (M15 close)\n"+
-								"*Boundary:* "+notificationTime(boundary)+"\n"+
-								"*Error:* "+err.Error()+"\n"+
-								"*At:* "+notificationTime(time.Now()),
-						)
+						opsUC.SendScanFailed(ctx, scanID, boundary, err)
 					} else {
 						usecase.GetGlobalMetrics().SetLastScanTime(time.Now())
 						usecase.GetGlobalMetrics().SetLastSuccessScan(time.Now())
 
 						latest, loadErr := storageUC.LoadLatestResult()
 						if loadErr == nil && latest != nil && latest.ScanID != "" {
-							notificationUC.SendStatus(
-								ctx,
-								"✅ *[SCAN DONE]* (M15 close)\n"+
-									"*Boundary:* "+notificationTime(boundary)+"\n"+
-									"*ScanID:* "+latest.ScanID+"\n"+
-									fmt.Sprintf("*AI:* confirm=%d wait=%d reject=%d error=%d\n", latest.TotalAIConfirm, latest.TotalAIWait, latest.TotalAIReject, latest.TotalAIError)+
-									fmt.Sprintf("*Final:* execute=%d watch=%d reject=%d\n", latest.TotalFinalExecute, latest.TotalFinalWatch, latest.TotalFinalReject)+
-									fmt.Sprintf("*Signals:* %d\n", len(latest.Signals))+
-									"*At:* "+notificationTime(time.Now()),
-							)
+							opsUC.SendScanDone(ctx, latest)
 						}
 					}
 

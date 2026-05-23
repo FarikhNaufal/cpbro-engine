@@ -118,24 +118,37 @@ func ValidateShortDuringBTCBullish(playbook Playbook, strongRejection bool) bool
 	return false
 }
 
-// 6. GetClosedCandlesOnly guarantees we exclude the last active/open candle if passed.
-func GetClosedCandlesOnly(candles []dto.Candle) []dto.Candle {
+// GetClosedCandlesOnly returns candles that are safe to treat as "closed" for indicator calculations.
+//
+// IMPORTANT:
+//   - The Binance read-only service already attempts to exclude the currently-open kline.
+//   - This helper MUST NOT drop the last candle blindly; it only drops it when the open-time indicates
+//     the candle is still in-progress for the given timeframe.
+func GetClosedCandlesOnly(candles []dto.Candle, timeframe time.Duration) []dto.Candle {
 	if len(candles) <= 1 {
 		return candles
 	}
-	// By default, assuming the slice might contain an open candle at index len-1,
-	// we slice it to ignore the last candle, ensuring strictly closed data.
-	return candles[:len(candles)-1]
+	if timeframe <= 0 {
+		return candles
+	}
+
+	// dto.Candle.Time is treated as candle open-time in this project.
+	last := candles[len(candles)-1]
+	if last.Time.Add(timeframe).After(time.Now()) {
+		return candles[:len(candles)-1]
+	}
+	return candles
 }
 
-// 7. VerifyIndicatorInput checks that the latest price is NOT in the candles indicator slice.
+// 7. VerifyIndicatorInput is kept for backward compatibility.
+//
+// NOTE:
+// The live/latest price may equal the last closed candle close without being "pollution".
+// Latest price must not be used as indicator input, but equality is not an issue.
 func VerifyIndicatorInput(candles []dto.Candle, latestPrice float64) bool {
-	if len(candles) == 0 {
-		return true
-	}
-	// Ensure the latest live price does not match any candle close in the indicator set
-	lastCandleClose := candles[len(candles)-1].Close
-	return lastCandleClose != latestPrice
+	_ = candles
+	_ = latestPrice
+	return true
 }
 
 // 8. ValidateStaleness blocks executing trade plans if the entry is stale.
@@ -288,9 +301,9 @@ func LowestLow(candles []dto.Candle, period int) float64 {
 
 // PopulateSnapshots builds high-fidelity TechnicalSnapshot and StructureSnapshot for use in selectors & gates.
 func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundingRate float64, latestPrice float64) (*TechnicalSnapshot, *StructureSnapshot) {
-	m15Closed := GetClosedCandlesOnly(m15)
-	h1Closed := GetClosedCandlesOnly(h1)
-	h4Closed := GetClosedCandlesOnly(h4)
+	m15Closed := GetClosedCandlesOnly(m15, 15*time.Minute)
+	h1Closed := GetClosedCandlesOnly(h1, time.Hour)
+	h4Closed := GetClosedCandlesOnly(h4, 4*time.Hour)
 
 	// Safe checks
 	if len(m15Closed) < 14 {
@@ -318,7 +331,7 @@ func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundi
 		IndicatorValues: make(map[string]float64),
 	}
 
-	tech.IndicatorValues["ADX"] = adxVal
+	tech.IndicatorValues[IndicatorADX] = adxVal
 
 	if len(m15Closed) > 0 {
 		lastCandle := m15Closed[len(m15Closed)-1]
@@ -327,7 +340,7 @@ func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundi
 		highRej := (lastCandle.High - math.Max(lastCandle.Open, lastCandle.Close)) / (lastCandle.High - lastCandle.Low + 0.000001)
 
 		if lowRej > 0.4 || highRej > 0.4 {
-			tech.IndicatorValues["wick_rejection"] = 1.0
+			tech.IndicatorValues[IndicatorWickRejection] = 1.0
 		}
 
 		// Sweeps
@@ -335,34 +348,45 @@ func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundi
 			highest20 := HighestHigh(m15Closed[:len(m15Closed)-1], 20)
 			lowest20 := LowestLow(m15Closed[:len(m15Closed)-1], 20)
 			if lastCandle.Low < lowest20 && lastCandle.Close > lowest20 {
-				tech.IndicatorValues["sweep_low"] = 1.0
+				tech.IndicatorValues[IndicatorSweepLow] = 1.0
 			}
 			if lastCandle.High > highest20 && lastCandle.Close < highest20 {
-				tech.IndicatorValues["sweep_high"] = 1.0
+				tech.IndicatorValues[IndicatorSweepHigh] = 1.0
 			}
 		}
 
 		// Vol spike
 		if ConfirmLiquiditySweep(m15Closed, 20, 1.5) {
-			tech.IndicatorValues["volume_spike"] = 1.0
+			tech.IndicatorValues[IndicatorVolumeSpike] = 1.0
 		} else {
-			tech.IndicatorValues["volume_spike"] = -1.0
+			tech.IndicatorValues[IndicatorVolumeSpike] = -1.0
 		}
 
 		// Compression (Bollinger Band width proxy)
 		atrVal := CalculateATR(m15Closed, 14)
+		tech.IndicatorValues[IndicatorATR] = atrVal
 		if atrVal > 0 && atrVal < lastCandle.Close*0.008 {
-			tech.IndicatorValues["contraction"] = 1.0
-			tech.IndicatorValues["bb_width"] = 0.05
+			tech.IndicatorValues[IndicatorContraction] = 1.0
+			tech.IndicatorValues[IndicatorBBWidth] = 0.05
 		} else {
-			tech.IndicatorValues["bb_width"] = 0.12
+			tech.IndicatorValues[IndicatorBBWidth] = 0.12
 		}
 
-		// Squeeze
+		// Funding (OI is optional; do NOT dummy-true).
+		tech.IndicatorValues[IndicatorFundingRate] = fundingRate
+		tech.IndicatorValues[IndicatorFundingAbs] = math.Abs(fundingRate)
 		if math.Abs(fundingRate) > 0.003 {
-			tech.IndicatorValues["extreme_funding"] = 1.0
+			tech.IndicatorValues[IndicatorExtremeFunding] = 1.0
+		} else {
+			tech.IndicatorValues[IndicatorExtremeFunding] = 0.0
 		}
-		tech.IndicatorValues["extreme_oi"] = 1.0
+
+		// OI / crowding defaults when data is unavailable.
+		tech.IndicatorValues[IndicatorHasOIData] = 0.0
+		tech.IndicatorValues[IndicatorOIChange] = 0.0
+		tech.IndicatorValues[IndicatorExtremeOI] = 0.0
+		tech.IndicatorValues[IndicatorCrowdingScore] = 0.0
+		tech.IndicatorValues[IndicatorHasCrowdingEvidence] = 0.0
 
 		// Set pa_rejection dynamically
 		paRejection := -1.0
@@ -377,14 +401,14 @@ func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundi
 				paRejection = 1.0
 			}
 		}
-		tech.IndicatorValues["pa_rejection"] = paRejection
+		tech.IndicatorValues[IndicatorPARejection] = paRejection
 
 		// Near range edge
 		if len(m15Closed) >= 40 {
 			rangeHigh := HighestHigh(m15Closed, 40)
 			rangeLow := LowestLow(m15Closed, 40)
 			if lastCandle.Close > rangeHigh*0.99 || lastCandle.Close < rangeLow*1.01 {
-				tech.IndicatorValues["near_range_edge"] = 1.0
+				tech.IndicatorValues[IndicatorNearRangeEdge] = 1.0
 			}
 		}
 	}

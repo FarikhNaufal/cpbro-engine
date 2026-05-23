@@ -9,13 +9,11 @@ import (
 func TestPlanReconciliation_Rules(t *testing.T) {
 	reconciler := NewPlanReconciliationUsecase()
 
-	policy := MarketPolicy{Reason: "Normal"}
-
 	// Rule 1: AI decision REJECT -> Conflicted true, status LOCAL_REJECT
 	t.Run("Rule 1 - AI decision REJECT", func(t *testing.T) {
 		quant := QuantResult{Playbook: TREND_PULLBACK, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "REJECT", Confidence: "HIGH", Last5CandlesBias: "BULLISH"}
-		review := reconciler.Reconcile(quant, ai, policy)
+		review := reconciler.Reconcile(quant, ai)
 		if !review.Conflicted {
 			t.Errorf("Expected Conflicted to be true on REJECT")
 		}
@@ -28,7 +26,7 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 	t.Run("Rule 2 - AI conflict_with_bot", func(t *testing.T) {
 		quant := QuantResult{Playbook: TREND_PULLBACK, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "CONFIRM", ConflictWithBot: true, Confidence: "HIGH", Last5CandlesBias: "BULLISH"}
-		review := reconciler.Reconcile(quant, ai, policy)
+		review := reconciler.Reconcile(quant, ai)
 		if !review.Conflicted {
 			t.Errorf("Expected Conflicted to be true on conflict_with_bot")
 		}
@@ -38,7 +36,7 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 	t.Run("Rule 3 - AI confidence LOW", func(t *testing.T) {
 		quant := QuantResult{Playbook: TREND_PULLBACK, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "CONFIRM", Confidence: "LOW", Last5CandlesBias: "BULLISH"}
-		review := reconciler.Reconcile(quant, ai, policy)
+		review := reconciler.Reconcile(quant, ai)
 		if !review.Conflicted {
 			t.Errorf("Expected Conflicted to be true on LOW confidence")
 		}
@@ -51,7 +49,7 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 	t.Run("Rule 4 - AI entry_timing MISSED", func(t *testing.T) {
 		quant := QuantResult{Playbook: TREND_PULLBACK, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "CONFIRM", Confidence: "HIGH", EntryTiming: "MISSED", Last5CandlesBias: "BULLISH"}
-		review := reconciler.Reconcile(quant, ai, policy)
+		review := reconciler.Reconcile(quant, ai)
 		if review.EntryStillValid {
 			t.Errorf("Expected EntryStillValid to be false")
 		}
@@ -67,7 +65,7 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 	t.Run("Rule 5 - AI entry_timing LATE", func(t *testing.T) {
 		quant := QuantResult{Playbook: TREND_PULLBACK, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "CONFIRM", Confidence: "HIGH", EntryTiming: "LATE", Last5CandlesBias: "BULLISH"}
-		review := reconciler.Reconcile(quant, ai, policy)
+		review := reconciler.Reconcile(quant, ai)
 		if review.EntryStillValid {
 			t.Errorf("Expected EntryStillValid to be false")
 		}
@@ -83,7 +81,7 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 	t.Run("Rule 6 - AI suggested_action WAIT_RETEST", func(t *testing.T) {
 		quant := QuantResult{Playbook: TREND_PULLBACK, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "CONFIRM", Confidence: "HIGH", SuggestedAction: "WAIT_RETEST", Last5CandlesBias: "BULLISH"}
-		review := reconciler.Reconcile(quant, ai, policy)
+		review := reconciler.Reconcile(quant, ai)
 		if !review.NeedRetest {
 			t.Errorf("Expected NeedRetest to be true on WAIT_RETEST")
 		}
@@ -93,7 +91,7 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 	t.Run("Rule 7 - Reversal playbook missing indicators", func(t *testing.T) {
 		quant := QuantResult{Playbook: LIQUIDITY_SWEEP_REVERSAL, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "CONFIRM", Confidence: "HIGH", HasRejection: false, HasConfirmation: true}
-		review := reconciler.Reconcile(quant, ai, policy)
+		review := reconciler.Reconcile(quant, ai)
 		if !review.Conflicted || !review.NeedRetest {
 			t.Errorf("Expected Conflicted and NeedRetest on missing reversal indicators")
 		}
@@ -103,7 +101,7 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 	t.Run("Rule 8 - Trend pullback mismatched bias", func(t *testing.T) {
 		quant := QuantResult{Playbook: TREND_PULLBACK, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "CONFIRM", Confidence: "HIGH", Last5CandlesBias: "BEARISH"}
-		review := reconciler.Reconcile(quant, ai, policy)
+		review := reconciler.Reconcile(quant, ai)
 		if !review.Conflicted || !review.NeedRetest {
 			t.Errorf("Expected Conflicted and NeedRetest on mismatched bias for TREND_PULLBACK")
 		}
@@ -113,7 +111,7 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 	t.Run("Rule 8 - Trend pullback exhausted", func(t *testing.T) {
 		quant := QuantResult{Playbook: TREND_PULLBACK, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "CONFIRM", Confidence: "HIGH", Last5CandlesBias: "BULLISH", CandleNarrative: "EXHAUSTED"}
-		review := reconciler.Reconcile(quant, ai, policy)
+		review := reconciler.Reconcile(quant, ai)
 		if !review.Conflicted || !review.NeedRetest {
 			t.Errorf("Expected Conflicted and NeedRetest on EXHAUSTED narrative")
 		}
@@ -123,7 +121,7 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 	t.Run("Rule 9 - Breakout retest lacks validation", func(t *testing.T) {
 		quant := QuantResult{Playbook: COMPRESSION_BREAKOUT_RETEST, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "CONFIRM", Confidence: "HIGH", CandleNarrative: "CHOP", HasConfirmation: false}
-		review := reconciler.Reconcile(quant, ai, policy)
+		review := reconciler.Reconcile(quant, ai)
 		if !review.Conflicted {
 			t.Errorf("Expected Conflicted to be true when breakout retest lacks validation")
 		}
@@ -133,7 +131,7 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 	t.Run("Rule 10 - Range reversal breaking range", func(t *testing.T) {
 		quant := QuantResult{Playbook: RANGE_EDGE_REVERSAL, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "CONFIRM", Confidence: "HIGH", HasRejection: true, HasConfirmation: true, CandleNarrative: "CONTINUATION"}
-		review := reconciler.Reconcile(quant, ai, policy)
+		review := reconciler.Reconcile(quant, ai)
 		if !review.Conflicted {
 			t.Errorf("Expected Conflicted to be true when candle narrative indicates continuation through range edge")
 		}
@@ -158,7 +156,7 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 			SuggestedStopLoss:   90.0,
 			SuggestedTakeProfit: 120.0,
 		}
-		review := reconciler.Reconcile(quant, ai, policy)
+		review := reconciler.Reconcile(quant, ai)
 		if review.Conflicted {
 			t.Errorf("Expected no conflict, got conflicted")
 		}

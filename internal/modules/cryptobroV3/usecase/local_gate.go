@@ -226,7 +226,7 @@ func (uc *LocalGateUsecase) Evaluate(quant QuantResult, policy MarketPolicy, m15
 		if policy.ShortMode == SWEEP_ONLY {
 			isSweep := quant.Playbook == LIQUIDITY_SWEEP_REVERSAL
 			isFailedBreakout := strings.Contains(strings.ToUpper(quant.SetupType), "FAILED_BREAKOUT")
-			isStrongRejection := quant.Playbook == RANGE_EDGE_REVERSAL && quant.TechnicalSnapshot.IndicatorValues["wick_rejection"] == 1.0
+			isStrongRejection := quant.Playbook == RANGE_EDGE_REVERSAL && quant.TechnicalSnapshot.IndicatorValues[IndicatorWickRejection] == 1.0
 
 			if !isSweep && !isFailedBreakout && !isStrongRejection {
 				return LocalGateResult{
@@ -256,7 +256,7 @@ func (uc *LocalGateUsecase) Evaluate(quant QuantResult, policy MarketPolicy, m15
 	}
 
 	// ADX validation per profile
-	adx := quant.TechnicalSnapshot.IndicatorValues["adx"]
+	adx := quant.TechnicalSnapshot.IndicatorValues[IndicatorADX]
 	if profile.RequireADX {
 		if adx < profile.MinADX {
 			return LocalGateResult{
@@ -325,7 +325,7 @@ func (uc *LocalGateUsecase) Evaluate(quant QuantResult, policy MarketPolicy, m15
 
 	// Rejection requirement check
 	if profile.RequireRejection {
-		wickRejection := quant.TechnicalSnapshot.IndicatorValues["wick_rejection"]
+		wickRejection := quant.TechnicalSnapshot.IndicatorValues[IndicatorWickRejection]
 		if wickRejection != 1.0 {
 			return LocalGateResult{
 				Passed: false,
@@ -360,10 +360,19 @@ func (uc *LocalGateUsecase) Evaluate(quant QuantResult, policy MarketPolicy, m15
 
 	// Crowding evidence check
 	if profile.RequireCrowdingEvidence {
-		funding := math.Abs(quant.TechnicalSnapshot.IndicatorValues["funding_rate"])
-		oiChange := quant.TechnicalSnapshot.IndicatorValues["oi_change"]
-		crowdingScore := quant.TechnicalSnapshot.IndicatorValues["crowding_score"]
-		if funding == 0 && oiChange == 0 && crowdingScore < profile.MinCrowdingScore {
+		hasEvidence := quant.TechnicalSnapshot.IndicatorValues[IndicatorHasCrowdingEvidence]
+		crowdingScore := quant.TechnicalSnapshot.IndicatorValues[IndicatorCrowdingScore]
+		fundingAbs := math.Abs(quant.TechnicalSnapshot.IndicatorValues[IndicatorFundingRate])
+		oiChange := quant.TechnicalSnapshot.IndicatorValues[IndicatorOIChange]
+
+		if hasEvidence != 1.0 {
+			return LocalGateResult{
+				Passed: false,
+				Status: LOCAL_REJECT,
+				Reason: "CROWDING_EVIDENCE_MISSING",
+			}
+		}
+		if crowdingScore < profile.MinCrowdingScore && fundingAbs == 0 && oiChange == 0 {
 			return LocalGateResult{
 				Passed: false,
 				Status: LOCAL_REJECT,

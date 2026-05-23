@@ -8,46 +8,67 @@ import (
 	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
+	"cpbro-engine/internal/modules/cryptobroV3/entity"
 	"cpbro-engine/internal/modules/cryptobroV3/usecase"
 )
 
 type mockNotificationService struct {
-	sentAlerts   []dto.SignalResponse
-	sentMessages []string
-	shouldFail   bool
+	signalMessages []string
+	opsMessages    []string
+	shouldFail     bool
 }
 
-func (m *mockNotificationService) SendFinalExecuteAlert(ctx context.Context, signal dto.SignalResponse) error {
-	m.sentAlerts = append(m.sentAlerts, signal)
-	return nil
-}
-
-func (m *mockNotificationService) SendTelegramMessage(ctx context.Context, msg string) error {
+func (m *mockNotificationService) SendSignalMessage(ctx context.Context, msg string) error {
 	if m.shouldFail {
 		return errors.New("telegram api error")
 	}
-	m.sentMessages = append(m.sentMessages, msg)
+	m.signalMessages = append(m.signalMessages, msg)
 	return nil
 }
 
-func TestNotification_SendV3_Success(t *testing.T) {
+func (m *mockNotificationService) SendOpsMessage(ctx context.Context, msg string) error {
+	if m.shouldFail {
+		return errors.New("telegram api error")
+	}
+	m.opsMessages = append(m.opsMessages, msg)
+	return nil
+}
+
+func TestSignalNotification_SendV3Signals_SuccessAndFilters(t *testing.T) {
 	mockSvc := &mockNotificationService{}
-	uc := usecase.NewNotificationUsecase(mockSvc)
+	uc := usecase.NewSignalNotificationUsecase(mockSvc)
 
 	policy := usecase.MarketPolicy{
 		Reason: "NORMAL",
 	}
 
 	summary := usecase.ScannerSummaryV3{
-		TotalScanned:    10,
-		CandidatesFound: 1,
-		StartTime:       time.Now(),
-		Duration:        "1.5s",
-		ActiveRegime:    "NORMAL",
-		BtcTrend:        "UP",
+		ActiveRegime: "NORMAL",
 	}
 
 	reqs := []usecase.SignalNotificationRequest{
+		{
+			Decision: usecase.FinalDecision{
+				Symbol: "AVAXUSDT",
+				Status: usecase.AI_ERROR_REVIEW,
+			},
+			AuditResponse: dto.AIAuditResponse{
+				Reasoning: "AI_ERROR: context deadline exceeded",
+			},
+		},
+		{
+			Decision: usecase.FinalDecision{
+				Symbol:          "ETHUSDT",
+				Status:          usecase.FINAL_WATCH,
+				IsExecutable:    false,
+				AIConfidence:    "HIGH",
+				StalenessStatus: "FRESH",
+				EntryPrice:      3000,
+				StopLoss:        2900,
+				TakeProfit:      3200,
+				Reason:          "Valid setup.",
+			},
+		},
 		{
 			Decision: usecase.FinalDecision{
 				Symbol:                  "BTCUSDT",
@@ -75,18 +96,28 @@ func TestNotification_SendV3_Success(t *testing.T) {
 				Risk:      "Low leverage risk.",
 			},
 		},
+		{
+			Decision: usecase.FinalDecision{
+				Symbol:          "SOLUSDT",
+				Status:          usecase.FINAL_EXECUTE,
+				IsExecutable:    true,
+				AIConfidence:    "MEDIUM",
+				StalenessStatus: "FRESH",
+				EntryPrice:      100,
+				StopLoss:        90,
+				TakeProfit:      120,
+				Reason:          "Valid setup.",
+			},
+		},
 	}
 
-	err := uc.SendV3(context.Background(), reqs, policy, summary)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	uc.SendV3Signals(context.Background(), reqs, policy, summary)
+
+	if len(mockSvc.signalMessages) != 1 {
+		t.Fatalf("expected 1 telegram message sent, got %d", len(mockSvc.signalMessages))
 	}
 
-	if len(mockSvc.sentMessages) != 1 {
-		t.Fatalf("expected 1 telegram message sent, got %d", len(mockSvc.sentMessages))
-	}
-
-	msg := mockSvc.sentMessages[0]
+	msg := mockSvc.signalMessages[0]
 	if !strings.Contains(msg, "[CRYPTOBRO V3 SIGNAL]") {
 		t.Errorf("missing header, got %s", msg)
 	}
@@ -108,119 +139,14 @@ func TestNotification_SendV3_Success(t *testing.T) {
 	if !strings.Contains(msg, "*Grade/Score:* S / 8.20") {
 		t.Errorf("incorrect grade or score representation, got %s", msg)
 	}
-	if !strings.Contains(msg, "*Max Hold:* 8 candle M15 / 120 menit") {
-		t.Errorf("missing max hold, got %s", msg)
-	}
 	if !strings.Contains(msg, "*Mode:* Alert-only, manual execution.") {
 		t.Errorf("missing manual execution warning, got %s", msg)
 	}
 }
 
-func TestNotification_SendV3_Filters(t *testing.T) {
+func TestSignalNotification_SendV3Signals_HighRiskRegimeWarning(t *testing.T) {
 	mockSvc := &mockNotificationService{}
-	uc := usecase.NewNotificationUsecase(mockSvc)
-
-	policy := usecase.MarketPolicy{Reason: "NORMAL"}
-	summary := usecase.ScannerSummaryV3{ActiveRegime: "NORMAL"}
-
-	reqs := []usecase.SignalNotificationRequest{
-		{
-			// Watch status should be filtered
-			Decision: usecase.FinalDecision{
-				Symbol:          "ETHUSDT",
-				Status:          usecase.FINAL_WATCH,
-				IsExecutable:    false,
-				AIConfidence:    "HIGH",
-				StalenessStatus: "FRESH",
-				EntryPrice:      3000,
-				StopLoss:        2900,
-				TakeProfit:      3200,
-				Reason:          "Valid setup.",
-			},
-		},
-		{
-			// Low AI confidence should be filtered
-			Decision: usecase.FinalDecision{
-				Symbol:          "SOLUSDT",
-				Status:          usecase.FINAL_EXECUTE,
-				IsExecutable:    true,
-				AIConfidence:    "MEDIUM",
-				StalenessStatus: "FRESH",
-				EntryPrice:      100,
-				StopLoss:        90,
-				TakeProfit:      120,
-				Reason:          "Valid setup.",
-			},
-		},
-		{
-			// LATE status should be filtered
-			Decision: usecase.FinalDecision{
-				Symbol:          "NEARUSDT",
-				Status:          usecase.FINAL_EXECUTE,
-				IsExecutable:    true,
-				AIConfidence:    "HIGH",
-				StalenessStatus: "LATE",
-				EntryPrice:      5,
-				StopLoss:        4.5,
-				TakeProfit:      6.0,
-				Reason:          "Valid setup.",
-			},
-		},
-	}
-
-	err := uc.SendV3(context.Background(), reqs, policy, summary)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(mockSvc.sentMessages) != 0 {
-		t.Errorf("expected 0 telegram alerts sent due to filtering, got %d", len(mockSvc.sentMessages))
-	}
-}
-
-func TestNotification_SendV3_AdminWarning(t *testing.T) {
-	mockSvc := &mockNotificationService{}
-	uc := usecase.NewNotificationUsecase(mockSvc)
-
-	policy := usecase.MarketPolicy{Reason: "NORMAL"}
-	summary := usecase.ScannerSummaryV3{ActiveRegime: "NORMAL"}
-
-	reqs := []usecase.SignalNotificationRequest{
-		{
-			Decision: usecase.FinalDecision{
-				Symbol: "AVAXUSDT",
-				Status: "AI_ERROR_REVIEW",
-			},
-			AuditResponse: dto.AIAuditResponse{
-				Reasoning: "AI_ERROR: context deadline exceeded",
-			},
-		},
-	}
-
-	err := uc.SendV3(context.Background(), reqs, policy, summary)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(mockSvc.sentMessages) != 1 {
-		t.Fatalf("expected 1 admin warning message, got %d", len(mockSvc.sentMessages))
-	}
-
-	msg := mockSvc.sentMessages[0]
-	if !strings.Contains(msg, "[ADMIN WARNING]") {
-		t.Errorf("missing admin warning tag, got %s", msg)
-	}
-	if !strings.Contains(msg, "AVAXUSDT") {
-		t.Errorf("missing Symbol, got %s", msg)
-	}
-	if !strings.Contains(msg, "AI_ERROR: context deadline exceeded") {
-		t.Errorf("missing error details, got %s", msg)
-	}
-}
-
-func TestNotification_SendV3_HighRiskRegimeWarning(t *testing.T) {
-	mockSvc := &mockNotificationService{}
-	uc := usecase.NewNotificationUsecase(mockSvc)
+	uc := usecase.NewSignalNotificationUsecase(mockSvc)
 
 	policy := usecase.MarketPolicy{Reason: "BTC_CHAOS"}
 	summary := usecase.ScannerSummaryV3{
@@ -246,26 +172,23 @@ func TestNotification_SendV3_HighRiskRegimeWarning(t *testing.T) {
 		},
 	}
 
-	err := uc.SendV3(context.Background(), reqs, policy, summary)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	uc.SendV3Signals(context.Background(), reqs, policy, summary)
+
+	if len(mockSvc.signalMessages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(mockSvc.signalMessages))
 	}
 
-	if len(mockSvc.sentMessages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(mockSvc.sentMessages))
-	}
-
-	msg := mockSvc.sentMessages[0]
+	msg := mockSvc.signalMessages[0]
 	if !strings.Contains(msg, "BTC_CHAOS ⚠️ *[HIGH RISK]*") {
 		t.Errorf("missing high risk regime warning, got %s", msg)
 	}
 }
 
-func TestNotification_SendV3_FailureTolerance(t *testing.T) {
+func TestSignalNotification_SendV3Signals_FailureTolerance(t *testing.T) {
 	mockSvc := &mockNotificationService{
 		shouldFail: true,
 	}
-	uc := usecase.NewNotificationUsecase(mockSvc)
+	uc := usecase.NewSignalNotificationUsecase(mockSvc)
 
 	policy := usecase.MarketPolicy{Reason: "NORMAL"}
 	summary := usecase.ScannerSummaryV3{ActiveRegime: "NORMAL"}
@@ -289,9 +212,76 @@ func TestNotification_SendV3_FailureTolerance(t *testing.T) {
 		},
 	}
 
-	// Should not crash or return error even if notification dispatch fails
-	err := uc.SendV3(context.Background(), reqs, policy, summary)
-	if err != nil {
-		t.Errorf("SendV3 should handle notification errors gracefully without returning error, got %v", err)
+	// Should not crash even if dispatch fails
+	uc.SendV3Signals(context.Background(), reqs, policy, summary)
+}
+
+func TestOpsNotification_NonSignalPrefixAndNoTradeActionFooter(t *testing.T) {
+	mockSvc := &mockNotificationService{}
+	uc := usecase.NewOpsNotificationUsecase(mockSvc)
+
+	boundary := time.Date(2026, 5, 24, 0, 15, 0, 0, time.UTC)
+	uc.SendScanStarted(context.Background(), "scan-123", boundary, "M15 close scan")
+	if len(mockSvc.opsMessages) != 1 {
+		t.Fatalf("expected 1 ops message, got %d", len(mockSvc.opsMessages))
+	}
+	msg := mockSvc.opsMessages[0]
+	if !strings.Contains(msg, "[CRYPTOBRO V3 OPS][NON-SIGNAL]") {
+		t.Fatalf("missing ops prefix: %s", msg)
+	}
+	if !strings.Contains(msg, "No trade action") {
+		t.Fatalf("missing non-signal footer: %s", msg)
+	}
+	if strings.Contains(msg, "*Entry:*") || strings.Contains(msg, "*SL:*") || strings.Contains(msg, "*TP") {
+		t.Fatalf("ops message must not resemble trade signal payload: %s", msg)
+	}
+}
+
+func TestOpsNotification_ScanDoneSummary_NoEntrySLTP(t *testing.T) {
+	mockSvc := &mockNotificationService{}
+	uc := usecase.NewOpsNotificationUsecase(mockSvc)
+
+	latest := &entity.LatestResult{
+		ScanID:                "scan-abc",
+		GeneratedAt:           time.Now(),
+		MarketRegime:          "NORMAL",
+		TotalUniversePass:     10,
+		TotalPlaybookEligible: 3,
+		TotalLocalAICandidate: 2,
+		TotalFinalExecute:     1,
+		TotalFinalWatch:       1,
+		TotalFinalReject:      1,
+		TotalAIError:          0,
+		Duration:              "1500ms",
+	}
+	uc.SendScanDone(context.Background(), latest)
+	if len(mockSvc.opsMessages) != 1 {
+		t.Fatalf("expected 1 ops message, got %d", len(mockSvc.opsMessages))
+	}
+	msg := mockSvc.opsMessages[0]
+	if !strings.Contains(msg, "SCAN_DONE") {
+		t.Fatalf("missing SCAN_DONE: %s", msg)
+	}
+	if strings.Contains(msg, "*Entry:*") || strings.Contains(msg, "*SL:*") || strings.Contains(msg, "*TP") {
+		t.Fatalf("scan done ops message must not contain entry/sl/tp fields: %s", msg)
+	}
+}
+
+func TestOpsNotification_AdminWarningAIError_NonSignal(t *testing.T) {
+	mockSvc := &mockNotificationService{}
+	uc := usecase.NewOpsNotificationUsecase(mockSvc)
+	uc.SendAdminWarningAIError(context.Background(), "scan-1", "SOLUSDT", "TREND_PULLBACK", "AI_ERROR_REVIEW", "AI timeout")
+	if len(mockSvc.opsMessages) != 1 {
+		t.Fatalf("expected 1 ops message, got %d", len(mockSvc.opsMessages))
+	}
+	msg := mockSvc.opsMessages[0]
+	if !strings.Contains(msg, "ADMIN_WARNING") || !strings.Contains(msg, "AI_ERROR") {
+		t.Fatalf("missing admin warning type: %s", msg)
+	}
+	if strings.Contains(msg, "[CRYPTOBRO V3 SIGNAL]") {
+		t.Fatalf("admin warning must not be sent through signal format: %s", msg)
+	}
+	if !strings.Contains(msg, "No trade action") {
+		t.Fatalf("missing non-signal footer: %s", msg)
 	}
 }

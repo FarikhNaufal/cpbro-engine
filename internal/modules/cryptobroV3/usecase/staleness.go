@@ -91,7 +91,7 @@ func (uc *StalenessUsecase) Evaluate(quant QuantResult, review PlanReview, polic
 		basePct = 0.35
 	}
 
-	atrVal, hasATR := quant.TechnicalSnapshot.IndicatorValues["ATR"]
+	atrVal, hasATR := quant.TechnicalSnapshot.IndicatorValues[IndicatorATR]
 	var distanceATR float64
 	useATR := hasATR && atrVal > 0
 
@@ -129,6 +129,7 @@ func (uc *StalenessUsecase) Evaluate(quant QuantResult, review PlanReview, polic
 	} else {
 		reason += fmt.Sprintf("distancePct=%0.3f%%, thresholdPct=%0.3f%%, status=%s", distancePct, basePct, status)
 	}
+	reason += fmt.Sprintf(" | plan_status=%s plan_need_retest=%v", review.Status, review.NeedRetest)
 
 	return StalenessResult{
 		IsStale:         isStale,
