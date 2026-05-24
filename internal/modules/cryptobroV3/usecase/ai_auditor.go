@@ -28,7 +28,7 @@ func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy
 
 	// Try loading cache
 	cache, err := uc.storageUsecase.LoadAIAuditCache()
-	if err == nil && cache.CacheMap != nil {
+	if err == nil && cache != nil && cache.CacheMap != nil {
 		if cached, ok := cache.CacheMap[symbol]; ok {
 			// Cache validity duration is 15 minutes
 			if time.Since(cached.CachedAt) < 15*time.Minute {

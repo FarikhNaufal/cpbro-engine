@@ -153,7 +153,17 @@ func (uc *FinalGateUsecase) Evaluate(
 
 	// 6. PlanReview.PlanConflict check
 	if planReview.Conflicted {
-		rejectReasons = append(rejectReasons, "PlanReview has plan conflict")
+		if planReview.NeedRetest {
+			reasonStr := "SOFT_PLAN_CONFLICT / NEED_RETEST: " + planReview.Reason
+			if aiAudit.Decision == "WAIT" {
+				watchReasons = append(watchReasons, reasonStr)
+			} else {
+				rejectReasons = append(rejectReasons, reasonStr)
+			}
+		} else {
+			reasonStr := "HARD_PLAN_CONFLICT: " + planReview.Reason
+			rejectReasons = append(rejectReasons, reasonStr)
+		}
 	}
 
 	// 7. Staleness check
@@ -199,7 +209,11 @@ func (uc *FinalGateUsecase) Evaluate(
 
 	// 11. Score check
 	if quant.Score < minScoreExecute {
-		rejectReasons = append(rejectReasons, fmt.Sprintf("Quant score %0.1f below minimum execute score %0.1f", quant.Score, minScoreExecute))
+		if aiAudit.Decision == "WAIT" {
+			watchReasons = append(watchReasons, fmt.Sprintf("Quant score %0.1f below minimum execute score %0.1f", quant.Score, minScoreExecute))
+		} else {
+			rejectReasons = append(rejectReasons, fmt.Sprintf("Quant score %0.1f below minimum execute score %0.1f", quant.Score, minScoreExecute))
+		}
 	}
 
 	// 12. Actual Risk-to-Reward ratio check
@@ -239,7 +253,11 @@ func (uc *FinalGateUsecase) Evaluate(
 	}
 
 	if rrActual < minRRExecute {
-		rejectReasons = append(rejectReasons, fmt.Sprintf("Actual RR %0.2f below minimum required RR %0.2f", rrActual, minRRExecute))
+		if aiAudit.Decision == "WAIT" {
+			watchReasons = append(watchReasons, fmt.Sprintf("Actual RR %0.2f below minimum required RR %0.2f", rrActual, minRRExecute))
+		} else {
+			rejectReasons = append(rejectReasons, fmt.Sprintf("Actual RR %0.2f below minimum required RR %0.2f", rrActual, minRRExecute))
+		}
 	}
 
 	// 13. ADX rule checks
@@ -268,7 +286,11 @@ func (uc *FinalGateUsecase) Evaluate(
 
 	if profile.RequireRejection || quant.Playbook == LIQUIDITY_SWEEP_REVERSAL || quant.Playbook == RANGE_EDGE_REVERSAL || quant.Playbook == CROWDED_POSITIONING_SQUEEZE {
 		if !hasRejection {
-			rejectReasons = append(rejectReasons, "Rejection wick or price action evidence missing")
+			if aiAudit.Decision == "WAIT" {
+				watchReasons = append(watchReasons, "Rejection wick or price action evidence missing")
+			} else {
+				rejectReasons = append(rejectReasons, "Rejection wick or price action evidence missing")
+			}
 		}
 	}
 
@@ -331,7 +353,11 @@ func (uc *FinalGateUsecase) Evaluate(
 		}
 	}
 	if !hasVolumeConfirm {
-		rejectReasons = append(rejectReasons, "Volume / OI confirmation missing")
+		if aiAudit.Decision == "WAIT" {
+			watchReasons = append(watchReasons, "Volume / OI confirmation missing")
+		} else {
+			rejectReasons = append(rejectReasons, "Volume / OI confirmation missing")
+		}
 	}
 
 	// 18. Crowding evidence checks
@@ -340,7 +366,11 @@ func (uc *FinalGateUsecase) Evaluate(
 		(quant.TechnicalSnapshot.IndicatorValues[IndicatorCrowdingScore] >= profile.MinCrowdingScore)
 	if profile.RequireCrowdingEvidence || quant.Playbook == CROWDED_POSITIONING_SQUEEZE {
 		if !hasCrowdingEvidence {
-			rejectReasons = append(rejectReasons, "Crowded funding/OI positioning evidence missing")
+			if aiAudit.Decision == "WAIT" {
+				watchReasons = append(watchReasons, "Crowded funding/OI positioning evidence missing")
+			} else {
+				rejectReasons = append(rejectReasons, "Crowded funding/OI positioning evidence missing")
+			}
 		}
 	}
 
@@ -425,7 +455,11 @@ func (uc *FinalGateUsecase) Evaluate(
 			quant.TechnicalSnapshot.IndicatorValues[IndicatorSweepLow] == 1.0 ||
 			quant.TechnicalSnapshot.IndicatorValues[IndicatorSweepHigh] == 1.0
 		if !isSweep {
-			rejectReasons = append(rejectReasons, "Liquidity sweep setup lacks high/low breakout and reclaim evidence")
+			if aiAudit.Decision == "WAIT" {
+				watchReasons = append(watchReasons, "Liquidity sweep setup lacks high/low breakout and reclaim evidence")
+			} else {
+				rejectReasons = append(rejectReasons, "Liquidity sweep setup lacks high/low breakout and reclaim evidence")
+			}
 		}
 	}
 
@@ -433,7 +467,11 @@ func (uc *FinalGateUsecase) Evaluate(
 		nearEdge := quant.TechnicalSnapshot.IndicatorValues[IndicatorNearRangeEdge] == 1.0 ||
 			strings.Contains(strings.ToLower(quant.Reason), "range")
 		if !nearEdge {
-			rejectReasons = append(rejectReasons, "Not close enough to range edge bounds")
+			if aiAudit.Decision == "WAIT" {
+				watchReasons = append(watchReasons, "Not close enough to range edge bounds")
+			} else {
+				rejectReasons = append(rejectReasons, "Not close enough to range edge bounds")
+			}
 		}
 		if aiAudit.CandleNarrative == "CONTINUATION" || strings.Contains(strings.ToLower(aiAudit.Reason), "breaking range") {
 			rejectReasons = append(rejectReasons, "Range edge candle narrative is CONTINUATION (breakout threat)")
@@ -445,7 +483,11 @@ func (uc *FinalGateUsecase) Evaluate(
 			rejectReasons = append(rejectReasons, fmt.Sprintf("Crowded squeeze score %0.1f is below mandatory 7.8", quant.Score))
 		}
 		if quant.TechnicalSnapshot.IndicatorValues[IndicatorExtremeFunding] == 1.0 && !hasConfirmation {
-			rejectReasons = append(rejectReasons, "Crowded squeeze has extreme funding but lacks confirmation candle")
+			if aiAudit.Decision == "WAIT" {
+				watchReasons = append(watchReasons, "Crowded squeeze has extreme funding but lacks confirmation candle")
+			} else {
+				rejectReasons = append(rejectReasons, "Crowded squeeze has extreme funding but lacks confirmation candle")
+			}
 		}
 	}
 

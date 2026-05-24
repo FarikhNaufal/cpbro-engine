@@ -19,4 +19,6 @@ type SignalJournal struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 	ClosedAt      time.Time `json:"closed_at,omitempty"`
 	PnlPercentage float64   `json:"pnl_percentage"`
+	NotificationStatus string    `json:"notification_status,omitempty"`
+	NotificationError  string    `json:"notification_error,omitempty"`
 }

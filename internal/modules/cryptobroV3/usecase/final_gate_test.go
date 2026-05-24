@@ -300,4 +300,68 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 			t.Errorf("expected status %s, got %s", AI_ERROR_REVIEW, res.Status)
 		}
 	})
+
+	t.Run("AI Decision Wait with Soft Plan Conflict remains WATCH", func(t *testing.T) {
+		ai := baseAI
+		ai.Decision = "WAIT"
+		pr := basePlanReview
+		pr.Conflicted = true
+		pr.NeedRetest = true
+		pr.Reason = "retest needed"
+
+		res := uc.Evaluate(baseQuant, baseLocalGate, ai, pr, baseStaleness, policy, 50000, nil, nil, nil)
+		if res.Status != FINAL_WATCH {
+			t.Errorf("expected status %s (downgraded to watch), got %s", FINAL_WATCH, res.Status)
+		}
+	})
+
+	t.Run("AI Decision Wait with Hard Plan Conflict is REJECT", func(t *testing.T) {
+		ai := baseAI
+		ai.Decision = "WAIT"
+		pr := basePlanReview
+		pr.Conflicted = true
+		pr.NeedRetest = false
+		pr.Reason = "hard direction mismatch"
+
+		res := uc.Evaluate(baseQuant, baseLocalGate, ai, pr, baseStaleness, policy, 50000, nil, nil, nil)
+		if res.Status != FINAL_REJECT {
+			t.Errorf("expected status %s (hard conflict is reject), got %s", FINAL_REJECT, res.Status)
+		}
+	})
+
+	t.Run("AI Decision Wait with low score remains WATCH", func(t *testing.T) {
+		ai := baseAI
+		ai.Decision = "WAIT"
+		q := baseQuant
+		q.Score = 6.5 // below MinScoreExecute = 7.0
+
+		res := uc.Evaluate(q, baseLocalGate, ai, basePlanReview, baseStaleness, policy, 50000, nil, nil, nil)
+		if res.Status != FINAL_WATCH {
+			t.Errorf("expected status %s, got %s", FINAL_WATCH, res.Status)
+		}
+	})
+
+	t.Run("AI Decision Wait with low RR remains WATCH", func(t *testing.T) {
+		ai := baseAI
+		ai.Decision = "WAIT"
+		q := baseQuant
+		q.TradePlan.TakeProfit = 51000 // fails MinRRExecute
+
+		res := uc.Evaluate(q, baseLocalGate, ai, basePlanReview, baseStaleness, policy, 50000, nil, nil, nil)
+		if res.Status != FINAL_WATCH {
+			t.Errorf("expected status %s, got %s", FINAL_WATCH, res.Status)
+		}
+	})
+
+	t.Run("AI Decision Wait with Low Confidence is REJECT (Hard Safety)", func(t *testing.T) {
+		ai := baseAI
+		ai.Decision = "WAIT"
+		ai.Confidence = "LOW"
+
+		res := uc.Evaluate(baseQuant, baseLocalGate, ai, basePlanReview, baseStaleness, policy, 50000, nil, nil, nil)
+		if res.Status != FINAL_REJECT {
+			t.Errorf("expected status %s (confidence LOW is hard safety reject), got %s", FINAL_REJECT, res.Status)
+		}
+	})
 }
+

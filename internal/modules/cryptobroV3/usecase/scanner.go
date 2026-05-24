@@ -94,7 +94,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 	slog.Info("Starting AnalyzeMarketV3 Scan", "scan_id", scanID)
 
-	var finalSignals []dto.SignalResponse
+	finalSignals := []dto.SignalResponse{}
 
 	// Load active signals (signal journal) and history signals for final gate evaluation
 	activeSignals, _ := uc.storageUsecase.LoadSignalJournal()
@@ -189,7 +189,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	// Filter dynamic universe candidates
 	candidates, rejectedCandidatesList := uc.universeUsecase.FilterUniverse(tickers, fundingRates, policy)
 
-	var rejectedSummary []string
+	rejectedSummary := []string{}
 	for _, rej := range rejectedCandidatesList {
 		rejectedSummary = append(rejectedSummary, fmt.Sprintf("%s: %s", rej.Symbol, rej.Reason))
 	}
@@ -238,9 +238,17 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	wg.Wait()
 
 	var allCandidates []QuantResult
-	var policyRejectedSummary []string
+	policyRejectedSummary := []string{}
 	totalStrategySelected := 0
 	totalPlaybookEligible := 0
+
+	type eligibilityFailure struct {
+		Symbol       string
+		StrategyName string
+		Direction    string
+		Reason       string
+	}
+	var eligibilityFailures []eligibilityFailure
 
 	tickerLastPrice := make(map[string]float64, len(tickers))
 	for _, t := range tickers {
@@ -291,7 +299,12 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		for _, sel := range selections {
 			eligibilityRes := uc.playbookEligibilityUsecase.CheckEligibility(sel, policy, prelimData, tech, structure)
 			if !eligibilityRes.Eligible {
-				policyRejectedSummary = append(policyRejectedSummary, fmt.Sprintf("%s (%s): eligibility failed - %s", pair, sel.StrategyName, eligibilityRes.Reason))
+				eligibilityFailures = append(eligibilityFailures, eligibilityFailure{
+					Symbol:       pair,
+					StrategyName: sel.StrategyName,
+					Direction:    string(sel.Direction),
+					Reason:       eligibilityRes.Reason,
+				})
 				continue
 			}
 			totalPlaybookEligible++
@@ -319,10 +332,58 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		}
 	}
 
+	type rejectKey struct {
+		Symbol       string
+		StrategyName string
+		Reason       string
+	}
+	rejectGroups := make(map[rejectKey][]string)
+	var rejectKeys []rejectKey
+
+	for _, f := range eligibilityFailures {
+		key := rejectKey{Symbol: f.Symbol, StrategyName: f.StrategyName, Reason: f.Reason}
+		if _, ok := rejectGroups[key]; !ok {
+			rejectKeys = append(rejectKeys, key)
+		}
+		rejectGroups[key] = append(rejectGroups[key], f.Direction)
+	}
+
+	for _, key := range rejectKeys {
+		dirs := rejectGroups[key]
+		var dirStr string
+		isLong := false
+		isShort := false
+		for _, d := range dirs {
+			if d == "LONG" {
+				isLong = true
+			} else if d == "SHORT" {
+				isShort = true
+			}
+		}
+		if isLong && isShort {
+			dirStr = "LONG/SHORT"
+		} else if isLong {
+			dirStr = "LONG"
+		} else if isShort {
+			dirStr = "SHORT"
+		}
+
+		policyRejectedSummary = append(policyRejectedSummary, fmt.Sprintf("%s (%s %s): %s", key.Symbol, key.StrategyName, dirStr, key.Reason))
+	}
+
 	// Run Candidate Arbiter
 	selectedCandidates, arbiterRejected := uc.candidateArbiterUsecase.Arbitrate(allCandidates, policy)
+	seenArbiterRejections := make(map[string]bool)
 	for _, rej := range arbiterRejected {
-		rejectedSummary = append(rejectedSummary, fmt.Sprintf("%s: arbiter filter - score=%0.1f", rej.Symbol, rej.Score))
+		reason := rej.Reason
+		if reason == "" {
+			reason = "failed arbiter filter"
+		}
+		entry := fmt.Sprintf("%s (%s %s): arbiter rejected - score=%0.1f reason=%s", rej.Symbol, rej.Playbook, rej.Direction, rej.Score, reason)
+		if !seenArbiterRejections[entry] {
+			seenArbiterRejections[entry] = true
+			rejectedSummary = append(rejectedSummary, entry)
+		}
 	}
 
 	// Evaluate Local Quality Gate
@@ -451,13 +512,19 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		var auditResponse dto.AIAuditResponse
 		aiSkipped := false
 		if !lgRes.Passed {
+			decision := "REJECT"
+			reason := "LOCAL_GATE_FAILED"
+			if lgRes.Status == LOCAL_WATCH {
+				decision = "WAIT"
+				reason = "LOCAL_GATE_WATCH"
+			}
 			auditResponse = dto.AIAuditResponse{
 				Symbol:     pair,
 				IsApproved: false,
-				Decision:   "REJECT",
+				Decision:   decision,
 				Sentiment:  "NEUTRAL",
 				Reasoning:  "Local gate failed: " + lgRes.Reason,
-				Reason:     "LOCAL_GATE_FAILED",
+				Reason:     reason,
 			}
 		} else {
 			resp, audited := aiAuditsMap[pair]
@@ -468,7 +535,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				auditResponse = dto.AIAuditResponse{
 					Symbol:     pair,
 					IsApproved: false,
-					Decision:   "REJECT",
+					Decision:   "WAIT",
 					Sentiment:  "NEUTRAL",
 					Reasoning:  "AI_SKIPPED: Exceeded policy MaxAICandidates quota limit",
 					Reason:     "AI_SKIPPED",
@@ -540,8 +607,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	totalFinalWatch := 0
 	totalFinalReject := 0
 
-	var executeSignals []dto.SignalResponse
-	var watchlistSignals []dto.SignalResponse
+	executeSignals := []dto.SignalResponse{}
+	watchlistSignals := []dto.SignalResponse{}
 
 	for _, finalDecision := range resolvedDecisions {
 		pair := finalDecision.Symbol
@@ -743,7 +810,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		Watchlist:                      watchlistSignals,
 		RejectedSummary:                rejectedSummary,
 		PolicyRejectedSummary:          policyRejectedSummary,
-		ThresholdProfileSummary:        thresholdProfileSummary,
+		SelectedThresholdProfileSummary:        thresholdProfileSummary,
 		EvaluationDataCompletenessHint: "has_decision_audit: true",
 	}
 
@@ -778,6 +845,30 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		uc.signalNotificationUsecase.SendV3Signals(ctx, notificationReqs, policy, summary)
 	}
 
+	arbiterDetails := []entity.ArbiterSelectedDetail{}
+	for _, dec := range resolvedDecisions {
+		pair := dec.Symbol
+		candCtx := ctxMap[pair]
+
+		localGateStatus := "FAILED"
+		if candCtx.localGateResult.Passed {
+			localGateStatus = "PASSED"
+		} else if candCtx.localGateResult.Status == LOCAL_WATCH {
+			localGateStatus = "LOCAL_WATCH"
+		}
+
+		arbiterDetails = append(arbiterDetails, entity.ArbiterSelectedDetail{
+			Symbol:          pair,
+			Playbook:        string(dec.Playbook),
+			Direction:       string(dec.Direction),
+			LocalGateStatus: localGateStatus,
+			AIDecision:      candCtx.auditResponse.Decision,
+			StalenessStatus: string(candCtx.stalenessRes.Status),
+			FinalStatus:     string(dec.Status),
+			FinalReason:     dec.Reason,
+		})
+	}
+
 	// Save latest scan results
 	latestResult := &entity.LatestResult{
 		GeneratedAt:                    scanStart,
@@ -804,8 +895,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		Watchlist:                      watchlistSignals,
 		RejectedSummary:                rejectedSummary,
 		PolicyRejectedSummary:          policyRejectedSummary,
-		ThresholdProfileSummary:        thresholdProfileSummary,
+		SelectedThresholdProfileSummary:        thresholdProfileSummary,
 		EvaluationDataCompletenessHint: "has_decision_audit: true",
+		ArbiterSelectedDetails:         arbiterDetails,
 
 		LastScanTime: scanStart,
 		Duration:     time.Since(scanStart).String(),

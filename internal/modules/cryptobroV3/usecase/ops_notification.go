@@ -3,18 +3,13 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"html"
 	"log/slog"
 	"strings"
 	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/entity"
 )
-
-const opsPrefix = "[CRYPTOBRO V3 OPS][NON-SIGNAL]"
-
-func opsFooter() string {
-	return "No trade action. Informational status only."
-}
 
 type OpsNotificationUsecase struct {
 	notifier OpsNotificationService
@@ -26,83 +21,95 @@ func NewOpsNotificationUsecase(notifier OpsNotificationService) *OpsNotification
 	}
 }
 
-func (uc *OpsNotificationUsecase) SendBootStatus(ctx context.Context, appName, env, version, httpPort string, alertOnly, binanceReadOnly, scanEnabled, monitoringEnabled bool) {
-	msg := fmt.Sprintf(
-		"%s\n\n"+
-			"BOOT\n"+
-			"app=%s\n"+
-			"env=%s\n"+
-			"version=%s\n"+
-			"http_port=%s\n"+
-			"alert_only=%v\n"+
-			"binance_read_only=%v\n"+
-			"scan_enabled=%v\n"+
-			"monitoring_enabled=%v\n"+
-			"at=%s\n\n"+
-			"%s",
-		opsPrefix,
-		appName,
-		env,
-		version,
-		httpPort,
+func escapeTelegramHTML(value string) string {
+	return html.EscapeString(value)
+}
+
+func FormatBootStatus(appName, env, version, httpPort string, alertOnly, binanceReadOnly, scanEnabled, monitoringEnabled bool) string {
+	atStr := FormatNotificationTime(time.Now())
+	return fmt.Sprintf(
+		"ℹ️ <b>CRYPTOBRO V3 OPS — NON-SIGNAL</b>\n\n"+
+			"🚀 <b>Boot</b>\n\n"+
+			"<pre>\n"+
+			"App       : %s\n"+
+			"Env       : %s\n"+
+			"Version   : %s\n"+
+			"Port      : %s\n"+
+			"AlertOnly : %v\n"+
+			"ReadOnly  : %v\n"+
+			"Scan      : %v\n"+
+			"Monitor   : %v\n"+
+			"At        : %s\n"+
+			"</pre>\n\n"+
+			"<i>No trade action. Informational status only.</i>",
+		escapeTelegramHTML(appName),
+		escapeTelegramHTML(env),
+		escapeTelegramHTML(version),
+		escapeTelegramHTML(httpPort),
 		alertOnly,
 		binanceReadOnly,
 		scanEnabled,
 		monitoringEnabled,
-		time.Now().Format(time.RFC3339),
-		opsFooter(),
+		escapeTelegramHTML(atStr),
 	)
-	uc.send(ctx, msg)
 }
 
-func (uc *OpsNotificationUsecase) SendScanStarted(ctx context.Context, scanID string, boundary time.Time, mode string) {
-	msg := fmt.Sprintf(
-		"%s\n\n"+
-			"SCAN_STARTED\n"+
-			"scan_id=%s\n"+
-			"mode=%s\n"+
-			"boundary=%s\n"+
-			"started_at=%s\n"+
-			"market_regime=not evaluated yet\n\n"+
-			"%s",
-		opsPrefix,
-		scanID,
-		mode,
-		boundary.Format(time.RFC3339),
-		time.Now().Format(time.RFC3339),
-		opsFooter(),
+func FormatOpsScanStarted(scanID string, boundary time.Time, mode string) string {
+	boundaryStr := FormatNotificationTime(boundary)
+	startedStr := FormatNotificationTime(time.Now())
+	return fmt.Sprintf(
+		"🟡 <b>CRYPTOBRO V3 OPS — NON-SIGNAL</b>\n\n"+
+			"📡 <b>Scan Started</b>\n\n"+
+			"<pre>\n"+
+			"Scan ID   : %s\n"+
+			"Mode      : %s\n"+
+			"Boundary  : %s\n"+
+			"Started   : %s\n"+
+			"Regime    : Not evaluated yet\n"+
+			"</pre>\n\n"+
+			"<i>No trade action. Informational status only.</i>",
+		escapeTelegramHTML(scanID),
+		escapeTelegramHTML(mode),
+		escapeTelegramHTML(boundaryStr),
+		escapeTelegramHTML(startedStr),
 	)
-	uc.send(ctx, msg)
 }
 
-func (uc *OpsNotificationUsecase) SendScanDone(ctx context.Context, latest *entity.LatestResult) {
+func FormatOpsScanDone(latest *entity.LatestResult) string {
 	if latest == nil {
-		return
+		return ""
 	}
 	durationMs := int64(-1)
 	if d, err := time.ParseDuration(latest.Duration); err == nil {
 		durationMs = d.Milliseconds()
 	}
+	durationStr := "N/A"
+	if durationMs >= 0 {
+		durationStr = fmt.Sprintf("%d ms", durationMs)
+	}
 
-	msg := fmt.Sprintf(
-		"%s\n\n"+
-			"SCAN_DONE\n"+
-			"scan_id=%s\n"+
-			"generated_at=%s\n"+
-			"market_regime=%s\n"+
-			"total_universe_pass=%d\n"+
-			"total_playbook_eligible=%d\n"+
-			"total_ai_candidate=%d\n"+
-			"total_final_execute=%d\n"+
-			"total_final_watch=%d\n"+
-			"total_final_reject=%d\n"+
-			"total_ai_error=%d\n"+
-			"duration_ms=%d\n\n"+
-			"%s",
-		opsPrefix,
-		latest.ScanID,
-		latest.GeneratedAt.Format(time.RFC3339),
-		latest.MarketRegime,
+	generatedStr := FormatNotificationTime(latest.GeneratedAt)
+
+	return fmt.Sprintf(
+		"🟢 <b>CRYPTOBRO V3 OPS — NON-SIGNAL</b>\n\n"+
+			"✅ <b>Scan Done</b>\n\n"+
+			"<pre>\n"+
+			"Scan ID      : %s\n"+
+			"Generated    : %s\n"+
+			"Regime       : %s\n\n"+
+			"Universe     : %d\n"+
+			"Eligible     : %d\n"+
+			"AI Candidate : %d\n"+
+			"Execute      : %d\n"+
+			"Watch        : %d\n"+
+			"Reject       : %d\n"+
+			"AI Error     : %d\n\n"+
+			"Duration     : %s\n"+
+			"</pre>\n\n"+
+			"<i>No trade action. Informational status only.</i>",
+		escapeTelegramHTML(latest.ScanID),
+		escapeTelegramHTML(generatedStr),
+		escapeTelegramHTML(latest.MarketRegime),
 		latest.TotalUniversePass,
 		latest.TotalPlaybookEligible,
 		latest.TotalLocalAICandidate,
@@ -110,56 +117,82 @@ func (uc *OpsNotificationUsecase) SendScanDone(ctx context.Context, latest *enti
 		latest.TotalFinalWatch,
 		latest.TotalFinalReject,
 		latest.TotalAIError,
-		durationMs,
-		opsFooter(),
+		escapeTelegramHTML(durationStr),
 	)
-	uc.send(ctx, msg)
 }
 
-func (uc *OpsNotificationUsecase) SendScanFailed(ctx context.Context, scanID string, boundary time.Time, err error) {
-	errText := ""
+func FormatOpsScanFailed(scanID string, boundary time.Time, err error) string {
+	errText := "Unknown error"
 	if err != nil {
 		errText = sanitizeErr(err.Error())
 	}
-	msg := fmt.Sprintf(
-		"%s\n\n"+
-			"SCAN_FAILED\n"+
-			"scan_id=%s\n"+
-			"boundary=%s\n"+
-			"failed_at=%s\n"+
-			"error=%s\n\n"+
-			"%s",
-		opsPrefix,
-		scanID,
-		boundary.Format(time.RFC3339),
-		time.Now().Format(time.RFC3339),
-		errText,
-		opsFooter(),
+	boundaryStr := FormatNotificationTime(boundary)
+	failedStr := FormatNotificationTime(time.Now())
+	return fmt.Sprintf(
+		"🔴 <b>CRYPTOBRO V3 OPS — NON-SIGNAL</b>\n\n"+
+			"⚠️ <b>Scan Failed</b>\n\n"+
+			"<pre>\n"+
+			"Scan ID   : %s\n"+
+			"Boundary  : %s\n"+
+			"Failed    : %s\n"+
+			"Error     : %s\n"+
+			"</pre>\n\n"+
+			"<i>No trade action. Informational status only.</i>",
+		escapeTelegramHTML(scanID),
+		escapeTelegramHTML(boundaryStr),
+		escapeTelegramHTML(failedStr),
+		escapeTelegramHTML(errText),
 	)
+}
+
+func FormatAdminWarning(scanID, symbol, playbook, finalStatus, reason string) string {
+	atStr := FormatNotificationTime(time.Now())
+	return fmt.Sprintf(
+		"⚠️ <b>CRYPTOBRO V3 OPS — NON-SIGNAL</b>\n\n"+
+			"❌ <b>Admin Warning</b>\n\n"+
+			"<pre>\n"+
+			"Type      : AI_ERROR\n"+
+			"Scan ID   : %s\n"+
+			"Symbol    : %s\n"+
+			"Playbook  : %s\n"+
+			"Status    : %s\n"+
+			"Reason    : %s\n"+
+			"At        : %s\n"+
+			"</pre>\n\n"+
+			"<i>No trade action. Informational status only.</i>",
+		escapeTelegramHTML(scanID),
+		escapeTelegramHTML(symbol),
+		escapeTelegramHTML(playbook),
+		escapeTelegramHTML(finalStatus),
+		escapeTelegramHTML(sanitizeErr(reason)),
+		escapeTelegramHTML(atStr),
+	)
+}
+
+func (uc *OpsNotificationUsecase) SendBootStatus(ctx context.Context, appName, env, version, httpPort string, alertOnly, binanceReadOnly, scanEnabled, monitoringEnabled bool) {
+	msg := FormatBootStatus(appName, env, version, httpPort, alertOnly, binanceReadOnly, scanEnabled, monitoringEnabled)
+	uc.send(ctx, msg)
+}
+
+func (uc *OpsNotificationUsecase) SendScanStarted(ctx context.Context, scanID string, boundary time.Time, mode string) {
+	msg := FormatOpsScanStarted(scanID, boundary, mode)
+	uc.send(ctx, msg)
+}
+
+func (uc *OpsNotificationUsecase) SendScanDone(ctx context.Context, latest *entity.LatestResult) {
+	msg := FormatOpsScanDone(latest)
+	if msg != "" {
+		uc.send(ctx, msg)
+	}
+}
+
+func (uc *OpsNotificationUsecase) SendScanFailed(ctx context.Context, scanID string, boundary time.Time, err error) {
+	msg := FormatOpsScanFailed(scanID, boundary, err)
 	uc.send(ctx, msg)
 }
 
 func (uc *OpsNotificationUsecase) SendAdminWarningAIError(ctx context.Context, scanID, symbol, playbook, finalStatus, reason string) {
-	msg := fmt.Sprintf(
-		"%s\n\n"+
-			"ADMIN_WARNING\n"+
-			"type=AI_ERROR\n"+
-			"scan_id=%s\n"+
-			"symbol=%s\n"+
-			"playbook=%s\n"+
-			"final_status=%s\n"+
-			"reason=%s\n"+
-			"at=%s\n\n"+
-			"%s",
-		opsPrefix,
-		scanID,
-		symbol,
-		playbook,
-		finalStatus,
-		sanitizeErr(reason),
-		time.Now().Format(time.RFC3339),
-		opsFooter(),
-	)
+	msg := FormatAdminWarning(scanID, symbol, playbook, finalStatus, reason)
 	uc.send(ctx, msg)
 }
 

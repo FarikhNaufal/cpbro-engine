@@ -350,6 +350,8 @@ type SignalJournal struct {
 	UpdatedAt     time.Time `json:"updated_at,omitempty"`
 	ClosedAt      time.Time `json:"closed_at,omitempty"`
 	Reason        string    `json:"reason,omitempty"`
+	NotificationStatus string    `json:"notification_status,omitempty"`
+	NotificationError  string    `json:"notification_error,omitempty"`
 }
 
 type DecisionAudit struct {
@@ -535,7 +537,7 @@ type ScannerSummaryV3 struct {
 	Watchlist                      []dto.SignalResponse `json:"watchlist"`
 	RejectedSummary                []string             `json:"rejected_summary"`
 	PolicyRejectedSummary          []string             `json:"policy_rejected_summary"`
-	ThresholdProfileSummary        map[string]string    `json:"threshold_profile_summary"`
+	SelectedThresholdProfileSummary        map[string]string    `json:"selected_threshold_profile_summary"`
 	EvaluationDataCompletenessHint string               `json:"evaluation_data_completeness_hint"`
 }
 
@@ -587,4 +589,16 @@ type StorageRepository interface {
 	LoadDecisionAudits() ([]DecisionAudit, error)
 	SaveDecisionAudits(audits []DecisionAudit) error
 	AppendDecisionAudit(entry DecisionAudit) error
+}
+
+// FormatNotificationTime formats a time.Time into Asia/Jakarta (WIB) timezone for readable Telegram messages.
+func FormatNotificationTime(t time.Time) string {
+	if t.IsZero() {
+		return "N/A"
+	}
+	loc, err := time.LoadLocation("Asia/Jakarta")
+	if err != nil {
+		loc = time.Local
+	}
+	return t.In(loc).Format("2006-01-02 15:04:05 MST")
 }

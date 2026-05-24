@@ -161,7 +161,7 @@ func TestAPIRoutes(t *testing.T) {
 	stalenessUC := usecase.NewStalenessUsecase(30 * time.Minute)
 	finalGateUC := usecase.NewFinalGateUsecase()
 	conflictResolverUC := usecase.NewConflictResolverUsecase()
-	signalNotificationUC := usecase.NewSignalNotificationUsecase(&mockAPINotification{})
+	signalNotificationUC := usecase.NewSignalNotificationUsecase(&mockAPINotification{}, storageUC)
 	opsNotificationUC := usecase.NewOpsNotificationUsecase(&mockAPINotification{})
 	monitoringUC := usecase.NewMonitoringUsecase(&mockAPIMarketDataProvider{}, storageUC)
 	feedbackUC := usecase.NewFeedbackUsecase(storageUC)
@@ -358,7 +358,7 @@ func TestSwaggerRouteEnabled(t *testing.T) {
 		usecase.NewStalenessUsecase(30*time.Minute),
 		usecase.NewFinalGateUsecase(),
 		usecase.NewConflictResolverUsecase(),
-		usecase.NewSignalNotificationUsecase(&mockAPINotification{}),
+		usecase.NewSignalNotificationUsecase(&mockAPINotification{}, storageUC),
 		usecase.NewOpsNotificationUsecase(&mockAPINotification{}),
 		usecase.NewMonitoringUsecase(&mockAPIMarketDataProvider{}, storageUC),
 		feedbackUC,
@@ -428,7 +428,7 @@ func TestSwaggerRouteDisabled(t *testing.T) {
 		usecase.NewStalenessUsecase(30*time.Minute),
 		usecase.NewFinalGateUsecase(),
 		usecase.NewConflictResolverUsecase(),
-		usecase.NewSignalNotificationUsecase(&mockAPINotification{}),
+		usecase.NewSignalNotificationUsecase(&mockAPINotification{}, storageUC),
 		usecase.NewOpsNotificationUsecase(&mockAPINotification{}),
 		usecase.NewMonitoringUsecase(&mockAPIMarketDataProvider{}, storageUC),
 		feedbackUC,

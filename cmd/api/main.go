@@ -119,7 +119,7 @@ func main() {
 	stalenessUC := usecase.NewStalenessUsecase(30 * time.Minute)
 	finalGateUC := usecase.NewFinalGateUsecase()
 	conflictResolverUC := usecase.NewConflictResolverUsecase()
-	signalNotificationUC := usecase.NewSignalNotificationUsecase(telegramService)
+	signalNotificationUC := usecase.NewSignalNotificationUsecase(telegramService, storageUC)
 	opsNotificationUC := usecase.NewOpsNotificationUsecase(telegramService)
 	monitoringUC := usecase.NewMonitoringUsecase(binanceService, storageUC)
 	feedbackUC := usecase.NewFeedbackUsecase(storageUC)

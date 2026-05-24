@@ -451,7 +451,7 @@ func TestConflictResolverCompliance(t *testing.T) {
 func TestNotificationCompliance(t *testing.T) {
 	t.Run("SendV3Signals only transmits FINAL_EXECUTE with HIGH+FRESH", func(t *testing.T) {
 		tgMock2 := &complianceNotification{}
-		uc2 := NewSignalNotificationUsecase(tgMock2)
+		uc2 := NewSignalNotificationUsecase(tgMock2, nil)
 
 		reqs := []SignalNotificationRequest{
 			{
@@ -616,7 +616,7 @@ func TestOrchestratorCompliance(t *testing.T) {
 	stalenessUC := NewStalenessUsecase(30 * time.Minute)
 	finalGateUC := NewFinalGateUsecase()
 	conflictResolverUC := NewConflictResolverUsecase()
-	signalNotificationUC := NewSignalNotificationUsecase(mockNotif)
+	signalNotificationUC := NewSignalNotificationUsecase(mockNotif, storageUC)
 	opsNotificationUC := NewOpsNotificationUsecase(mockNotif)
 	monitoringUC := NewMonitoringUsecase(mockData, storageUC)
 	feedbackUC := NewFeedbackUsecase(storageUC)

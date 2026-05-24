@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -196,6 +197,57 @@ func generateFreshCandles(startPrice float64) []dto.Candle {
 	return candles
 }
 
+func generateBreakoutRetestCandles(startPrice float64) []dto.Candle {
+	var candles []dto.Candle
+	baseTime := time.Now().Add(-60 * 15 * time.Minute)
+	for i := 0; i < 60; i++ {
+		t := baseTime.Add(time.Duration(i) * 15 * time.Minute)
+		closePrice := startPrice
+		vol := 1000.0
+		if i == 55 {
+			closePrice = startPrice + 4.0
+		} else if i > 55 {
+			closePrice = startPrice + 1.5
+			vol = 2000.0
+		}
+		candles = append(candles, dto.Candle{
+			Time:  t,
+			Open:  startPrice,
+			High:  closePrice + 0.1,
+			Low:   closePrice - 0.1,
+			Close: closePrice,
+			Vol:   vol,
+		})
+	}
+	return candles
+}
+
+func generateSweepCandles(startPrice float64) []dto.Candle {
+	var candles []dto.Candle
+	baseTime := time.Now().Add(-60 * 15 * time.Minute)
+	for i := 0; i < 60; i++ {
+		t := baseTime.Add(time.Duration(i) * 15 * time.Minute)
+		closePrice := startPrice
+		high := startPrice + 0.1
+		low := startPrice - 0.1
+		vol := 1000.0
+		// Candle 59 is the sweep candle
+		if i == 59 {
+			low = startPrice - 1.0 // sweeps below previous lows (99.9)
+			vol = 2000.0           // volume spike
+		}
+		candles = append(candles, dto.Candle{
+			Time:  t,
+			Open:  startPrice,
+			High:  high,
+			Low:   low,
+			Close: closePrice,
+			Vol:   vol,
+		})
+	}
+	return candles
+}
+
 func TestScannerUsecase_Run(t *testing.T) {
 	// Initialize Mock Services
 	tickers := []dto.Ticker24h{
@@ -292,16 +344,16 @@ func TestScannerUsecase_Run(t *testing.T) {
 	candidateArbiterUC := NewCandidateArbiterUsecase()
 	localGateUC := NewLocalGateUsecase()
 	aiCandidateSelectorUC := NewAICandidateSelectorUsecase(60.0)
-	aiAuditorUC := NewAIAuditorUsecase(mockAI, NewStorageUsecase(mockStorage))
+	storageUC := NewStorageUsecase(mockStorage)
+	aiAuditorUC := NewAIAuditorUsecase(mockAI, storageUC)
 	planReconciliationUC := NewPlanReconciliationUsecase()
 	stalenessUC := NewStalenessUsecase(30 * time.Minute)
 	finalGateUC := NewFinalGateUsecase()
 	conflictResolverUC := NewConflictResolverUsecase()
-	signalNotificationUC := NewSignalNotificationUsecase(mockNotify)
+	signalNotificationUC := NewSignalNotificationUsecase(mockNotify, storageUC)
 	opsNotificationUC := NewOpsNotificationUsecase(mockNotify)
-	monitoringUC := NewMonitoringUsecase(mockProvider, NewStorageUsecase(mockStorage))
-	feedbackUC := NewFeedbackUsecase(NewStorageUsecase(mockStorage))
-	storageUC := NewStorageUsecase(mockStorage)
+	monitoringUC := NewMonitoringUsecase(mockProvider, storageUC)
+	feedbackUC := NewFeedbackUsecase(storageUC)
 
 	uc := NewScannerUsecase(
 		marketDataUC,
@@ -403,3 +455,353 @@ func TestScannerUsecase_Run(t *testing.T) {
 		}
 	})
 }
+
+func TestScannerUsecase_Run_AIWait_And_AIReject(t *testing.T) {
+	// Initialize Mock Services
+	tickers := []dto.Ticker24h{
+		{
+			Symbol:             "BTCUSDT",
+			LastPrice:          50000.0,
+			PriceChangePercent: 2.0,
+			QuoteVolume:        1000000000.0,
+		},
+		{
+			Symbol:             "SOLUSDT",
+			LastPrice:          100.0,
+			PriceChangePercent: 1.0,
+			QuoteVolume:        200000000.0,
+		},
+	}
+
+	fundingRates := map[string]float64{
+		"BTCUSDT": 0.0001,
+		"SOLUSDT": 0.0001,
+	}
+
+	freshM15 := generateSweepCandles(100.0)
+	freshH1 := generateFreshCandles(100.0)
+	freshH4 := generateFreshCandles(100.0)
+
+	btcM15 := generateFreshCandles(50000.0)
+	btcH1 := generateFreshCandles(50000.0)
+	btcH4 := generateFreshCandles(50000.0)
+
+	m15Candles := map[string][]dto.Candle{"SOLUSDT": freshM15, "BTCUSDT": btcM15}
+	h1Candles := map[string][]dto.Candle{"SOLUSDT": freshH1, "BTCUSDT": btcH1}
+	h4Candles := map[string][]dto.Candle{"SOLUSDT": freshH4, "BTCUSDT": btcH4}
+	prices := map[string]float64{"SOLUSDT": 100.0, "BTCUSDT": 50000.0}
+
+	mockProvider := &mockMarketDataProvider{
+		tickers:      tickers,
+		fundingRates: fundingRates,
+		m15Candles:   m15Candles,
+		h1Candles:    h1Candles,
+		h4Candles:    h4Candles,
+		prices:       prices,
+	}
+
+	mockAI := &mockAIAuditor{
+		response: dto.AIAuditResponse{
+			Symbol:          "SOLUSDT",
+			Decision:        "WAIT", // Start with AI WAIT
+			Confidence:      "HIGH",
+			IsApproved:      false,
+			Sentiment:       "NEUTRAL",
+			HasRejection:    false,
+			HasConfirmation: true,
+			CandleNarrative: "Wait for breakout confirmation.",
+			EntryTiming:     "WATCH_ONLY",
+		},
+	}
+
+	mockNotify := &mockNotification{}
+	mockStorage := &mockStorageRepo{
+		journal: []SignalJournal{},
+		audits:  []DecisionAudit{},
+	}
+
+	// Initialize actual Usecases
+	marketDataUC := NewMarketDataUsecase(mockProvider)
+	marketPolicyUC := NewMarketPolicyUsecase()
+	universeUC := NewUniverseUsecase()
+	strategySelectorUC := NewStrategySelectorUsecase()
+	playbookEligibilityUC := NewPlaybookEligibilityUsecase()
+	playbookQuantEngineUC := NewPlaybookQuantEngineUsecase()
+	scoringUC := NewScoringUsecase()
+	candidateArbiterUC := NewCandidateArbiterUsecase()
+	localGateUC := NewLocalGateUsecase()
+	aiCandidateSelectorUC := NewAICandidateSelectorUsecase(60.0)
+	storageUC := NewStorageUsecase(mockStorage)
+	aiAuditorUC := NewAIAuditorUsecase(mockAI, storageUC)
+	planReconciliationUC := NewPlanReconciliationUsecase()
+	stalenessUC := NewStalenessUsecase(30 * time.Minute)
+	finalGateUC := NewFinalGateUsecase()
+	conflictResolverUC := NewConflictResolverUsecase()
+	signalNotificationUC := NewSignalNotificationUsecase(mockNotify, storageUC)
+	opsNotificationUC := NewOpsNotificationUsecase(mockNotify)
+	monitoringUC := NewMonitoringUsecase(mockProvider, storageUC)
+	feedbackUC := NewFeedbackUsecase(storageUC)
+
+	uc := NewScannerUsecase(
+		marketDataUC,
+		marketPolicyUC,
+		universeUC,
+		strategySelectorUC,
+		playbookEligibilityUC,
+		playbookQuantEngineUC,
+		scoringUC,
+		candidateArbiterUC,
+		localGateUC,
+		aiCandidateSelectorUC,
+		aiAuditorUC,
+		planReconciliationUC,
+		stalenessUC,
+		finalGateUC,
+		conflictResolverUC,
+		signalNotificationUC,
+		opsNotificationUC,
+		monitoringUC,
+		feedbackUC,
+		storageUC,
+	)
+
+	t.Run("Scanner AI_WAIT becomes FINAL_WATCH and appears in watchlist", func(t *testing.T) {
+		ctx := context.Background()
+		_, err := uc.Run(ctx, dto.ScanRequest{TriggerTime: time.Now()})
+		if err != nil {
+			t.Fatalf("scanner run failed: %v", err)
+		}
+
+		latest, err := storageUC.LoadLatestResult()
+		if err != nil {
+			t.Fatalf("failed to load latest result: %v", err)
+		}
+		t.Logf("policy_rejected_summary: %+v", latest.PolicyRejectedSummary)
+		t.Logf("rejected_summary: %+v", latest.RejectedSummary)
+		t.Logf("arbiterDetails: %+v", latest.ArbiterSelectedDetails)
+
+		if latest.TotalAIWait != 1 {
+			t.Errorf("expected TotalAIWait = 1, got %d", latest.TotalAIWait)
+		}
+		if latest.TotalFinalWatch != 1 {
+			t.Errorf("expected TotalFinalWatch = 1, got %d", latest.TotalFinalWatch)
+		}
+		if latest.TotalFinalReject != 0 {
+			t.Errorf("expected TotalFinalReject = 0, got %d", latest.TotalFinalReject)
+		}
+
+		if len(latest.Watchlist) != 1 {
+			t.Fatalf("expected Watchlist length = 1, got %d", len(latest.Watchlist))
+		}
+		if latest.Watchlist[0].Symbol != "SOLUSDT" {
+			t.Errorf("expected Watchlist[0].Symbol = SOLUSDT, got %s", latest.Watchlist[0].Symbol)
+		}
+		if latest.Watchlist[0].Status != "FINAL_WATCH" {
+			t.Errorf("expected Watchlist[0].Status = FINAL_WATCH, got %s", latest.Watchlist[0].Status)
+		}
+		if len(latest.ExecuteSignals) != 0 {
+			t.Errorf("expected ExecuteSignals to be empty, got %d", len(latest.ExecuteSignals))
+		}
+
+		// Verify watchlist is not nil/null representation (it's initialized slice)
+		if latest.Watchlist == nil {
+			t.Errorf("expected Watchlist to not be nil")
+		}
+		if latest.ExecuteSignals == nil {
+			t.Errorf("expected ExecuteSignals to not be nil")
+		}
+	})
+
+	t.Run("Scanner AI_REJECT becomes FINAL_REJECT and does not appear in watchlist", func(t *testing.T) {
+		// Set AI decision to REJECT
+		mockAI.response.Decision = "REJECT"
+		mockAI.response.CandleNarrative = "Overextended trend."
+		mockAI.response.EntryTiming = "REJECT"
+		mockStorage.auditCache = nil
+
+		ctx := context.Background()
+		_, err := uc.Run(ctx, dto.ScanRequest{TriggerTime: time.Now()})
+		if err != nil {
+			t.Fatalf("scanner run failed: %v", err)
+		}
+
+		latest, err := storageUC.LoadLatestResult()
+		if err != nil {
+			t.Fatalf("failed to load latest result: %v", err)
+		}
+
+		if latest.TotalAIReject != 1 {
+			t.Errorf("expected TotalAIReject = 1, got %d", latest.TotalAIReject)
+		}
+		if latest.TotalFinalReject != 1 {
+			t.Errorf("expected TotalFinalReject = 1, got %d", latest.TotalFinalReject)
+		}
+		if latest.TotalFinalWatch != 0 {
+			t.Errorf("expected TotalFinalWatch = 0, got %d", latest.TotalFinalWatch)
+		}
+
+		if len(latest.Watchlist) != 0 {
+			t.Errorf("expected Watchlist to be empty, got %d", len(latest.Watchlist))
+		}
+		if len(latest.ExecuteSignals) != 0 {
+			t.Errorf("expected ExecuteSignals to be empty, got %d", len(latest.ExecuteSignals))
+		}
+	})
+}
+
+func TestPolicyRejectedSummaryCompaction(t *testing.T) {
+	// We want to verify that when scanner.Run processes eligibility failures,
+	// it correctly formats them and groups LONG and SHORT failures into LONG/SHORT.
+	failures := []struct {
+		Symbol       string
+		StrategyName string
+		Direction    string
+		Reason       string
+	}{
+		{
+			Symbol:       "ETHUSDT",
+			StrategyName: "RANGE_EDGE_REVERSAL",
+			Direction:    "LONG",
+			Reason:       "Range edge reversal invalid: strong trending expansion",
+		},
+		{
+			Symbol:       "ETHUSDT",
+			StrategyName: "RANGE_EDGE_REVERSAL",
+			Direction:    "SHORT",
+			Reason:       "Range edge reversal invalid: strong trending expansion",
+		},
+		{
+			Symbol:       "SOLUSDT",
+			StrategyName: "LIQUIDITY_SWEEP_REVERSAL",
+			Direction:    "LONG",
+			Reason:       "No lower liquidity sweep detected",
+		},
+	}
+
+	type rejectKey struct {
+		Symbol       string
+		StrategyName string
+		Reason       string
+	}
+	rejectGroups := make(map[rejectKey][]string)
+	var rejectKeys []rejectKey
+
+	for _, f := range failures {
+		key := rejectKey{Symbol: f.Symbol, StrategyName: f.StrategyName, Reason: f.Reason}
+		if _, ok := rejectGroups[key]; !ok {
+			rejectKeys = append(rejectKeys, key)
+		}
+		rejectGroups[key] = append(rejectGroups[key], f.Direction)
+	}
+
+	var policyRejectedSummary []string
+	for _, key := range rejectKeys {
+		dirs := rejectGroups[key]
+		var dirStr string
+		isLong := false
+		isShort := false
+		for _, d := range dirs {
+			if d == "LONG" {
+				isLong = true
+			} else if d == "SHORT" {
+				isShort = true
+			}
+		}
+		if isLong && isShort {
+			dirStr = "LONG/SHORT"
+		} else if isLong {
+			dirStr = "LONG"
+		} else if isShort {
+			dirStr = "SHORT"
+		}
+
+		policyRejectedSummary = append(policyRejectedSummary, fmt.Sprintf("%s (%s %s): %s", key.Symbol, key.StrategyName, dirStr, key.Reason))
+	}
+
+	if len(policyRejectedSummary) != 2 {
+		t.Fatalf("expected 2 summary entries, got %d", len(policyRejectedSummary))
+	}
+
+	expectedETH := "ETHUSDT (RANGE_EDGE_REVERSAL LONG/SHORT): Range edge reversal invalid: strong trending expansion"
+	expectedSOL := "SOLUSDT (LIQUIDITY_SWEEP_REVERSAL LONG): No lower liquidity sweep detected"
+
+	if policyRejectedSummary[0] != expectedETH {
+		t.Errorf("expected: %q, got: %q", expectedETH, policyRejectedSummary[0])
+	}
+	if policyRejectedSummary[1] != expectedSOL {
+		t.Errorf("expected: %q, got: %q", expectedSOL, policyRejectedSummary[1])
+	}
+}
+
+func TestArbiterRejectedSummaryFormattingAndDeduplication(t *testing.T) {
+	arbiterRejected := []QuantResult{
+		{
+			Symbol:    "ONDOUSDT",
+			Playbook:  RANGE_EDGE_REVERSAL,
+			Direction: SHORT,
+			Score:     4.5,
+			Reason:    "Arbiter reject: opposing LONG exists",
+		},
+		{
+			Symbol:    "ONDOUSDT",
+			Playbook:  RANGE_EDGE_REVERSAL,
+			Direction: SHORT,
+			Score:     4.5,
+			Reason:    "Arbiter reject: opposing LONG exists",
+		},
+		{
+			Symbol:    "XAUUSDT",
+			Playbook:  LIQUIDITY_SWEEP_REVERSAL,
+			Direction: LONG,
+			Score:     7.0,
+			Reason:    "Arbiter reject: not premium setup",
+		},
+		{
+			Symbol:    "XAUUSDT",
+			Playbook:  LIQUIDITY_SWEEP_REVERSAL,
+			Direction: LONG,
+			Score:     7.0,
+			Reason:    "Arbiter reject: not premium setup",
+		},
+		{
+			Symbol:    "XAUUSDT",
+			Playbook:  LIQUIDITY_SWEEP_REVERSAL,
+			Direction: SHORT,
+			Score:     7.2,
+			Reason:    "Arbiter reject: not premium setup",
+		},
+	}
+
+	rejectedSummary := []string{}
+	seenArbiterRejections := make(map[string]bool)
+	for _, rej := range arbiterRejected {
+		reason := rej.Reason
+		if reason == "" {
+			reason = "failed arbiter filter"
+		}
+		entry := fmt.Sprintf("%s (%s %s): arbiter rejected - score=%0.1f reason=%s", rej.Symbol, rej.Playbook, rej.Direction, rej.Score, reason)
+		if !seenArbiterRejections[entry] {
+			seenArbiterRejections[entry] = true
+			rejectedSummary = append(rejectedSummary, entry)
+		}
+	}
+
+	if len(rejectedSummary) != 3 {
+		t.Fatalf("expected 3 entries after deduplication, got %d", len(rejectedSummary))
+	}
+
+	expected0 := "ONDOUSDT (RANGE_EDGE_REVERSAL SHORT): arbiter rejected - score=4.5 reason=Arbiter reject: opposing LONG exists"
+	expected1 := "XAUUSDT (LIQUIDITY_SWEEP_REVERSAL LONG): arbiter rejected - score=7.0 reason=Arbiter reject: not premium setup"
+	expected2 := "XAUUSDT (LIQUIDITY_SWEEP_REVERSAL SHORT): arbiter rejected - score=7.2 reason=Arbiter reject: not premium setup"
+
+	if rejectedSummary[0] != expected0 {
+		t.Errorf("expected: %q, got: %q", expected0, rejectedSummary[0])
+	}
+	if rejectedSummary[1] != expected1 {
+		t.Errorf("expected: %q, got: %q", expected1, rejectedSummary[1])
+	}
+	if rejectedSummary[2] != expected2 {
+		t.Errorf("expected: %q, got: %q", expected2, rejectedSummary[2])
+	}
+}
+

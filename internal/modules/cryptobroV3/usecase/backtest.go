@@ -677,10 +677,14 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 			lgRes := localGateMap[qResult.Symbol]
 			var auditResponse dto.AIAuditResponse
 			if !lgRes.Passed {
+				decision := "REJECT"
+				if lgRes.Status == LOCAL_WATCH {
+					decision = "WAIT"
+				}
 				auditResponse = dto.AIAuditResponse{
 					Symbol:     qResult.Symbol,
 					IsApproved: false,
-					Decision:   "REJECT",
+					Decision:   decision,
 					Reasoning:  "Local gate failed: " + lgRes.Reason,
 				}
 			} else {
@@ -691,7 +695,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 					auditResponse = dto.AIAuditResponse{
 						Symbol:     qResult.Symbol,
 						IsApproved: false,
-						Decision:   "REJECT",
+						Decision:   "WAIT",
 						Reasoning:  "AI_SKIPPED",
 					}
 				}
