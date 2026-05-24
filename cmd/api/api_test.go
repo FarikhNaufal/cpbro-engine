@@ -221,11 +221,26 @@ func TestAPIRoutes(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), `"status":"UP"`)
+		assert.Contains(t, w.Body.String(), `"success":true`)
+		assert.Contains(t, w.Body.String(), `"data":`)
 		assert.Contains(t, w.Body.String(), `"mode":"alert-only"`)
+		assert.Contains(t, w.Body.String(), `"status":"healthy"`)
+
 		// Check that secrets are not exposed in health response
-		assert.NotContains(t, w.Body.String(), "key")
-		assert.NotContains(t, w.Body.String(), "token")
+		t.Setenv("TELEGRAM_BOT_TOKEN", "super-secret-token-xyz")
+		t.Setenv("BINANCE_API_SECRET", "super-secret-binance")
+		t.Setenv("GEMINI_API_KEY", "super-secret-gemini")
+		assert.NotContains(t, w.Body.String(), "super-secret-token-xyz")
+		assert.NotContains(t, w.Body.String(), "super-secret-binance")
+		assert.NotContains(t, w.Body.String(), "super-secret-gemini")
+	})
+
+	t.Run("GET /api/v3/health alias", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/api/v3/health", nil)
+		router.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Body.String(), `"app_env":`)
 	})
 
 	t.Run("Forbidden Routes return 404", func(t *testing.T) {
@@ -304,7 +319,8 @@ func TestAPIRoutes(t *testing.T) {
 		router.ServeHTTP(w, req)
 
 		assert.Equal(t, http.StatusOK, w.Code)
-		assert.Contains(t, w.Body.String(), `"status":"UP"`)
+		assert.Contains(t, w.Body.String(), `"success":true`)
+		assert.Contains(t, w.Body.String(), `"status":"healthy"`)
 	})
 }
 

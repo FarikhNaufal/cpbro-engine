@@ -53,6 +53,9 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 
 	// 1. Load data sources
 	journal, err := uc.storageUsecase.LoadSignalJournal()
+	if err != nil {
+		return fmt.Errorf("failed to load signal journal: %w", err)
+	}
 	hasJournal := err == nil && len(journal) > 0
 	if hasJournal {
 		sourceFiles = append(sourceFiles, "signal_journal.json")
@@ -61,6 +64,9 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	}
 
 	latestRes, err := uc.storageUsecase.LoadLatestResult()
+	if err != nil {
+		return fmt.Errorf("failed to load latest result: %w", err)
+	}
 	hasLatest := err == nil && latestRes != nil && len(latestRes.Signals) > 0
 	if hasLatest {
 		sourceFiles = append(sourceFiles, "latest_result.json")
@@ -69,6 +75,9 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	}
 
 	audits, err := uc.storageUsecase.LoadDecisionAudits()
+	if err != nil {
+		return fmt.Errorf("failed to load decision audits: %w", err)
+	}
 	hasAudits := err == nil && len(audits) > 0
 	if hasAudits {
 		sourceFiles = append(sourceFiles, "decision_audit.json")
