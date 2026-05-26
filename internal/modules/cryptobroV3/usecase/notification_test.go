@@ -381,8 +381,8 @@ func TestTelegramOpsHTMLCompliance(t *testing.T) {
 		if strings.Contains(msg, "Entry:") || strings.Contains(msg, "SL:") || strings.Contains(msg, "TP1:") || strings.Contains(msg, "TP2:") {
 			t.Errorf("OPS message must not contain entry/SL/TP signal details: %s", msg)
 		}
-		})
-	}
+	})
+}
 
 type mockNotificationStorageRepo struct {
 	journal []usecase.SignalJournal
@@ -442,8 +442,8 @@ type mockTelegramAPIError struct {
 func (e *mockTelegramAPIError) Error() string {
 	return e.description
 }
-func (e *mockTelegramAPIError) GetStatusCode() int   { return e.statusCode }
-func (e *mockTelegramAPIError) GetErrorCode() int    { return e.errorCode }
+func (e *mockTelegramAPIError) GetStatusCode() int     { return e.statusCode }
+func (e *mockTelegramAPIError) GetErrorCode() int      { return e.errorCode }
 func (e *mockTelegramAPIError) GetDescription() string { return e.description }
 
 type mockNotificationServiceWithAPIError struct {

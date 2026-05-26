@@ -804,4 +804,3 @@ func TestArbiterRejectedSummaryFormattingAndDeduplication(t *testing.T) {
 		t.Errorf("expected: %q, got: %q", expected2, rejectedSummary[2])
 	}
 }
-

@@ -204,7 +204,6 @@ func (t *TelegramService) sendRequest(ctx context.Context, chatID string, msg st
 	return nil
 }
 
-
 // Ping checks Telegram Bot API availability. Used by health endpoint.
 func (t *TelegramService) Ping(ctx context.Context) error {
 	if !t.enabled {

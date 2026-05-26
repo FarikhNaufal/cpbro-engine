@@ -194,6 +194,39 @@ func CalculateRSI(candles []dto.Candle, period int) float64 {
 	return 100.0 - (100.0 / (1 + rs))
 }
 
+func CalculateMFI(candles []dto.Candle, period int) float64 {
+	if len(candles) <= period {
+		return 50.0
+	}
+	tp := make([]float64, len(candles))
+	for i := range candles {
+		tp[i] = (candles[i].High + candles[i].Low + candles[i].Close) / 3.0
+	}
+
+	posFlow := 0.0
+	negFlow := 0.0
+	startIdx := len(candles) - period
+	for i := startIdx; i < len(candles); i++ {
+		if i == 0 {
+			continue
+		}
+		flow := tp[i] * candles[i].Vol
+		if tp[i] > tp[i-1] {
+			posFlow += flow
+		} else if tp[i] < tp[i-1] {
+			negFlow += flow
+		}
+	}
+	if negFlow == 0 {
+		if posFlow == 0 {
+			return 50.0
+		}
+		return 100.0
+	}
+	mr := posFlow / negFlow
+	return 100.0 - (100.0 / (1.0 + mr))
+}
+
 func CalculateMACD(candles []dto.Candle, fast, slow, signal int) (float64, float64) {
 	if len(candles) < slow {
 		return 0.0, 0.0
@@ -300,7 +333,7 @@ func LowestLow(candles []dto.Candle, period int) float64 {
 }
 
 // PopulateSnapshots builds high-fidelity TechnicalSnapshot and StructureSnapshot for use in selectors & gates.
-func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundingRate float64, latestPrice float64) (*TechnicalSnapshot, *StructureSnapshot) {
+func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundingRate float64, latestPrice float64, priceChange24h float64, openInterest float64) (*TechnicalSnapshot, *StructureSnapshot) {
 	m15Closed := GetClosedCandlesOnly(m15, 15*time.Minute)
 	h1Closed := GetClosedCandlesOnly(h1, time.Hour)
 	h4Closed := GetClosedCandlesOnly(h4, 4*time.Hour)
@@ -322,6 +355,51 @@ func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundi
 	adxVal := CalculateADX(m15Closed, 14)
 	macdLine, signalLine := CalculateMACD(m15Closed, 12, 26, 9)
 
+	// Calculate slopes
+	rsiSlope := 0.0
+	if len(m15Closed) >= 15 {
+		prevRsi := CalculateRSI(m15Closed[:len(m15Closed)-1], 14)
+		rsiSlope = rsiVal - prevRsi
+	}
+
+	mfiVal := CalculateMFI(m15Closed, 14)
+	mfiSlope := 0.0
+	if len(m15Closed) >= 15 {
+		prevMfi := CalculateMFI(m15Closed[:len(m15Closed)-1], 14)
+		mfiSlope = mfiVal - prevMfi
+	}
+
+	adxSlope := 0.0
+	if len(m15Closed) >= 15 {
+		prevAdx := CalculateADX(m15Closed[:len(m15Closed)-1], 14)
+		adxSlope = adxVal - prevAdx
+	}
+
+	atrVal := CalculateATR(m15Closed, 14)
+	atrPercent := 0.0
+	if len(m15Closed) > 0 {
+		lastClose := m15Closed[len(m15Closed)-1].Close
+		if lastClose > 0 {
+			atrPercent = (atrVal / lastClose) * 100.0
+		}
+	}
+
+	volumeRatio := 1.0
+	if len(m15Closed) > 0 {
+		lastVol := m15Closed[len(m15Closed)-1].Vol
+		sumVol := 0.0
+		count := 0
+		for i := len(m15Closed) - 2; i >= 0 && i >= len(m15Closed)-21; i-- {
+			sumVol += m15Closed[i].Vol
+			count++
+		}
+		avgVol := 1.0
+		if count > 0 && sumVol > 0 {
+			avgVol = sumVol / float64(count)
+		}
+		volumeRatio = lastVol / avgVol
+	}
+
 	tech := &TechnicalSnapshot{
 		RSI:             rsiVal,
 		MACD:            macdLine,
@@ -329,6 +407,15 @@ func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundi
 		Timeframe:       "M15",
 		Notes:           fmt.Sprintf("MACD Line: %0.4f | Signal Line: %0.4f", macdLine, signalLine),
 		IndicatorValues: make(map[string]float64),
+		RSISlope:        rsiSlope,
+		MFI:             mfiVal,
+		MFISlope:        mfiSlope,
+		ADXSlope:        adxSlope,
+		ATRPercent:      atrPercent,
+		VolumeRatio:     volumeRatio,
+		OIChange:        0.0,
+		FundingRate:     fundingRate,
+		PriceChange24h:  priceChange24h,
 	}
 
 	tech.IndicatorValues[IndicatorADX] = adxVal
@@ -363,7 +450,6 @@ func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundi
 		}
 
 		// Compression (Bollinger Band width proxy)
-		atrVal := CalculateATR(m15Closed, 14)
 		tech.IndicatorValues[IndicatorATR] = atrVal
 		if atrVal > 0 && atrVal < lastCandle.Close*0.008 {
 			tech.IndicatorValues[IndicatorContraction] = 1.0
@@ -383,6 +469,9 @@ func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundi
 
 		// OI / crowding defaults when data is unavailable.
 		tech.IndicatorValues[IndicatorHasOIData] = 0.0
+		if openInterest > 0 {
+			tech.IndicatorValues[IndicatorHasOIData] = 1.0
+		}
 		tech.IndicatorValues[IndicatorOIChange] = 0.0
 		tech.IndicatorValues[IndicatorExtremeOI] = 0.0
 		tech.IndicatorValues[IndicatorCrowdingScore] = 0.0
@@ -413,10 +502,64 @@ func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundi
 		}
 	}
 
+	sessionHigh := HighestHigh(m15Closed, 40)
+	sessionLow := LowestLow(m15Closed, 40)
+	liquidityUpper := HighestHigh(m15Closed, 20)
+	liquidityLower := LowestLow(m15Closed, 20)
+
+	var highs []float64
+	var lows []float64
+	for i := len(m15Closed) - 3; i >= 2 && len(highs) < 5; i-- {
+		if m15Closed[i].High > m15Closed[i-1].High && m15Closed[i].High > m15Closed[i-2].High &&
+			m15Closed[i].High > m15Closed[i+1].High && m15Closed[i].High > m15Closed[i+2].High {
+			highs = append(highs, m15Closed[i].High)
+		}
+		if m15Closed[i].Low < m15Closed[i-1].Low && m15Closed[i].Low < m15Closed[i-2].Low &&
+			m15Closed[i].Low < m15Closed[i+1].Low && m15Closed[i].Low < m15Closed[i+2].Low {
+			lows = append(lows, m15Closed[i].Low)
+		}
+	}
+
+	explicitSupport := 0.0
+	if len(lows) > 0 {
+		explicitSupport = lows[0]
+	}
+
+	explicitResistance := 0.0
+	if len(highs) > 0 {
+		explicitResistance = highs[0]
+	}
+
+	support := 0.0
+	if explicitSupport > 0 {
+		support = explicitSupport
+	} else if sessionLow > 0 {
+		support = sessionLow
+	} else if liquidityLower > 0 {
+		support = liquidityLower
+	}
+
+	resistance := 0.0
+	if explicitResistance > 0 {
+		resistance = explicitResistance
+	} else if sessionHigh > 0 {
+		resistance = sessionHigh
+	} else if liquidityUpper > 0 {
+		resistance = liquidityUpper
+	}
+
 	structure := &StructureSnapshot{
 		MarketStructure: "CHOP",
 		Timeframe:       "M15",
 		Notes:           fmt.Sprintf("H4Trend: %s | H1Trend: %s", h4Trend, h1Trend),
+		Highs:           highs,
+		Lows:            lows,
+		Support:         support,
+		Resistance:      resistance,
+		SessionHigh:     sessionHigh,
+		SessionLow:      sessionLow,
+		LiquidityUpper:  liquidityUpper,
+		LiquidityLower:  liquidityLower,
 	}
 	if h4Trend == "BULLISH" {
 		structure.MarketStructure = "BULLISH_BOS"

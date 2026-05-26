@@ -140,6 +140,8 @@ type MarketPolicy struct {
 	StalenessATRMultiplier float64      `json:"staleness_atr_multiplier"`
 	CooldownMinutes        int          `json:"cooldown_minutes"`
 	BtcTrend               string       `json:"btc_trend"`
+	BtcScore               float64      `json:"btc_score"`
+	BtcChaos               float64      `json:"btc_chaos"`
 	Reason                 string       `json:"reason"`
 }
 
@@ -166,6 +168,7 @@ type MarketData struct {
 	OpenInterestM15 float64      `json:"open_interest_m15"`
 	FundingRate     float64      `json:"funding_rate"`
 	LatestPrice     float64      `json:"latest_price"`
+	PriceChange24h  float64      `json:"price_change_24h"`
 	LastUpdated     time.Time    `json:"last_updated"`
 }
 
@@ -176,6 +179,15 @@ type TechnicalSnapshot struct {
 	Timeframe       string             `json:"timeframe"`
 	IndicatorValues map[string]float64 `json:"indicator_values"`
 	Notes           string             `json:"notes"`
+	RSISlope        float64            `json:"rsi_slope"`
+	MFI             float64            `json:"mfi"`
+	MFISlope        float64            `json:"mfi_slope"`
+	ADXSlope        float64            `json:"adx_slope"`
+	ATRPercent      float64            `json:"atr_percent"`
+	VolumeRatio     float64            `json:"volume_ratio"`
+	OIChange        float64            `json:"oi_change"`
+	FundingRate     float64            `json:"funding_rate"`
+	PriceChange24h  float64            `json:"price_change_24h"`
 }
 
 type StructureSnapshot struct {
@@ -184,6 +196,12 @@ type StructureSnapshot struct {
 	CHOCH           bool      `json:"choch"`
 	Highs           []float64 `json:"highs"`
 	Lows            []float64 `json:"lows"`
+	Support         float64   `json:"support"`
+	Resistance      float64   `json:"resistance"`
+	SessionHigh     float64   `json:"session_high"`
+	SessionLow      float64   `json:"session_low"`
+	LiquidityUpper  float64   `json:"liquidity_upper"`
+	LiquidityLower  float64   `json:"liquidity_lower"`
 	Timeframe       string    `json:"timeframe"`
 	Notes           string    `json:"notes"`
 }
@@ -341,15 +359,15 @@ type SignalJournal struct {
 	Tier                    Tier      `json:"tier"`
 
 	// Keep existing fields for backward compatibility
-	Timeframe     string    `json:"timeframe,omitempty"`
-	LatestPrice   float64   `json:"latest_price,omitempty"`
-	TakeProfit    float64   `json:"take_profit,omitempty"`
-	AISentiment   string    `json:"ai_sentiment,omitempty"`
-	AIReasoning   string    `json:"ai_reasoning,omitempty"`
-	PnlPercentage float64   `json:"pnl_percentage,omitempty"`
-	UpdatedAt     time.Time `json:"updated_at,omitempty"`
-	ClosedAt      time.Time `json:"closed_at,omitempty"`
-	Reason        string    `json:"reason,omitempty"`
+	Timeframe          string    `json:"timeframe,omitempty"`
+	LatestPrice        float64   `json:"latest_price,omitempty"`
+	TakeProfit         float64   `json:"take_profit,omitempty"`
+	AISentiment        string    `json:"ai_sentiment,omitempty"`
+	AIReasoning        string    `json:"ai_reasoning,omitempty"`
+	PnlPercentage      float64   `json:"pnl_percentage,omitempty"`
+	UpdatedAt          time.Time `json:"updated_at,omitempty"`
+	ClosedAt           time.Time `json:"closed_at,omitempty"`
+	Reason             string    `json:"reason,omitempty"`
 	NotificationStatus string    `json:"notification_status,omitempty"`
 	NotificationError  string    `json:"notification_error,omitempty"`
 }
@@ -512,33 +530,33 @@ type EvaluationReport struct {
 }
 
 type ScannerSummaryV3 struct {
-	TotalScanned                   int                  `json:"total_scanned"`
-	CandidatesFound                int                  `json:"candidates_found"`
-	StartTime                      time.Time            `json:"start_time"`
-	Duration                       string               `json:"duration"`
-	ActiveRegime                   string               `json:"active_regime"`
-	BtcTrend                       string               `json:"btc_trend"`
-	TotalTickers                   int                  `json:"total_tickers"`
-	TotalUniversePass              int                  `json:"total_universe_pass"`
-	TotalUniverseRejected          int                  `json:"total_universe_rejected"`
-	TotalStrategySelected          int                  `json:"total_strategy_selected"`
-	TotalPlaybookEligible          int                  `json:"total_playbook_eligible"`
-	TotalQuantCandidates           int                  `json:"total_quant_candidates"`
-	TotalArbiterSelected           int                  `json:"total_arbiter_selected"`
-	TotalLocalAICandidate          int                  `json:"total_local_ai_candidate"`
-	TotalAIConfirm                 int                  `json:"total_ai_confirm"`
-	TotalAIWait                    int                  `json:"total_ai_wait"`
-	TotalAIReject                  int                  `json:"total_ai_reject"`
-	TotalAIError                   int                  `json:"total_ai_error"`
-	TotalFinalExecute              int                  `json:"total_final_execute"`
-	TotalFinalWatch                int                  `json:"total_final_watch"`
-	TotalFinalReject               int                  `json:"total_final_reject"`
-	ExecuteSignals                 []dto.SignalResponse `json:"execute_signals"`
-	Watchlist                      []dto.SignalResponse `json:"watchlist"`
-	RejectedSummary                []string             `json:"rejected_summary"`
-	PolicyRejectedSummary          []string             `json:"policy_rejected_summary"`
-	SelectedThresholdProfileSummary        map[string]string    `json:"selected_threshold_profile_summary"`
-	EvaluationDataCompletenessHint string               `json:"evaluation_data_completeness_hint"`
+	TotalScanned                    int                  `json:"total_scanned"`
+	CandidatesFound                 int                  `json:"candidates_found"`
+	StartTime                       time.Time            `json:"start_time"`
+	Duration                        string               `json:"duration"`
+	ActiveRegime                    string               `json:"active_regime"`
+	BtcTrend                        string               `json:"btc_trend"`
+	TotalTickers                    int                  `json:"total_tickers"`
+	TotalUniversePass               int                  `json:"total_universe_pass"`
+	TotalUniverseRejected           int                  `json:"total_universe_rejected"`
+	TotalStrategySelected           int                  `json:"total_strategy_selected"`
+	TotalPlaybookEligible           int                  `json:"total_playbook_eligible"`
+	TotalQuantCandidates            int                  `json:"total_quant_candidates"`
+	TotalArbiterSelected            int                  `json:"total_arbiter_selected"`
+	TotalLocalAICandidate           int                  `json:"total_local_ai_candidate"`
+	TotalAIConfirm                  int                  `json:"total_ai_confirm"`
+	TotalAIWait                     int                  `json:"total_ai_wait"`
+	TotalAIReject                   int                  `json:"total_ai_reject"`
+	TotalAIError                    int                  `json:"total_ai_error"`
+	TotalFinalExecute               int                  `json:"total_final_execute"`
+	TotalFinalWatch                 int                  `json:"total_final_watch"`
+	TotalFinalReject                int                  `json:"total_final_reject"`
+	ExecuteSignals                  []dto.SignalResponse `json:"execute_signals"`
+	Watchlist                       []dto.SignalResponse `json:"watchlist"`
+	RejectedSummary                 []string             `json:"rejected_summary"`
+	PolicyRejectedSummary           []string             `json:"policy_rejected_summary"`
+	SelectedThresholdProfileSummary map[string]string    `json:"selected_threshold_profile_summary"`
+	EvaluationDataCompletenessHint  string               `json:"evaluation_data_completeness_hint"`
 }
 
 type SignalNotificationRequest struct {

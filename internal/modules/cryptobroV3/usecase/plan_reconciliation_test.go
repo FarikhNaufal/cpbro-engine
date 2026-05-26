@@ -9,7 +9,7 @@ import (
 func TestPlanReconciliation_Rules(t *testing.T) {
 	reconciler := NewPlanReconciliationUsecase()
 
-	// Rule 1: AI decision REJECT -> Conflicted true, status LOCAL_REJECT
+	// Rule 1: AI decision REJECT -> Conflicted true, status PLAN_CONFLICT
 	t.Run("Rule 1 - AI decision REJECT", func(t *testing.T) {
 		quant := QuantResult{Playbook: TREND_PULLBACK, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "REJECT", Confidence: "HIGH", Last5CandlesBias: "BULLISH"}
@@ -17,12 +17,12 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 		if !review.Conflicted {
 			t.Errorf("Expected Conflicted to be true on REJECT")
 		}
-		if review.Status != LOCAL_REJECT {
-			t.Errorf("Expected status to be LOCAL_REJECT, got %s", review.Status)
+		if review.Status != PLAN_CONFLICT {
+			t.Errorf("Expected status to be PLAN_CONFLICT, got %s", review.Status)
 		}
 	})
 
-	// Rule 2: AI conflict_with_bot true -> Conflicted true, status LOCAL_REJECT
+	// Rule 2: AI conflict_with_bot true -> Conflicted true, status PLAN_CONFLICT
 	t.Run("Rule 2 - AI conflict_with_bot", func(t *testing.T) {
 		quant := QuantResult{Playbook: TREND_PULLBACK, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "CONFIRM", ConflictWithBot: true, Confidence: "HIGH", Last5CandlesBias: "BULLISH"}
@@ -32,7 +32,7 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 		}
 	})
 
-	// Rule 3: AI confidence LOW -> Conflicted true, status LOCAL_WATCH
+	// Rule 3: AI confidence LOW -> Conflicted true, status PLAN_CONFLICT
 	t.Run("Rule 3 - AI confidence LOW", func(t *testing.T) {
 		quant := QuantResult{Playbook: TREND_PULLBACK, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "CONFIRM", Confidence: "LOW", Last5CandlesBias: "BULLISH"}
@@ -40,12 +40,12 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 		if !review.Conflicted {
 			t.Errorf("Expected Conflicted to be true on LOW confidence")
 		}
-		if review.Status != LOCAL_WATCH {
-			t.Errorf("Expected status to be LOCAL_WATCH, got %s", review.Status)
+		if review.Status != PLAN_CONFLICT {
+			t.Errorf("Expected status to be PLAN_CONFLICT, got %s", review.Status)
 		}
 	})
 
-	// Rule 4: AI entry_timing MISSED -> EntryStillValid false, NeedRetest false, status MISSED
+	// Rule 4: AI entry_timing MISSED -> EntryStillValid false, NeedRetest false, status PLAN_CONFLICT
 	t.Run("Rule 4 - AI entry_timing MISSED", func(t *testing.T) {
 		quant := QuantResult{Playbook: TREND_PULLBACK, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "CONFIRM", Confidence: "HIGH", EntryTiming: "MISSED", Last5CandlesBias: "BULLISH"}
@@ -56,12 +56,12 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 		if review.NeedRetest {
 			t.Errorf("Expected NeedRetest to be false")
 		}
-		if review.Status != "MISSED" {
-			t.Errorf("Expected status to be MISSED, got %s", review.Status)
+		if review.Status != PLAN_CONFLICT {
+			t.Errorf("Expected status to be PLAN_CONFLICT, got %s", review.Status)
 		}
 	})
 
-	// Rule 5: AI entry_timing LATE -> EntryStillValid false, NeedRetest true, status LATE
+	// Rule 5: AI entry_timing LATE -> EntryStillValid false, NeedRetest true, status PLAN_NEED_RETEST
 	t.Run("Rule 5 - AI entry_timing LATE", func(t *testing.T) {
 		quant := QuantResult{Playbook: TREND_PULLBACK, Direction: LONG}
 		ai := dto.AIAuditResponse{Decision: "CONFIRM", Confidence: "HIGH", EntryTiming: "LATE", Last5CandlesBias: "BULLISH"}
@@ -72,8 +72,8 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 		if !review.NeedRetest {
 			t.Errorf("Expected NeedRetest to be true")
 		}
-		if review.Status != "LATE" {
-			t.Errorf("Expected status to be LATE, got %s", review.Status)
+		if review.Status != PLAN_NEED_RETEST {
+			t.Errorf("Expected status to be PLAN_NEED_RETEST, got %s", review.Status)
 		}
 	})
 

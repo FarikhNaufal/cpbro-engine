@@ -17,34 +17,34 @@ type ArbiterSelectedDetail struct {
 }
 
 type LatestResult struct {
-	SchemaVersion                  string                  `json:"schema_version,omitempty"`
-	ConfigVersion                  string                  `json:"config_version,omitempty"`
-	GeneratedAt                    time.Time               `json:"generated_at"`
-	ScanID                         string                  `json:"scan_id"`
-	MarketPolicy                   string                  `json:"market_policy"`
-	MarketRegime                   string                  `json:"market_regime"`
-	TotalTickers                   int                     `json:"total_tickers"`
-	TotalUniversePass              int                     `json:"total_universe_pass"`
-	TotalUniverseRejected          int                     `json:"total_universe_rejected"`
-	TotalStrategySelected          int                     `json:"total_strategy_selected"`
-	TotalPlaybookEligible          int                     `json:"total_playbook_eligible"`
-	TotalQuantCandidates           int                     `json:"total_quant_candidates"`
-	TotalArbiterSelected           int                     `json:"total_arbiter_selected"`
-	TotalLocalAICandidate          int                     `json:"total_local_ai_candidate"`
-	TotalAIConfirm                 int                     `json:"total_ai_confirm"`
-	TotalAIWait                    int                     `json:"total_ai_wait"`
-	TotalAIReject                  int                     `json:"total_ai_reject"`
-	TotalAIError                   int                     `json:"total_ai_error"`
-	TotalFinalExecute              int                     `json:"total_final_execute"`
-	TotalFinalWatch                int                     `json:"total_final_watch"`
-	TotalFinalReject               int                     `json:"total_final_reject"`
-	ExecuteSignals                 []dto.SignalResponse    `json:"execute_signals"`
-	Watchlist                      []dto.SignalResponse    `json:"watchlist"`
-	RejectedSummary                []string                `json:"rejected_summary"`
-	PolicyRejectedSummary          []string                `json:"policy_rejected_summary"`
+	SchemaVersion                   string                  `json:"schema_version,omitempty"`
+	ConfigVersion                   string                  `json:"config_version,omitempty"`
+	GeneratedAt                     time.Time               `json:"generated_at"`
+	ScanID                          string                  `json:"scan_id"`
+	MarketPolicy                    string                  `json:"market_policy"`
+	MarketRegime                    string                  `json:"market_regime"`
+	TotalTickers                    int                     `json:"total_tickers"`
+	TotalUniversePass               int                     `json:"total_universe_pass"`
+	TotalUniverseRejected           int                     `json:"total_universe_rejected"`
+	TotalStrategySelected           int                     `json:"total_strategy_selected"`
+	TotalPlaybookEligible           int                     `json:"total_playbook_eligible"`
+	TotalQuantCandidates            int                     `json:"total_quant_candidates"`
+	TotalArbiterSelected            int                     `json:"total_arbiter_selected"`
+	TotalLocalAICandidate           int                     `json:"total_local_ai_candidate"`
+	TotalAIConfirm                  int                     `json:"total_ai_confirm"`
+	TotalAIWait                     int                     `json:"total_ai_wait"`
+	TotalAIReject                   int                     `json:"total_ai_reject"`
+	TotalAIError                    int                     `json:"total_ai_error"`
+	TotalFinalExecute               int                     `json:"total_final_execute"`
+	TotalFinalWatch                 int                     `json:"total_final_watch"`
+	TotalFinalReject                int                     `json:"total_final_reject"`
+	ExecuteSignals                  []dto.SignalResponse    `json:"execute_signals"`
+	Watchlist                       []dto.SignalResponse    `json:"watchlist"`
+	RejectedSummary                 []string                `json:"rejected_summary"`
+	PolicyRejectedSummary           []string                `json:"policy_rejected_summary"`
 	SelectedThresholdProfileSummary map[string]string       `json:"selected_threshold_profile_summary"`
-	EvaluationDataCompletenessHint string                  `json:"evaluation_data_completeness_hint"`
-	ArbiterSelectedDetails         []ArbiterSelectedDetail `json:"arbiter_selected_details,omitempty"`
+	EvaluationDataCompletenessHint  string                  `json:"evaluation_data_completeness_hint"`
+	ArbiterSelectedDetails          []ArbiterSelectedDetail `json:"arbiter_selected_details,omitempty"`
 
 	// Backward compatibility fields
 	LastScanTime time.Time            `json:"last_scan_time"`

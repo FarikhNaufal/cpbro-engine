@@ -62,7 +62,7 @@ func (uc *PlaybookQuantEngineUsecase) RunEngine(
 	triggerPrice := lastM15.Close
 
 	// Build snapshots using PopulateSnapshots helper
-	techSnapPtr, structSnapPtr := PopulateSnapshots(data.M15Candles, data.H1Candles, data.H4Candles, data.FundingRate, data.LatestPrice)
+	techSnapPtr, structSnapPtr := PopulateSnapshots(data.M15Candles, data.H1Candles, data.H4Candles, data.FundingRate, data.LatestPrice, data.PriceChange24h, data.OpenInterestM15)
 	techSnap := *techSnapPtr
 	structSnap := *structSnapPtr
 

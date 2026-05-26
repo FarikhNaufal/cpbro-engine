@@ -364,4 +364,3 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 		}
 	})
 }
-

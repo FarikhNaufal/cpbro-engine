@@ -23,6 +23,7 @@ func SetupRouter(cfg *config.Config, h *Handler) *gin.Engine {
 	r := gin.New()
 
 	// Register SRE Middlewares
+	r.Use(CORSMiddleware())
 	r.Use(RecoveryMiddleware())
 	r.Use(LoggerMiddleware())
 

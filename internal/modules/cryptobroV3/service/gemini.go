@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 
+	"time"
+
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 	"google.golang.org/genai"
 )
@@ -40,15 +42,96 @@ func NewGeminiService(modelName string) (*GeminiService, error) {
 	}, nil
 }
 
+func formatCompactCandles(candles []dto.Candle, count int) string {
+	if len(candles) == 0 {
+		return "N/A"
+	}
+	start := len(candles) - count
+	if start < 0 {
+		start = 0
+	}
+	var lines []string
+	for i := start; i < len(candles); i++ {
+		c := candles[i]
+		utcTimeStr := c.Time.UTC().Format(time.RFC3339)
+		ms := c.Time.UTC().UnixMilli()
+		lines = append(lines, fmt.Sprintf("[%s | %d] O=%0.5f H=%0.5f L=%0.5f C=%0.5f V=%0.2f",
+			utcTimeStr, ms, c.Open, c.High, c.Low, c.Close, c.Vol))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // AuditCandidate runs the structured AI Candle Auditor on raw kline structures.
 func (s *GeminiService) AuditCandidate(ctx context.Context, req dto.AIAuditRequest) (*dto.AIAuditResponse, error) {
-	// Build candle data representation (last 30 closed M15 candles)
-	var klineStr []string
-	for idx, c := range req.M15Candles {
-		klineStr = append(klineStr, fmt.Sprintf("Candle %d: Time=%s, Open=%0.5f, High=%0.5f, Low=%0.5f, Close=%0.5f, Vol=%0.1f",
-			idx, c.Time.Format("15:04"), c.Open, c.High, c.Low, c.Close, c.Vol))
+	p := req.Payload
+
+	// Format allowed playbooks/tiers
+	allowedPlaybooksStr := "N/A"
+	if len(p.Policy.AllowedPlaybooks) > 0 {
+		allowedPlaybooksStr = strings.Join(p.Policy.AllowedPlaybooks, ", ")
 	}
-	candlesText := strings.Join(klineStr, "\n")
+	allowedTiersStr := "N/A"
+	if len(p.Policy.AllowedTiers) > 0 {
+		allowedTiersStr = strings.Join(p.Policy.AllowedTiers, ", ")
+	}
+
+	// Format Support/Resistance/Levels
+	supportVal := "N/A"
+	if p.Structure.Support > 0 {
+		supportVal = fmt.Sprintf("%0.5f", p.Structure.Support)
+	}
+	resistanceVal := "N/A"
+	if p.Structure.Resistance > 0 {
+		resistanceVal = fmt.Sprintf("%0.5f", p.Structure.Resistance)
+	}
+	sessionHighVal := "N/A"
+	if p.Structure.SessionHigh > 0 {
+		sessionHighVal = fmt.Sprintf("%0.5f", p.Structure.SessionHigh)
+	}
+	sessionLowVal := "N/A"
+	if p.Structure.SessionLow > 0 {
+		sessionLowVal = fmt.Sprintf("%0.5f", p.Structure.SessionLow)
+	}
+	liqUpperVal := "N/A"
+	if p.Structure.LiquidityUpper > 0 {
+		liqUpperVal = fmt.Sprintf("%0.5f", p.Structure.LiquidityUpper)
+	}
+	liqLowerVal := "N/A"
+	if p.Structure.LiquidityLower > 0 {
+		liqLowerVal = fmt.Sprintf("%0.5f", p.Structure.LiquidityLower)
+	}
+
+	// Double check if all structure levels are N/A
+	structureIncompleteReason := ""
+	if supportVal == "N/A" && resistanceVal == "N/A" && sessionHighVal == "N/A" && sessionLowVal == "N/A" && liqUpperVal == "N/A" && liqLowerVal == "N/A" {
+		structureIncompleteReason = " | WARNING: Structure context incomplete (all support/resistance levels are N/A)"
+	}
+
+	// Format Technical Indicators deterministically
+	rsiValStr := fmt.Sprintf("%0.2f", p.Technical.RSI)
+	rsiSlopeStr := fmt.Sprintf("%0.2f", p.Technical.RSISlope)
+	mfiValStr := fmt.Sprintf("%0.2f", p.Technical.MFI)
+	mfiSlopeStr := fmt.Sprintf("%0.2f", p.Technical.MFISlope)
+	adxValStr := fmt.Sprintf("%0.2f", p.Technical.ADX)
+	adxSlopeStr := fmt.Sprintf("%0.2f", p.Technical.ADXSlope)
+	atrValStr := fmt.Sprintf("%0.5f", p.Technical.ATR)
+	atrPercentStr := fmt.Sprintf("%0.2f%%", p.Technical.ATRPercent)
+	volRatioStr := fmt.Sprintf("%0.2f", p.Technical.VolumeRatio)
+
+	oiChangeStr := "N/A"
+	if p.Technical.OIChange != 0.0 {
+		oiChangeStr = fmt.Sprintf("%0.2f%%", p.Technical.OIChange)
+	} else {
+		oiChangeStr = "N/A (Open Interest data not available/fetched in live scanner)"
+	}
+
+	fundingRateStr := fmt.Sprintf("%0.5f", p.Technical.FundingRate)
+	priceChange24hStr := fmt.Sprintf("%0.2f%%", p.Technical.PriceChange24h)
+
+	// Format Candles
+	m15CandlesText := formatCompactCandles(p.Klines.M15Candles, 30)
+	h1CandlesText := formatCompactCandles(p.Klines.H1Candles, 5)
+	h4CandlesText := formatCompactCandles(p.Klines.H4Candles, 5)
 
 	prompt := fmt.Sprintf(`You are a narrative candle structure auditor.
 Role: Analyze the raw candle patterns, market narrative, and timing.
@@ -62,19 +145,71 @@ Trading Candidate Context:
 - Direction: %s
 - Playbook: %s
 - Setup Type: %s
+- Tier: %s
 - Quant Score: %0.2f
-- Policy Summary: %s
+- Grade: %s
+
+Market Policy Context:
+- Regime: %s
+- BTC Trend: %s
+- BTC Score: %0.2f
+- BTC Chaos: %0.2f
+- Long Mode: %s
+- Short Mode: %s
+- Allowed Playbooks: %s
+- Allowed Tiers: %s
+- Min Score Execute: %0.2f
+- Min RR Execute: %0.2f
+- Min ADX Execute: %0.2f
+
+Technical Context:
+- RSI: %s
+- RSI Slope: %s
+- MFI: %s
+- MFI Slope: %s
+- ADX: %s
+- ADX Slope: %s
+- ATR: %s
+- ATR Percent: %s
+- Volume Ratio: %s
+- OI Change: %s
+- Funding Rate: %s
+- Price Change 24h: %s
+
+Structure Context:
 - H4 Trend: %s
 - H1 Trend: %s
-- M15/H1 Structure: %s
-- Support/Resistance: %s
-- Bot Entry Price: %0.5f
-- Bot Stop Loss: %0.5f
-- Bot Take Profit: %0.5f
-- Bot Risk-to-Reward: %0.2f
-- Indicator Context (RSI/MFI/ADX/ATR/OI/Funding): %s
+- M15 Structure: %s
+- H1 Structure: %s
+- Support: %s
+- Resistance: %s
+- Session High: %s
+- Session Low: %s
+- Liquidity Upper: %s
+- Liquidity Lower: %s
+- Sweep Side: %s
+- Has Liquidity Sweep: %v
+- Has Volume Confirmation: %v
+- BOS: %v
+- CHOCH: %v%s
+
+Trade Plan:
+- Proposed Entry Price: %0.5f
+- Proposed Stop Loss: %0.5f
+- Proposed Take Profit 1: %0.5f
+- Proposed Take Profit 2: %0.5f
+- Risk-to-Reward: %0.2f
+- Invalidation Reason: %s
 
 M15 Candles (Last 30 closed):
+%s
+
+HIGHER TIMEFRAME CONTEXT:
+- H4 Trend: %s
+- H1 Trend: %s
+- H4 last closed candles summary:
+%s
+- H1 last closed candles summary:
 %s
 
 Address these specific evaluation questions:
@@ -85,9 +220,15 @@ Address these specific evaluation questions:
 5. Does the candle narrative conflict with the bot direction?
 6. Does the selected playbook fit the raw klines?
 7. Is the suggested action to execute-if-not-stale, wait retest, watch only, or reject?`,
-		req.Symbol, req.Direction, req.Playbook, req.SetupType, req.QuantScore, req.PolicySummary,
-		req.H4Trend, req.H1Trend, req.M15H1Structure, req.SupportResistance, req.BotEntry, req.BotSL,
-		req.BotTP, req.BotRR, req.RsiMfiAdxAtr, candlesText)
+		p.Candidate.Symbol, p.Candidate.Direction, p.Candidate.Playbook, p.Candidate.SetupType, p.Candidate.Tier, p.Candidate.Score, p.Candidate.Grade,
+		p.Policy.Regime, p.Policy.BtcTrend, p.Policy.BtcScore, p.Policy.BtcChaos, p.Policy.LongMode, p.Policy.ShortMode, allowedPlaybooksStr, allowedTiersStr, p.Policy.MinScoreExecute, p.Policy.MinRRExecute, p.Policy.MinADXExecute,
+		rsiValStr, rsiSlopeStr, mfiValStr, mfiSlopeStr, adxValStr, adxSlopeStr, atrValStr, atrPercentStr, volRatioStr, oiChangeStr, fundingRateStr, priceChange24hStr,
+		p.Structure.H4Trend, p.Structure.H1Trend, p.Structure.M15Structure, p.Structure.H1Structure, supportVal, resistanceVal, sessionHighVal, sessionLowVal, liqUpperVal, liqLowerVal, p.Structure.SweepSide, p.Structure.HasLiquiditySweep, p.Structure.HasVolumeConfirmation, p.Structure.Bos, p.Structure.Choch, structureIncompleteReason,
+		p.TradePlan.ProposedEntry, p.TradePlan.ProposedSL, p.TradePlan.ProposedTP1, p.TradePlan.ProposedTP2, p.TradePlan.RR, p.TradePlan.InvalidationReason,
+		m15CandlesText,
+		p.Structure.H4Trend, p.Structure.H1Trend,
+		h4CandlesText,
+		h1CandlesText)
 
 	// Configure structured JSON schema
 	config := &genai.GenerateContentConfig{

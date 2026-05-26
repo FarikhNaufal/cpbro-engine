@@ -21,8 +21,12 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 	btcChaos float64,
 	volatility string, // "HIGH", "LOW", "NORMAL"
 	breadth float64,
-) MarketPolicy {
-	var policy MarketPolicy
+) (policy MarketPolicy) {
+	defer func() {
+		policy.BtcScore = btcScore
+		policy.BtcChaos = btcChaos
+	}()
+
 	found := false
 
 	reg := GetGlobalConfigRegistry()

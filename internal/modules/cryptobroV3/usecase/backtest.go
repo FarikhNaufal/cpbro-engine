@@ -549,14 +549,16 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 
 		// Populate snapshots
 		fr := fundingRates[req.Symbol]
-		tech, structure := PopulateSnapshots(closedM15, closedH1, closedH4, fr, latestPrice)
+		tech, structure := PopulateSnapshots(closedM15, closedH1, closedH4, fr, latestPrice, symbolChangePercent, 0.0)
 		prelimData := MarketData{
-			Symbol:      req.Symbol,
-			FundingRate: fr,
-			M15Candles:  closedM15,
-			H1Candles:   closedH1,
-			H4Candles:   closedH4,
-			LatestPrice: latestPrice,
+			Symbol:          req.Symbol,
+			FundingRate:     fr,
+			M15Candles:      closedM15,
+			H1Candles:       closedH1,
+			H4Candles:       closedH4,
+			LatestPrice:     latestPrice,
+			PriceChange24h:  symbolChangePercent,
+			OpenInterestM15: 0.0,
 		}
 
 		// Playbook Selection
