@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
@@ -174,4 +176,52 @@ func TestAPIResponse_Contract_Constraints(t *testing.T) {
 			t.Errorf("expected empty errors array, got %v", respEmptyErr.Errors)
 		}
 	})
+}
+
+func TestGetBacktestReports_SortedDescendingByTime(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir := t.TempDir()
+
+	raw := []byte(`[
+		{"run_id":"1","generated_at":"2026-05-24T10:00:00Z"},
+		{"run_id":"2","generated_at":"2026-05-24T12:00:00Z"},
+		{"run_id":"3","generated_at":"2026-05-24T09:00:00Z"}
+	]`)
+	_ = os.WriteFile(filepath.Join(dir, "backtest_report.json"), raw, 0644)
+
+	h := &Handler{storageDir: dir}
+
+	r := gin.New()
+	r.GET("/backtest/reports", h.GetBacktestReports)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/backtest/reports", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp APIResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	dataBytes, _ := json.Marshal(resp.Data)
+	var reports []map[string]any
+	_ = json.Unmarshal(dataBytes, &reports)
+
+	if len(reports) != 3 {
+		t.Fatalf("expected 3 reports, got %d", len(reports))
+	}
+
+	// We expect sorting descending by generated_at:
+	// 1st: run_id "2"
+	// 2nd: run_id "1"
+	// 3rd: run_id "3"
+	if reports[0]["run_id"].(string) != "2" {
+		t.Errorf("expected 1st report to have run_id 2, got %v", reports[0]["run_id"])
+	}
+	if reports[1]["run_id"].(string) != "1" {
+		t.Errorf("expected 2nd report to have run_id 1, got %v", reports[1]["run_id"])
+	}
+	if reports[2]["run_id"].(string) != "3" {
+		t.Errorf("expected 3rd report to have run_id 3, got %v", reports[2]["run_id"])
+	}
 }

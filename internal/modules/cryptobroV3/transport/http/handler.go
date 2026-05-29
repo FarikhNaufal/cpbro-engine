@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -274,6 +275,10 @@ func (h *Handler) GetJournal(c *gin.Context) {
 		filtered = append(filtered, item)
 	}
 
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+	})
+
 	limitStr := c.Query("limit")
 	limit := 100 // default limit
 	if limitStr != "" {
@@ -451,6 +456,18 @@ func (h *Handler) GetDecisionAudit(c *gin.Context) {
 		filtered = append(filtered, item)
 	}
 
+	sort.Slice(filtered, func(i, j int) bool {
+		tI := filtered[i].CreatedAt
+		if tI.IsZero() {
+			tI = filtered[i].GeneratedAt
+		}
+		tJ := filtered[j].CreatedAt
+		if tJ.IsZero() {
+			tJ = filtered[j].GeneratedAt
+		}
+		return tI.After(tJ)
+	})
+
 	limit := 100
 	if s := c.Query("limit"); s != "" {
 		v, convErr := strconv.Atoi(s)
@@ -544,6 +561,10 @@ func (h *Handler) GetBacktestReports(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, fail("failed to parse backtest reports summary", err.Error()))
 		return
 	}
+
+	sort.Slice(reports, func(i, j int) bool {
+		return reports[i].GeneratedAt.After(reports[j].GeneratedAt)
+	})
 
 	c.JSON(http.StatusOK, ok("backtest reports retrieved successfully", reports))
 }
