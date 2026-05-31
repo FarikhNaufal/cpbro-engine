@@ -266,7 +266,11 @@ func CalculateADX(candles []dto.Candle, period int) float64 {
 	trSum := 0.0
 	dmPlusSum := 0.0
 	dmMinusSum := 0.0
-	for i := 1; i <= period; i++ {
+	start := len(candles) - period
+	if start < 1 {
+		start = 1
+	}
+	for i := start; i < len(candles); i++ {
 		h := candles[i].High
 		l := candles[i].Low
 		ph := candles[i-1].High

@@ -32,6 +32,7 @@ func (uc *MonitoringUsecase) MonitorVirtualPositions(ctx context.Context) error 
 
 	now := time.Now()
 	updated := false
+	updatedByID := make(map[string]SignalJournal)
 
 	for i, item := range journal {
 		// Only monitor active positions: either MONITORING, or TP1_HIT that has not expired yet.
@@ -235,10 +236,24 @@ func (uc *MonitoringUsecase) MonitorVirtualPositions(ctx context.Context) error 
 			item.ClosedAt = now
 		}
 		journal[i] = item
+		if item.ID != "" {
+			updatedByID[item.ID] = item
+		}
 	}
 
 	if updated {
-		return uc.storageUsecase.SaveSignalJournal(journal)
+		return uc.storageUsecase.UpdateSignalJournal(func(current []SignalJournal) ([]SignalJournal, error) {
+			for i := range current {
+				id := current[i].ID
+				if id == "" {
+					continue
+				}
+				if upd, ok := updatedByID[id]; ok {
+					current[i] = upd
+				}
+			}
+			return current, nil
+		})
 	}
 
 	return nil

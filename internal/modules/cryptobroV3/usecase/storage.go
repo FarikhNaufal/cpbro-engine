@@ -15,6 +15,10 @@ func NewStorageUsecase(repo StorageRepository) *StorageUsecase {
 	}
 }
 
+type signalJournalAtomicUpdater interface {
+	UpdateSignalJournal(update func([]SignalJournal) ([]SignalJournal, error)) error
+}
+
 func (uc *StorageUsecase) LoadLatestResult() (*entity.LatestResult, error) {
 	return uc.repo.LoadLatestResult()
 }
@@ -58,6 +62,26 @@ func (uc *StorageUsecase) SaveSignalJournal(journal []SignalJournal) error {
 		GetGlobalMetrics().IncrementStorageWriteFail()
 	}
 	return err
+}
+
+func (uc *StorageUsecase) UpdateSignalJournal(update func([]SignalJournal) ([]SignalJournal, error)) error {
+	if updater, ok := uc.repo.(signalJournalAtomicUpdater); ok {
+		err := updater.UpdateSignalJournal(update)
+		if err != nil {
+			GetGlobalMetrics().IncrementStorageWriteFail()
+		}
+		return err
+	}
+
+	journal, err := uc.repo.LoadSignalJournal()
+	if err != nil {
+		return err
+	}
+	updated, err := update(journal)
+	if err != nil {
+		return err
+	}
+	return uc.SaveSignalJournal(updated)
 }
 
 func (uc *StorageUsecase) SaveSignalToJournal(sig SignalJournal) error {

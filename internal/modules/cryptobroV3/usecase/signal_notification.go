@@ -242,42 +242,32 @@ func (uc *SignalNotificationUsecase) SendV3Signals(
 
 			// Update journal as FAILED
 			if uc.storageUsecase != nil {
-				journal, errLoad := uc.storageUsecase.LoadSignalJournal()
-				if errLoad == nil {
-					found := false
+				_ = uc.storageUsecase.UpdateSignalJournal(func(journal []SignalJournal) ([]SignalJournal, error) {
 					for i := len(journal) - 1; i >= 0; i-- {
 						if journal[i].Symbol == dec.Symbol && journal[i].Status == MONITORING && journal[i].NotificationStatus == "" {
 							journal[i].NotificationStatus = "FAILED"
 							journal[i].NotificationError = sanitizeError(err.Error())
-							found = true
 							break
 						}
 					}
-					if found {
-						_ = uc.storageUsecase.SaveSignalJournal(journal)
-					}
-				}
+					return journal, nil
+				})
 			}
 		} else {
 			GetGlobalMetrics().IncrementTelegramSuccess()
 
 			// Update journal as SUCCESS
 			if uc.storageUsecase != nil {
-				journal, errLoad := uc.storageUsecase.LoadSignalJournal()
-				if errLoad == nil {
-					found := false
+				_ = uc.storageUsecase.UpdateSignalJournal(func(journal []SignalJournal) ([]SignalJournal, error) {
 					for i := len(journal) - 1; i >= 0; i-- {
 						if journal[i].Symbol == dec.Symbol && journal[i].Status == MONITORING && journal[i].NotificationStatus == "" {
 							journal[i].NotificationStatus = "SUCCESS"
 							journal[i].NotificationError = ""
-							found = true
 							break
 						}
 					}
-					if found {
-						_ = uc.storageUsecase.SaveSignalJournal(journal)
-					}
-				}
+					return journal, nil
+				})
 			}
 		}
 	}

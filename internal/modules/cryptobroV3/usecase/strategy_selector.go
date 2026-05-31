@@ -224,28 +224,28 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 
 	// 5. RISK_OFF regime
 	if strings.Contains(reasonStr, "RISK_OFF") || strings.Contains(reasonStr, "BEARISH") {
-		// Priority SHORT trend pullback and SHORT breakout retest.
-		// LONG is strictly limited to REVERSAL_ONLY (lower sweep, range edge reversal at support, crowded short squeeze).
+		// RISK_OFF policy is expected to bias defensive setups.
+		// Keep selections aligned with policy.AllowedPlaybooks to avoid dead branches.
 		if policy.AllowShort {
-			if isPlaybookAllowed(TREND_PULLBACK) {
+			if isPlaybookAllowed(LIQUIDITY_SWEEP_REVERSAL) {
 				selections = append(selections, StrategySelection{
 					Symbol:        candidate.Symbol,
-					StrategyName:  string(TREND_PULLBACK),
+					StrategyName:  string(LIQUIDITY_SWEEP_REVERSAL),
 					Direction:     SHORT,
 					Priority:      1,
-					Reason:        "SHORT trend pullback prioritized in RISK_OFF regime",
+					Reason:        "SHORT liquidity sweep reversal (upper sweep) allowed in RISK_OFF regime",
 					PolicyContext: policyCtx,
 					Tier:          candidate.Tier,
 					Status:        STRATEGY_SELECTED,
 				})
 			}
-			if isPlaybookAllowed(COMPRESSION_BREAKOUT_RETEST) {
+			if isPlaybookAllowed(RANGE_EDGE_REVERSAL) {
 				selections = append(selections, StrategySelection{
 					Symbol:        candidate.Symbol,
-					StrategyName:  string(COMPRESSION_BREAKOUT_RETEST),
+					StrategyName:  string(RANGE_EDGE_REVERSAL),
 					Direction:     SHORT,
 					Priority:      2,
-					Reason:        "SHORT breakout retest allowed in RISK_OFF regime",
+					Reason:        "SHORT range edge reversal at resistance allowed in RISK_OFF regime",
 					PolicyContext: policyCtx,
 					Tier:          candidate.Tier,
 					Status:        STRATEGY_SELECTED,

@@ -64,19 +64,20 @@ func TestSelectPlaybooksRegimes(t *testing.T) {
 		AllowLong:  true,
 		AllowShort: true,
 		AllowedPlaybooks: []Playbook{
-			TREND_PULLBACK,
-			COMPRESSION_BREAKOUT_RETEST,
 			LIQUIDITY_SWEEP_REVERSAL,
 			RANGE_EDGE_REVERSAL,
-			CROWDED_POSITIONING_SQUEEZE,
 		},
 		Reason: "RISK_OFF + BTC Bearish active - short bias",
 	}
 	selectionsRiskOff := selector.SelectPlaybooks(policyRiskOff, candidate, prelimData, tech, structure)
 
-	// SHORT trend pullback prioritized (priority 1)
-	if ok, p := hasSelection(selectionsRiskOff, TREND_PULLBACK, SHORT); !ok || p != 1 {
-		t.Errorf("RISK_OFF: Expected SHORT trend pullback to have priority 1, got ok=%v, priority=%d", ok, p)
+	// SHORT sweep reversal prioritized (priority 1)
+	if ok, p := hasSelection(selectionsRiskOff, LIQUIDITY_SWEEP_REVERSAL, SHORT); !ok || p != 1 {
+		t.Errorf("RISK_OFF: Expected SHORT sweep reversal to have priority 1, got ok=%v, priority=%d", ok, p)
+	}
+	// SHORT range edge reversal allowed (priority 2)
+	if ok, p := hasSelection(selectionsRiskOff, RANGE_EDGE_REVERSAL, SHORT); !ok || p != 2 {
+		t.Errorf("RISK_OFF: Expected SHORT range edge reversal to have priority 2, got ok=%v, priority=%d", ok, p)
 	}
 	// LONG only reversal/sweep
 	if ok, _ := hasSelection(selectionsRiskOff, TREND_PULLBACK, LONG); ok {

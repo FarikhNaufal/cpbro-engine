@@ -131,17 +131,18 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	var btcTicker *dto.Ticker24h
 	var ethTicker *dto.Ticker24h
 
-	for _, t := range tickers {
+	for i := range tickers {
+		t := tickers[i]
 		tickerMap[t.Symbol] = t
 		if t.PriceChangePercent > 0 {
 			advancing++
 		}
 		totalTickers++
 		if t.Symbol == "BTCUSDT" {
-			btcTicker = &t
+			btcTicker = &tickers[i]
 		}
 		if t.Symbol == "ETHUSDT" {
-			ethTicker = &t
+			ethTicker = &tickers[i]
 		}
 	}
 

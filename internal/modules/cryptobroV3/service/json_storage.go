@@ -110,6 +110,49 @@ func (s *JSONStorageService) SaveSignalJournal(journal []usecase.SignalJournal) 
 	return s.writeJSON("signal_journal.json", journal)
 }
 
+func (s *JSONStorageService) UpdateSignalJournal(update func([]usecase.SignalJournal) ([]usecase.SignalJournal, error)) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	filename := "signal_journal.json"
+	path := filepath.Join(s.storageDir, filename)
+
+	var journal []usecase.SignalJournal
+	data, err := os.ReadFile(path)
+	if err == nil && len(data) > 0 {
+		if err := json.Unmarshal(data, &journal); err != nil {
+			return err
+		}
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if journal == nil {
+		journal = []usecase.SignalJournal{}
+	}
+
+	updated, err := update(journal)
+	if err != nil {
+		return err
+	}
+	if updated == nil {
+		updated = []usecase.SignalJournal{}
+	}
+
+	tmpPath := path + ".tmp"
+	bytes, err := json.MarshalIndent(updated, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(tmpPath, bytes, 0644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
+
 func (s *JSONStorageService) AppendSignalJournal(entry usecase.SignalJournal) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

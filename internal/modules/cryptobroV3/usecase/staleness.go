@@ -26,7 +26,10 @@ func (uc *StalenessUsecase) IsFresh(m15Candles []dto.Candle) bool {
 	}
 
 	lastCandle := m15Candles[len(m15Candles)-1]
-	return time.Since(lastCandle.Time) <= uc.maxStaleness
+	// dto.Candle.Time is treated as candle open-time in this project.
+	// For M15 closed-candle freshness, approximate close-time as open+15m.
+	lastCloseTime := lastCandle.Time.Add(15 * time.Minute)
+	return time.Since(lastCloseTime) <= uc.maxStaleness
 }
 
 // Evaluate performs the ATR-based or percentage-based live price staleness validation.
