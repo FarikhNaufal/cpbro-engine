@@ -78,12 +78,61 @@ func TestScoring_PlaybookCalculations(t *testing.T) {
 				IndicatorValues: map[string]float64{
 					"contraction":  1.0,
 					"volume_spike": 1.0,
+					// Used as proxy for retest hold evidence for this playbook.
+					"near_range_edge": 1.0,
 				},
 			},
 		}
 
 		score := uc.Calculate(quant, LONG, policy)
 		assert.True(t, score > 5.0, "Score should be moderate-high for compression setup")
+	})
+
+	t.Run("COMPRESSION_BREAKOUT_RETEST require retest penalizes missing evidence", func(t *testing.T) {
+		policy := MarketPolicy{
+			AllowLong:         true,
+			AllowShort:        true,
+			LongMode:          NORMAL,
+			ShortMode:         NORMAL,
+			RequireFreshEntry: true,
+		}
+
+		withRetest := &QuantResult{
+			Playbook:     COMPRESSION_BREAKOUT_RETEST,
+			Direction:    LONG,
+			IndicatorMet: true,
+			TriggerPrice: 100.0,
+			StopLoss:     98.0,
+			TakeProfit:   105.0,
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI: 50.0,
+				IndicatorValues: map[string]float64{
+					"contraction":     1.0,
+					"volume_spike":    1.0,
+					"near_range_edge": 1.0,
+				},
+			},
+		}
+		withoutRetest := &QuantResult{
+			Playbook:     COMPRESSION_BREAKOUT_RETEST,
+			Direction:    LONG,
+			IndicatorMet: true,
+			TriggerPrice: 100.0,
+			StopLoss:     98.0,
+			TakeProfit:   105.0,
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI: 50.0,
+				IndicatorValues: map[string]float64{
+					"contraction":     1.0,
+					"volume_spike":    1.0,
+					"near_range_edge": 0.0,
+				},
+			},
+		}
+
+		scoreWith := uc.Calculate(withRetest, LONG, policy)
+		scoreWithout := uc.Calculate(withoutRetest, LONG, policy)
+		assert.True(t, scoreWith > scoreWithout, "Retest evidence should score higher when RequireFreshEntry is enabled")
 	})
 
 	t.Run("RANGE_EDGE_REVERSAL high range score", func(t *testing.T) {
@@ -183,5 +232,38 @@ func TestScoring_Penalties(t *testing.T) {
 		score := uc.Calculate(quant, LONG, policy)
 		assert.True(t, score < 4.0, "Score should be penalized due to poor RR")
 		assert.Contains(t, quant.Reason, "Poor Risk-to-Reward ratio")
+	})
+
+	t.Run("Tier C chaos penalty applies only to Tier C", func(t *testing.T) {
+		policy := MarketPolicy{
+			AllowLong:  true,
+			AllowShort: true,
+			Reason:     "BTC_CHAOS active - strict restrictions applied",
+		}
+
+		base := QuantResult{
+			Playbook:     TREND_PULLBACK,
+			Direction:    LONG,
+			IndicatorMet: true,
+			TriggerPrice: 100.0,
+			StopLoss:     98.0,
+			TakeProfit:   105.0,
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI: 50.0,
+				IndicatorValues: map[string]float64{
+					IndicatorADX:   25.0,
+					"volume_spike": 1.0,
+				},
+			},
+		}
+
+		qa := base
+		qa.Tier = TierA
+		qc := base
+		qc.Tier = TierC
+
+		scoreA := uc.Calculate(&qa, LONG, policy)
+		scoreC := uc.Calculate(&qc, LONG, policy)
+		assert.True(t, scoreA > scoreC, "Tier C should be penalized under chaos/high vol while Tier A should not")
 	})
 }

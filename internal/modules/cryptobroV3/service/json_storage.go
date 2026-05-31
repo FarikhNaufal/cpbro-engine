@@ -197,6 +197,45 @@ func (s *JSONStorageService) LoadAIAuditCache() (*entity.AIAuditCache, error) {
 	return &cache, nil
 }
 
+func (s *JSONStorageService) UpdateAIAuditCache(update func(*entity.AIAuditCache) error) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	filename := "ai_audit_cache.json"
+	path := filepath.Join(s.storageDir, filename)
+
+	var cache entity.AIAuditCache
+	data, err := os.ReadFile(path)
+	if err == nil && len(data) > 0 {
+		if err := json.Unmarshal(data, &cache); err != nil {
+			return err
+		}
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if cache.CacheMap == nil {
+		cache.CacheMap = make(map[string]entity.CachedAudit)
+	}
+
+	if err := update(&cache); err != nil {
+		return err
+	}
+
+	tmpPath := path + ".tmp"
+	bytes, err := json.MarshalIndent(&cache, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(tmpPath, bytes, 0644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
+
 func (s *JSONStorageService) SaveAIAuditCache(cache *entity.AIAuditCache) error {
 	return s.writeJSON("ai_audit_cache.json", cache)
 }

@@ -19,6 +19,10 @@ type signalJournalAtomicUpdater interface {
 	UpdateSignalJournal(update func([]SignalJournal) ([]SignalJournal, error)) error
 }
 
+type aiAuditCacheAtomicUpdater interface {
+	UpdateAIAuditCache(update func(*entity.AIAuditCache) error) error
+}
+
 func (uc *StorageUsecase) LoadLatestResult() (*entity.LatestResult, error) {
 	return uc.repo.LoadLatestResult()
 }
@@ -102,6 +106,31 @@ func (uc *StorageUsecase) SaveAIAuditCache(cache entity.AIAuditCache) error {
 		GetGlobalMetrics().IncrementStorageWriteFail()
 	}
 	return err
+}
+
+func (uc *StorageUsecase) UpdateAIAuditCache(update func(*entity.AIAuditCache) error) error {
+	if updater, ok := uc.repo.(aiAuditCacheAtomicUpdater); ok {
+		err := updater.UpdateAIAuditCache(update)
+		if err != nil {
+			GetGlobalMetrics().IncrementStorageWriteFail()
+		}
+		return err
+	}
+
+	cache, err := uc.repo.LoadAIAuditCache()
+	if err != nil {
+		return err
+	}
+	if cache == nil {
+		cache = &entity.AIAuditCache{CacheMap: make(map[string]entity.CachedAudit)}
+	}
+	if cache.CacheMap == nil {
+		cache.CacheMap = make(map[string]entity.CachedAudit)
+	}
+	if err := update(cache); err != nil {
+		return err
+	}
+	return uc.SaveAIAuditCache(*cache)
 }
 
 func (uc *StorageUsecase) LoadEvaluationReport() (*EvaluationReport, error) {

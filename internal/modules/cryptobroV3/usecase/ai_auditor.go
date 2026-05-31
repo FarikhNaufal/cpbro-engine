@@ -271,6 +271,12 @@ func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy
 		}, err
 	}
 
+	// Work on a local copy to avoid mutating shared pointers returned by the service implementation.
+	if res != nil {
+		resVal := *res
+		res = &resVal
+	}
+
 	// Perform robust field mappings & derivations at the usecase layer
 	res.Symbol = symbol
 	res.IsApproved = (res.Decision == "CONFIRM")
@@ -316,15 +322,16 @@ func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy
 
 	res.AuditedAt = time.Now()
 
-	// Update cache
-	if cache == nil || cache.CacheMap == nil {
-		cache = &entity.AIAuditCache{CacheMap: make(map[string]entity.CachedAudit)}
-	}
-	cache.CacheMap[cacheKey] = entity.CachedAudit{
-		Response: *res,
-		CachedAt: time.Now(),
-	}
-	_ = uc.storageUsecase.SaveAIAuditCache(*cache)
+	_ = uc.storageUsecase.UpdateAIAuditCache(func(c *entity.AIAuditCache) error {
+		if c.CacheMap == nil {
+			c.CacheMap = make(map[string]entity.CachedAudit)
+		}
+		c.CacheMap[cacheKey] = entity.CachedAudit{
+			Response: *res,
+			CachedAt: time.Now(),
+		}
+		return nil
+	})
 
 	return *res, nil
 }

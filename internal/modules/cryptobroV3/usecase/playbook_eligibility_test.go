@@ -217,6 +217,22 @@ func TestPlaybookEligibility_RangeEdgeReversal(t *testing.T) {
 		t.Errorf("Expected Range Edge Reversal to be eligible, but got rejected: %s", res.Reason)
 	}
 
+	// Test 1b: RISK_OFF reason should not hard-reject if policy allows the playbook
+	policyRiskOff := MarketPolicy{
+		AllowLong:         true,
+		AllowShort:        true,
+		AllowedTiers:      []Tier{TierA},
+		AllowedPlaybooks:  []Playbook{LIQUIDITY_SWEEP_REVERSAL, RANGE_EDGE_REVERSAL},
+		LongMode:          REVERSAL_ONLY,
+		ShortMode:         NORMAL,
+		Reason:            "RISK_OFF + BTC Bearish active - short bias",
+		RequireFreshEntry: false,
+	}
+	resRiskOff := uc.CheckEligibility(sel, policyRiskOff, MarketData{}, tech, structure)
+	if !resRiskOff.Eligible {
+		t.Errorf("Expected Range Edge Reversal to be eligible under RISK_OFF when policy allows it, but got rejected: %s", resRiskOff.Reason)
+	}
+
 	// Test 2: Strong trending regime (ADX > 30) should reject
 	techHighADX := &TechnicalSnapshot{
 		RSI: 50.0,

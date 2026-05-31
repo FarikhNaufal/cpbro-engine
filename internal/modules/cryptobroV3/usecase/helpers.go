@@ -236,8 +236,45 @@ func CalculateMACD(candles []dto.Candle, fast, slow, signal int) (float64, float
 	if len(fastEMA) == 0 || len(slowEMA) == 0 {
 		return 0.0, 0.0
 	}
-	macdLine := fastEMA[len(fastEMA)-1] - slowEMA[len(slowEMA)-1]
-	return macdLine, macdLine * 0.9
+
+	start := slow - 1
+	if start < 0 {
+		start = 0
+	}
+	macdSeries := make([]float64, 0, len(candles)-start)
+	for i := start; i < len(candles); i++ {
+		macdSeries = append(macdSeries, fastEMA[i]-slowEMA[i])
+	}
+	if len(macdSeries) == 0 {
+		return 0.0, 0.0
+	}
+
+	macdLine := macdSeries[len(macdSeries)-1]
+	signalSeries := CalculateEMAFromValues(macdSeries, signal)
+	signalLine := 0.0
+	if len(signalSeries) > 0 {
+		signalLine = signalSeries[len(signalSeries)-1]
+	}
+	return macdLine, signalLine
+}
+
+func CalculateEMAFromValues(values []float64, period int) []float64 {
+	if len(values) < period || period <= 0 {
+		return nil
+	}
+	ema := make([]float64, len(values))
+
+	sum := 0.0
+	for i := 0; i < period; i++ {
+		sum += values[i]
+	}
+	ema[period-1] = sum / float64(period)
+
+	multiplier := 2.0 / float64(period+1)
+	for i := period; i < len(values); i++ {
+		ema[i] = (values[i]-ema[i-1])*multiplier + ema[i-1]
+	}
+	return ema
 }
 
 func CalculateATR(candles []dto.Candle, period int) float64 {

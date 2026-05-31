@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -99,6 +100,7 @@ func (m *mockNotification) SendOpsMessage(ctx context.Context, msg string) error
 }
 
 type mockStorageRepo struct {
+	mu           sync.Mutex
 	latestResult *entity.LatestResult
 	history      *entity.SignalHistory
 	journal      []SignalJournal
@@ -108,6 +110,8 @@ type mockStorageRepo struct {
 }
 
 func (m *mockStorageRepo) LoadLatestResult() (*entity.LatestResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.latestResult == nil {
 		return nil, errors.New("no latest result")
 	}
@@ -115,11 +119,15 @@ func (m *mockStorageRepo) LoadLatestResult() (*entity.LatestResult, error) {
 }
 
 func (m *mockStorageRepo) SaveLatestResult(res *entity.LatestResult) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.latestResult = res
 	return nil
 }
 
 func (m *mockStorageRepo) LoadSignalHistory() (*entity.SignalHistory, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.history == nil {
 		return &entity.SignalHistory{}, nil
 	}
@@ -127,52 +135,74 @@ func (m *mockStorageRepo) LoadSignalHistory() (*entity.SignalHistory, error) {
 }
 
 func (m *mockStorageRepo) SaveSignalHistory(hist *entity.SignalHistory) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.history = hist
 	return nil
 }
 
 func (m *mockStorageRepo) LoadSignalJournal() ([]SignalJournal, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.journal, nil
 }
 
 func (m *mockStorageRepo) SaveSignalJournal(journal []SignalJournal) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.journal = journal
 	return nil
 }
 
 func (m *mockStorageRepo) AppendSignalJournal(entry SignalJournal) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.journal = append(m.journal, entry)
 	return nil
 }
 
 func (m *mockStorageRepo) LoadAIAuditCache() (*entity.AIAuditCache, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.auditCache, nil
 }
 
 func (m *mockStorageRepo) SaveAIAuditCache(cache *entity.AIAuditCache) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.auditCache = cache
 	return nil
 }
 
 func (m *mockStorageRepo) LoadEvaluationReport() (*EvaluationReport, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.evalReport, nil
 }
 
 func (m *mockStorageRepo) SaveEvaluationReport(report *EvaluationReport) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.evalReport = report
 	return nil
 }
 
 func (m *mockStorageRepo) LoadDecisionAudits() ([]DecisionAudit, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.audits, nil
 }
 
 func (m *mockStorageRepo) SaveDecisionAudits(audits []DecisionAudit) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.audits = audits
 	return nil
 }
 
 func (m *mockStorageRepo) AppendDecisionAudit(entry DecisionAudit) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.audits = append(m.audits, entry)
 	if len(m.audits) > 1000 {
 		m.audits = m.audits[len(m.audits)-1000:]

@@ -211,8 +211,9 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 		notes = append(notes, fmt.Sprintf("BreakoutStrength: +%0.1f", breakScore))
 
 		// 3. Retest quality (Max 25)
+		// "near_range_edge" is used here as a proxy for retest hold evidence.
 		retestScore := 5.0
-		if !policy.RequireFreshEntry {
+		if nearRangeEdge == 1.0 {
 			retestScore = 25.0
 		}
 		rawScore += retestScore
@@ -237,9 +238,9 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 		notes = append(notes, fmt.Sprintf("RRScore: +%0.1f", rrScore))
 
 		// Playbook specific penalties
-		if policy.RequireFreshEntry {
+		if policy.RequireFreshEntry && nearRangeEdge == 0.0 {
 			rawScore -= 30.0
-			notes = append(notes, "PENALTY: Entry on breakout candle without retest hold (-30)")
+			notes = append(notes, "PENALTY: Breakout retest required but no retest hold evidence (-30)")
 		}
 		if resolvedDirection == LONG && nearRangeEdge == 0.0 {
 			rawScore -= 20.0
@@ -405,7 +406,7 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 
 	// 4. Tier C saat chaos / high vol
 	isChaos := strings.Contains(strings.ToUpper(policy.Reason), "CHAOS") || strings.Contains(strings.ToUpper(policy.Reason), "HIGH")
-	if isChaos {
+	if isChaos && quant.Tier == TierC {
 		penalty += 20.0
 		notes = append(notes, "GLOBAL PENALTY: Tier C trading under chaos/high vol regime (-20)")
 	}

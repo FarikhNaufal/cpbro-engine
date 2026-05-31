@@ -604,16 +604,8 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 			}
 		}
 
-		// 1. Regime check (sideways/chop)
-		isSideways := strings.Contains(strings.ToUpper(policy.Reason), "CHOP_RANGE") || strings.Contains(strings.ToUpper(policy.Reason), "SIDEWAYS")
-		if !isSideways {
-			return PlaybookEligibilityResult{
-				Playbook: playbook,
-				Eligible: false,
-				Status:   PLAYBOOK_REJECTED,
-				Reason:   "Range edge reversal is only allowed during sideways/chop market regimes",
-			}
-		}
+		// 1. Regime gate is enforced by MarketPolicy (AllowedPlaybooks + modes).
+		// Avoid brittle substring checks against policy.Reason that can drift.
 
 		// 1.5. ADX not expanding strongly check
 		adx := tech.IndicatorValues[IndicatorADX]
