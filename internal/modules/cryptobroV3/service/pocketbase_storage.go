@@ -113,7 +113,10 @@ func (s *PocketBaseStorageService) LoadSignalJournal() ([]usecase.SignalJournal,
 func (s *PocketBaseStorageService) SaveSignalJournal(journal []usecase.SignalJournal) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.saveSignalJournalUnlocked(journal)
+}
 
+func (s *PocketBaseStorageService) saveSignalJournalUnlocked(journal []usecase.SignalJournal) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
@@ -191,7 +194,7 @@ func (s *PocketBaseStorageService) UpdateSignalJournal(update func([]usecase.Sig
 	if updated == nil {
 		updated = []usecase.SignalJournal{}
 	}
-	return s.SaveSignalJournal(updated)
+	return s.saveSignalJournalUnlocked(updated)
 }
 
 // --- Evaluation ---
