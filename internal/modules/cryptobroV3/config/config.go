@@ -100,6 +100,19 @@ type StorageConfig struct {
 	HealthSnapshotFile   string `json:"health_snapshot_file"`
 }
 
+// PocketBaseConfig configures optional PocketBase persistence (journal + evaluation runs).
+type PocketBaseConfig struct {
+	Enabled               bool   `json:"enabled"`
+	URL                   string `json:"url"`
+	Token                 string `json:"-"`
+	SuperuserEmail        string `json:"-"`
+	SuperuserPassword     string `json:"-"`
+	AdminEmail            string `json:"-"`
+	AdminPassword         string `json:"-"`
+	RequestTimeoutSeconds int    `json:"request_timeout_seconds"`
+	LoginRetryMax         int    `json:"login_retry_max"`
+}
+
 // SafetyConfig strict runtime overrides (must never be false in production)
 type SafetyConfig struct {
 	AlertOnly                    bool `json:"alert_only"`
@@ -144,6 +157,7 @@ type Config struct {
 	Telegram    TelegramConfig    `json:"telegram"`
 	Concurrency ConcurrencyConfig `json:"concurrency"`
 	Storage     StorageConfig     `json:"storage"`
+	PocketBase  PocketBaseConfig  `json:"pocketbase"`
 	Safety      SafetyConfig      `json:"safety"`
 	Logging     LoggingConfig     `json:"logging"`
 	Route       RouteConfig       `json:"route"`
@@ -240,6 +254,17 @@ func LoadConfigFromEnv() (*Config, error) {
 			DecisionAuditFile:    getEnv("DECISION_AUDIT_FILE", "decision_audit.json"),
 			HealthSnapshotFile:   getEnv("HEALTH_SNAPSHOT_FILE", "health_snapshot.json"),
 		},
+		PocketBase: PocketBaseConfig{
+			Enabled:               getEnvBool("POCKETBASE_ENABLED", false),
+			URL:                   getEnv("POCKETBASE_URL", ""),
+			Token:                 getEnv("POCKETBASE_TOKEN", ""),
+			SuperuserEmail:        getEnv("POCKETBASE_SUPERUSER_EMAIL", ""),
+			SuperuserPassword:     getEnv("POCKETBASE_SUPERUSER_PASSWORD", ""),
+			AdminEmail:            getEnv("POCKETBASE_ADMIN_EMAIL", ""),
+			AdminPassword:         getEnv("POCKETBASE_ADMIN_PASSWORD", ""),
+			RequestTimeoutSeconds: getEnvInt("POCKETBASE_REQUEST_TIMEOUT_SECONDS", 10),
+			LoginRetryMax:         getEnvInt("POCKETBASE_LOGIN_RETRY_MAX", 1),
+		},
 		Safety: SafetyConfig{
 			AlertOnly:                    getEnvBool("ALERT_ONLY", true),
 			BinanceReadOnly:              getEnvBool("BINANCE_READ_ONLY", true),
@@ -289,6 +314,29 @@ func ValidateConfig(cfg *Config) error {
 	// Storage Path check
 	if strings.TrimSpace(cfg.Storage.StoragePath) == "" {
 		return fmt.Errorf("STORAGE_PATH cannot be empty")
+	}
+
+	// PocketBase validation (optional)
+	if cfg.PocketBase.Enabled {
+		if strings.TrimSpace(cfg.PocketBase.URL) == "" {
+			return fmt.Errorf("POCKETBASE_URL cannot be empty when POCKETBASE_ENABLED=true")
+		}
+		hasToken := strings.TrimSpace(cfg.PocketBase.Token) != ""
+		hasSuperuser := strings.TrimSpace(cfg.PocketBase.SuperuserEmail) != "" && strings.TrimSpace(cfg.PocketBase.SuperuserPassword) != ""
+		hasAdmin := strings.TrimSpace(cfg.PocketBase.AdminEmail) != "" && strings.TrimSpace(cfg.PocketBase.AdminPassword) != ""
+		if !hasToken && !hasSuperuser && !hasAdmin {
+			return fmt.Errorf("PocketBase enabled but no auth provided (set POCKETBASE_TOKEN or POCKETBASE_SUPERUSER_EMAIL/POCKETBASE_SUPERUSER_PASSWORD or POCKETBASE_ADMIN_EMAIL/POCKETBASE_ADMIN_PASSWORD)")
+		}
+		if cfg.PocketBase.RequestTimeoutSeconds <= 0 {
+			cfg.PocketBase.RequestTimeoutSeconds = 10
+		}
+		if cfg.PocketBase.LoginRetryMax < 0 {
+			return fmt.Errorf("POCKETBASE_LOGIN_RETRY_MAX must be >= 0")
+		}
+		if cfg.PocketBase.LoginRetryMax > 3 {
+			// prevent accidental long retry loops
+			cfg.PocketBase.LoginRetryMax = 3
+		}
 	}
 
 	// Timeouts checks
@@ -437,6 +485,15 @@ func SafeConfigView(cfg *Config) map[string]any {
 			"evaluation_report_file": cfg.Storage.EvaluationReportFile,
 			"decision_audit_file":    cfg.Storage.DecisionAuditFile,
 			"health_snapshot_file":   cfg.Storage.HealthSnapshotFile,
+		},
+		"pocketbase": map[string]any{
+			"enabled":                 cfg.PocketBase.Enabled,
+			"url":                     cfg.PocketBase.URL,
+			"token_configured":        strings.TrimSpace(cfg.PocketBase.Token) != "",
+			"superuser_configured":    strings.TrimSpace(cfg.PocketBase.SuperuserEmail) != "" && strings.TrimSpace(cfg.PocketBase.SuperuserPassword) != "",
+			"admin_configured":        strings.TrimSpace(cfg.PocketBase.AdminEmail) != "" && strings.TrimSpace(cfg.PocketBase.AdminPassword) != "",
+			"request_timeout_seconds": cfg.PocketBase.RequestTimeoutSeconds,
+			"login_retry_max":         cfg.PocketBase.LoginRetryMax,
 		},
 		"safety": map[string]any{
 			"alert_only":                      cfg.Safety.AlertOnly,

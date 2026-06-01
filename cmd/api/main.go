@@ -56,9 +56,37 @@ func main() {
 	slog.Info("Configuration loaded successfully", "env", cfg.App.Env, "version", cfg.App.Version)
 
 	// 2. Initialize Storage from config
-	storageService, err := service.NewJSONStorageService(cfg.Storage.StoragePath)
+	jsonStorage, err := service.NewJSONStorageService(cfg.Storage.StoragePath)
 	if err != nil {
 		log.Fatalf("failed to initialize json storage: %v", err)
+	}
+	var storageRepo usecase.StorageRepository = jsonStorage
+
+	if cfg.PocketBase.Enabled {
+		timeout := time.Duration(cfg.PocketBase.RequestTimeoutSeconds) * time.Second
+		var pbClient *service.PocketBaseClient
+		retryMax := cfg.PocketBase.LoginRetryMax
+		switch {
+		case cfg.PocketBase.Token != "":
+			pbClient, err = service.NewPocketBaseClientWithHTTPClient(cfg.PocketBase.URL, nil, timeout, service.PocketBaseAuthModeToken, cfg.PocketBase.Token, "", "", retryMax)
+		case cfg.PocketBase.SuperuserEmail != "" && cfg.PocketBase.SuperuserPassword != "":
+			pbClient, err = service.NewPocketBaseClientWithHTTPClient(cfg.PocketBase.URL, nil, timeout, service.PocketBaseAuthModeSuperuser, "", cfg.PocketBase.SuperuserEmail, cfg.PocketBase.SuperuserPassword, retryMax)
+		case cfg.PocketBase.AdminEmail != "" && cfg.PocketBase.AdminPassword != "":
+			pbClient, err = service.NewPocketBaseClientWithHTTPClient(cfg.PocketBase.URL, nil, timeout, service.PocketBaseAuthModeAdmin, "", cfg.PocketBase.AdminEmail, cfg.PocketBase.AdminPassword, retryMax)
+		default:
+			err = nil
+		}
+		if err != nil {
+			log.Fatalf("failed to initialize pocketbase client: %v", err)
+		}
+		if pbClient != nil {
+			pbStorage, err := service.NewPocketBaseStorageService(jsonStorage, pbClient)
+			if err != nil {
+				log.Fatalf("failed to initialize pocketbase storage: %v", err)
+			}
+			storageRepo = pbStorage
+			slog.Info("PocketBase storage enabled for signal_journals + evaluation_runs")
+		}
 	}
 
 	// Load configuration registry
@@ -95,7 +123,7 @@ func main() {
 	})
 
 	// 4. Initialize Usecases
-	storageUC := usecase.NewStorageUsecase(storageService)
+	storageUC := usecase.NewStorageUsecase(storageRepo)
 	marketDataUC := usecase.NewMarketDataUsecase(binanceService)
 	marketPolicyUC := usecase.NewMarketPolicyUsecase()
 	universeUC := usecase.NewUniverseUsecase()
