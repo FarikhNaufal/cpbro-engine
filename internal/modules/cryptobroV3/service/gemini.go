@@ -132,17 +132,92 @@ func (s *GeminiService) AuditCandidate(ctx context.Context, req dto.AIAuditReque
 	fundingRateStr := fmt.Sprintf("%0.5f", p.Technical.FundingRate)
 	priceChange24hStr := fmt.Sprintf("%0.2f%%", p.Technical.PriceChange24h)
 
-	// Format Candles
-	m15CandlesText := formatCompactCandles(p.Klines.M15Candles, 30)
-	h1CandlesText := formatCompactCandles(p.Klines.H1Candles, 5)
-	h4CandlesText := formatCompactCandles(p.Klines.H4Candles, 5)
+	// Limit candle payload size deterministically (closed candles only are expected upstream).
+	payloadForAI := p
+	if len(payloadForAI.Klines.M15Candles) > 30 {
+		payloadForAI.Klines.M15Candles = payloadForAI.Klines.M15Candles[len(payloadForAI.Klines.M15Candles)-30:]
+	}
+	if len(payloadForAI.Klines.H1Candles) > 5 {
+		payloadForAI.Klines.H1Candles = payloadForAI.Klines.H1Candles[len(payloadForAI.Klines.H1Candles)-5:]
+	}
+	if len(payloadForAI.Klines.H4Candles) > 5 {
+		payloadForAI.Klines.H4Candles = payloadForAI.Klines.H4Candles[len(payloadForAI.Klines.H4Candles)-5:]
+	}
 
-	prompt := fmt.Sprintf(`You are a narrative candle structure auditor.
-Role: Analyze the raw candle patterns, market narrative, and timing.
-CRITICAL: You are NOT a calculator or execution engine.
-- You CANNOT change entry/SL/TP prices under any circumstances.
-- You CANNOT flip LONG to SHORT or vice-versa.
-- Provide a strict evaluation of the candle structures.
+	// Format Candles (human-readable mirror of the same closed candles payload, for robustness).
+	m15CandlesText := formatCompactCandles(payloadForAI.Klines.M15Candles, 30)
+	h1CandlesText := formatCompactCandles(payloadForAI.Klines.H1Candles, 5)
+	h4CandlesText := formatCompactCandles(payloadForAI.Klines.H4Candles, 5)
+
+	payloadJSON, err := json.MarshalIndent(payloadForAI, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal ai payload: %w", err)
+	}
+
+	prompt := fmt.Sprintf(`You are CryptobroV3 Candle Narrative Auditor.
+
+Your job is ONLY to audit whether the raw CLOSED M15 candles support the bot’s chosen direction + playbook narrative, and whether the bot’s proposed entry timing is fresh/late/missed.
+You are NOT a trading executor and NOT a calculator.
+
+Hard Rules (must follow):
+1) Do NOT change bot direction (LONG/SHORT). Do NOT propose reversing it.
+2) Do NOT change bot numeric trade plan (entry, SL, TP1, TP2, RR). Treat them as read-only.
+3) Do NOT output trade instructions, order instructions, or FINAL_EXECUTE. You only output an audit verdict.
+4) Use ONLY closed candles from payload.klines.m15_candles. Ignore any "latest price".
+5) If data is missing / inconsistent / insufficient, choose WAIT or REJECT (never rubber-stamp CONFIRM).
+
+What you will receive:
+- A single JSON object: "payload" (see below).
+- The payload includes: candidate identity, policy context, technical context, structure context, bot trade plan, and raw closed candles.
+
+Your tasks:
+A) Audit last 5 closed M15 candles:
+- Determine candle_narrative: REJECTION / CONTINUATION / CHOP / EXHAUSTED / UNCLEAR
+- Determine last_5_candles_bias: BULLISH / BEARISH / NEUTRAL
+- Determine has_rejection and has_confirmation
+- Determine if narrative conflicts with bot direction (conflict_with_bot)
+
+B) Audit entry_timing vs narrative:
+- FRESH / ACCEPTABLE / LATE / MISSED
+
+C) Validate playbook narrative vs candles (playbook-aware):
+- TREND_PULLBACK: needs pullback stabilization + resumption evidence; reject/wait if exhaustion against direction.
+- LIQUIDITY_SWEEP_REVERSAL: requires sweep-like wick + reclaim/close back in range + confirmation; else WAIT/REJECT.
+- COMPRESSION_BREAKOUT_RETEST: do not rubber-stamp first breakout candle; prefer breakout + retest + hold/reject; else WAIT_RETEST.
+- RANGE_EDGE_REVERSAL: requires range-edge rejection; if strong expansion through edge, REJECT/WATCH_ONLY.
+- CROWDED_POSITIONING_SQUEEZE: derivatives may be incomplete; require price-action evidence of failed continuation + reclaim/rejection + confirmation.
+
+Output requirements (STRICT):
+- Output ONLY one JSON object. No markdown. No code fences. No extra keys. No trailing text.
+- All schema fields are REQUIRED.
+
+Schema:
+{
+  "decision": "CONFIRM|WAIT|REJECT",
+  "confidence": "HIGH|MEDIUM|LOW",
+  "candle_narrative": "REJECTION|CONTINUATION|CHOP|EXHAUSTED|UNCLEAR",
+  "last_5_candles_bias": "BULLISH|BEARISH|NEUTRAL",
+  "has_rejection": true,
+  "has_confirmation": true,
+  "entry_timing": "FRESH|ACCEPTABLE|LATE|MISSED",
+  "conflict_with_bot": false,
+  "suggested_action": "EXECUTE_IF_NOT_STALE|WAIT_RETEST|REJECT|WATCH_ONLY",
+  "plan_feedback": "text",
+  "reason": "text",
+  "risk": "text"
+}
+
+Consistency rules (must hold):
+- If decision=REJECT => suggested_action=REJECT
+- If decision=WAIT => suggested_action is WAIT_RETEST or WATCH_ONLY
+- suggested_action=EXECUTE_IF_NOT_STALE ONLY IF ALL true:
+  - decision=CONFIRM, confidence=HIGH, conflict_with_bot=false
+  - entry_timing is FRESH or ACCEPTABLE
+  - has_confirmation=true
+  - candle_narrative is NOT UNCLEAR and NOT CHOP
+- If uncertain, prefer WAIT with MEDIUM/LOW confidence.
+
+Now audit the provided payload JSON.
 
 Trading Candidate Context:
 - Symbol: %s
@@ -228,7 +303,10 @@ Address these specific evaluation questions:
 4. Is the bot entry timing fresh, acceptable, late, or missed?
 5. Does the candle narrative conflict with the bot direction?
 6. Does the selected playbook fit the raw klines?
-7. Is the suggested action to execute-if-not-stale, wait retest, watch only, or reject?`,
+7. Is the suggested action to execute-if-not-stale, wait retest, watch only, or reject?
+
+payload (JSON):
+%s`,
 		p.Candidate.Symbol, p.Candidate.Direction, p.Candidate.Playbook, p.Candidate.SetupType, p.Candidate.Tier, p.Candidate.Score, p.Candidate.Grade,
 		p.Policy.Regime, p.Policy.BtcTrend, p.Policy.BtcScore, p.Policy.BtcChaos, p.Policy.LongMode, p.Policy.ShortMode, allowedPlaybooksStr, allowedTiersStr, p.Policy.MinScoreExecute, p.Policy.MinRRExecute, p.Policy.MinADXExecute,
 		rsiValStr, rsiSlopeStr, mfiValStr, mfiSlopeStr, adxValStr, adxSlopeStr, atrValStr, atrPercentStr, volRatioStr, oiChangeStr, crowdingScoreStr, p.Technical.HasCrowdingEvidence, fundingRateStr, priceChange24hStr, breakoutLevelStr, p.Technical.RetestHold, p.Technical.RetestTouches,
@@ -237,7 +315,8 @@ Address these specific evaluation questions:
 		m15CandlesText,
 		p.Structure.H4Trend, p.Structure.H1Trend,
 		h4CandlesText,
-		h1CandlesText)
+		h1CandlesText,
+		string(payloadJSON))
 
 	// Configure structured JSON schema
 	config := &genai.GenerateContentConfig{
