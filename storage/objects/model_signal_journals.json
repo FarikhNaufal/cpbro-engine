@@ -1,0 +1,106 @@
+[
+  {
+    "name": "signal_journals",
+    "type": "base",
+    "schema": [
+      { "name": "schema_version", "type": "text" },
+      { "name": "config_version", "type": "text" },
+
+      { "name": "signal_id", "type": "text", "required": true },
+      { "name": "scan_id", "type": "text" },
+
+      { "name": "symbol", "type": "text", "required": true },
+      { "name": "direction", "type": "select", "required": true, "maxSelect": 1, "values": ["LONG", "SHORT"] },
+      { "name": "playbook", "type": "text", "required": true },
+
+      { "name": "entry", "type": "number", "required": true },
+      { "name": "sl", "type": "number", "required": true },
+      { "name": "tp1", "type": "number", "required": true },
+      { "name": "tp2", "type": "number" },
+      { "name": "rr", "type": "number" },
+      { "name": "score", "type": "number" },
+
+      { "name": "ai_confidence", "type": "text" },
+      { "name": "market_regime", "type": "text" },
+      { "name": "policy_mode", "type": "text" },
+      { "name": "threshold_profile_summary", "type": "text" },
+
+      { "name": "created_at", "type": "date" },
+      { "name": "expires_at", "type": "date" },
+
+      {
+        "name": "status",
+        "type": "select",
+        "maxSelect": 1,
+        "values": ["MONITORING", "TP1_HIT", "TP2_HIT", "SL_HIT", "EXPIRED", "BREAKEVEN"]
+      },
+
+      { "name": "mfe", "type": "number" },
+      { "name": "mae", "type": "number" },
+      { "name": "time_to_tp1", "type": "text" },
+      { "name": "time_to_tp2", "type": "text" },
+      { "name": "time_to_sl", "type": "text" },
+      { "name": "outcome_reason", "type": "text" },
+      { "name": "entry_timing", "type": "text" },
+      { "name": "tier", "type": "text" },
+
+      { "name": "timeframe", "type": "text" },
+      { "name": "latest_price", "type": "number" },
+      { "name": "take_profit", "type": "number" },
+      { "name": "ai_sentiment", "type": "text" },
+      { "name": "ai_reasoning", "type": "text" },
+      { "name": "pnl_percentage", "type": "number" },
+      { "name": "updated_at", "type": "date" },
+      { "name": "closed_at", "type": "date" },
+      { "name": "reason", "type": "text" },
+      { "name": "notification_status", "type": "text" },
+      { "name": "notification_error", "type": "text" }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_signal_journals_signal_id` ON `signal_journals` (`signal_id`)"
+    ]
+  },
+  {
+    "name": "evaluation_runs",
+    "type": "base",
+    "schema": [
+      { "name": "evaluation_id", "type": "text", "required": true },
+      { "name": "generated_at", "type": "date" },
+      { "name": "status", "type": "text" },
+
+      { "name": "total_signals", "type": "number" },
+
+      { "name": "data_completeness_json", "type": "json" },
+      { "name": "metrics_json", "type": "json" },
+      { "name": "playbook_stats_json", "type": "json" },
+      { "name": "regime_stats_json", "type": "json" },
+      { "name": "tier_stats_json", "type": "json" },
+      { "name": "direction_stats_json", "type": "json" },
+      { "name": "ai_stats_json", "type": "json" },
+      { "name": "staleness_stats_json", "type": "json" },
+      { "name": "conflict_stats_json", "type": "json" },
+      { "name": "cooldown_stats_json", "type": "json" },
+
+      { "name": "gate_bug_findings_json", "type": "json" },
+      { "name": "recommendations_json", "type": "json" },
+
+      { "name": "best_playbook", "type": "text" },
+      { "name": "worst_playbook", "type": "text" },
+      { "name": "setup_yang_sering_langsung_sl", "type": "text" },
+      { "name": "setup_yang_sering_expired", "type": "text" },
+      { "name": "setup_yang_sering_stale", "type": "text" },
+      { "name": "regime_yang_paling_buruk", "type": "text" },
+      { "name": "tier_yang_paling_buruk", "type": "text" },
+      { "name": "direction_yang_paling_buruk", "type": "text" },
+      { "name": "playbook_dengan_mae_terbesar", "type": "text" },
+      { "name": "playbook_dengan_expired_rate_terbesar", "type": "text" },
+      { "name": "playbook_dengan_tp1_rate_terbaik", "type": "text" },
+      { "name": "playbook_dengan_tp2_follow_through_terbaik", "type": "text" },
+
+      { "name": "notes_json", "type": "json" }
+    ],
+    "indexes": [
+      "CREATE UNIQUE INDEX `idx_evaluation_runs_evaluation_id` ON `evaluation_runs` (`evaluation_id`)"
+    ]
+  }
+]

@@ -143,10 +143,10 @@ func (uc *ConflictResolverUsecase) ResolveConflicts(
 		limit = 3
 	}
 
-	regimeUpper := strings.ToUpper(policy.Reason)
-	isChaos := strings.Contains(regimeUpper, "CHAOS")
-	isChop := strings.Contains(regimeUpper, "CHOP")
-	isRiskOff := strings.Contains(regimeUpper, "RISK")
+	regime := policy.EffectiveRegime()
+	isChaos := regime == BTC_CHAOS
+	isChop := regime == CHOP_RANGE
+	isRiskOff := regime == RISK_OFF
 
 	if isChaos {
 		limit = 1
@@ -276,24 +276,22 @@ func (uc *ConflictResolverUsecase) resolveSymbolConflict(cands []FinalDecision, 
 
 // GetDynamicCooldownMinutes maps score and market policy to minutes of cooldown.
 func (uc *ConflictResolverUsecase) GetDynamicCooldownMinutes(score float64, policy MarketPolicy) int {
-	regimeUpper := strings.ToUpper(policy.Reason)
-	isChaos := strings.Contains(regimeUpper, "CHAOS")
-
+	regime := policy.EffectiveRegime()
 	cooldown := 10 // Default
-	if strings.Contains(regimeUpper, "LOW") {
+	if regime == LOW_VOL {
 		cooldown = 15
-	} else if strings.Contains(regimeUpper, "HIGH") {
+	} else if regime == HIGH_VOL {
 		cooldown = 5
 	}
 
 	// S/S+ grades (score >= 7.8) can get 2 mins cooldown if policy is not chaos
 	grade := getGrade(score)
-	if (grade == "S" || grade == "S+") && !isChaos {
+	if (grade == "S" || grade == "S+") && regime != BTC_CHAOS {
 		cooldown = 2
 	}
 
 	// Chaos mode enforces minimum 10 minutes
-	if isChaos && cooldown < 10 {
+	if regime == BTC_CHAOS && cooldown < 10 {
 		cooldown = 10
 	}
 
@@ -302,6 +300,7 @@ func (uc *ConflictResolverUsecase) GetDynamicCooldownMinutes(score float64, poli
 
 // sortDecisions sorts decisions using the 5 priority levels
 func (uc *ConflictResolverUsecase) sortDecisions(cands []FinalDecision, policy MarketPolicy) {
+	regime := string(policy.EffectiveRegime())
 	sort.Slice(cands, func(i, j int) bool {
 		c1 := cands[i]
 		c2 := cands[j]
@@ -324,8 +323,8 @@ func (uc *ConflictResolverUsecase) sortDecisions(cands []FinalDecision, policy M
 		}
 
 		// 4. Playbook priority
-		prio1 := uc.getPlaybookPriorityIndex(c1.Playbook, policy.Reason)
-		prio2 := uc.getPlaybookPriorityIndex(c2.Playbook, policy.Reason)
+		prio1 := uc.getPlaybookPriorityIndex(c1.Playbook, regime)
+		prio2 := uc.getPlaybookPriorityIndex(c2.Playbook, regime)
 		if prio1 != prio2 {
 			return prio1 < prio2
 		}

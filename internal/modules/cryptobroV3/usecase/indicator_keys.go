@@ -20,6 +20,10 @@ const (
 	IndicatorContraction   = "contraction"
 	IndicatorBBWidth       = "bb_width"
 	IndicatorNearRangeEdge = "near_range_edge"
+
+	IndicatorBreakoutLevel = "breakout_level"
+	IndicatorRetestHold    = "retest_hold"
+	IndicatorRetestTouches = "retest_touches"
 )
 
 func GetIndicator(values map[string]float64, key string) float64 {

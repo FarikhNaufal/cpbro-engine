@@ -37,6 +37,7 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 	if !found {
 		// Start with default policy
 		policy = MarketPolicy{
+			Regime:                 DEFAULT,
 			AllowLong:              true,
 			AllowShort:             true,
 			LongMode:               NORMAL,
@@ -61,6 +62,7 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 			Reason:                 "Default normal policy",
 		}
 	} else {
+		policy.Regime = DEFAULT
 		policy.BtcTrend = btcTrend
 		policy.Reason = "Default normal policy"
 	}
@@ -69,11 +71,13 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 	if btcChaos > 0.8 {
 		if reg != nil {
 			if chaosPolicy, foundChaos := reg.GetMarketPolicy("BTC_CHAOS"); foundChaos {
+				chaosPolicy.Regime = BTC_CHAOS
 				chaosPolicy.BtcTrend = btcTrend
 				chaosPolicy.Reason = "BTC_CHAOS active - strict restrictions applied"
 				return chaosPolicy
 			}
 		}
+		policy.Regime = BTC_CHAOS
 		policy.AllowedTiers = []Tier{TierA, TierB} // block Tier C
 		policy.MaxSymbols = 35
 		policy.MaxAICandidates = 1
@@ -92,11 +96,13 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 	if ethBtcPerf < -0.05 || btcScore > 80.0 {
 		if reg != nil {
 			if domPolicy, foundDom := reg.GetMarketPolicy("BTC_DOMINANCE"); foundDom {
+				domPolicy.Regime = BTC_DOMINANCE
 				domPolicy.BtcTrend = btcTrend
 				domPolicy.Reason = "BTC_DOMINANCE active - altcoins restricted"
 				return domPolicy
 			}
 		}
+		policy.Regime = BTC_DOMINANCE
 		policy.LongMode = PULLBACK_ONLY
 		policy.ShortMode = SWEEP_ONLY
 		policy.AllowedTiers = []Tier{TierA, TierB} // Tier C limited
@@ -113,11 +119,13 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 	if ethBtcPerf >= 0.02 && btcTrend == "BULLISH" {
 		if reg != nil {
 			if altPolicy, foundAlt := reg.GetMarketPolicy("ALT_SUPPORTIVE"); foundAlt {
+				altPolicy.Regime = ALT_SUPPORTIVE
 				altPolicy.BtcTrend = btcTrend
 				altPolicy.Reason = "ALT_SUPPORTIVE + BTC Bullish active - favorable conditions"
 				return altPolicy
 			}
 		}
+		policy.Regime = ALT_SUPPORTIVE
 		policy.LongMode = NORMAL
 		policy.ShortMode = SWEEP_ONLY
 		policy.AllowedPlaybooks = []Playbook{TREND_PULLBACK, COMPRESSION_BREAKOUT_RETEST, LIQUIDITY_SWEEP_REVERSAL}
@@ -134,11 +142,13 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 	if btcTrend == "BEARISH" || breadth < 0.3 {
 		if reg != nil {
 			if roPolicy, foundRo := reg.GetMarketPolicy("RISK_OFF"); foundRo {
+				roPolicy.Regime = RISK_OFF
 				roPolicy.BtcTrend = btcTrend
 				roPolicy.Reason = "RISK_OFF + BTC Bearish active - short bias"
 				return roPolicy
 			}
 		}
+		policy.Regime = RISK_OFF
 		policy.ShortMode = NORMAL
 		policy.LongMode = REVERSAL_ONLY
 		policy.AllowedTiers = []Tier{TierA, TierB}
@@ -157,11 +167,13 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 	if btcTrend == "SIDEWAYS" && volatility == "NORMAL" {
 		if reg != nil {
 			if chopPolicy, foundChop := reg.GetMarketPolicy("CHOP_RANGE"); foundChop {
+				chopPolicy.Regime = CHOP_RANGE
 				chopPolicy.BtcTrend = btcTrend
 				chopPolicy.Reason = "CHOP_RANGE active - mean reversion only"
 				return chopPolicy
 			}
 		}
+		policy.Regime = CHOP_RANGE
 		policy.LongMode = REVERSAL_ONLY
 		policy.ShortMode = REVERSAL_ONLY
 		policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, RANGE_EDGE_REVERSAL} // trend continuation/breakout disabled
@@ -177,11 +189,13 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 	if volatility == "LOW" && btcScore > 50.0 {
 		if reg != nil {
 			if compPolicy, foundComp := reg.GetMarketPolicy("COMPRESSION"); foundComp {
+				compPolicy.Regime = COMPRESSION
 				compPolicy.BtcTrend = btcTrend
 				compPolicy.Reason = "COMPRESSION active - awaiting breakout retest confirmation"
 				return compPolicy
 			}
 		}
+		policy.Regime = COMPRESSION
 		policy.LongMode = BREAKOUT_RETEST_ONLY
 		policy.ShortMode = BREAKOUT_RETEST_ONLY
 		policy.AllowedPlaybooks = []Playbook{COMPRESSION_BREAKOUT_RETEST}
@@ -194,11 +208,13 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 
 	// 7. Modifiers based on Volatility
 	if volatility == "LOW" {
+		policy.Regime = LOW_VOL
 		policy.MaxSymbols = 75
 		policy.MinVolume = 500000.0     // looser volume constraint
 		policy.RequireFreshEntry = true // avoid fake breakouts
 		policy.Reason = "LOW_VOL active - cautious watch mode"
 	} else if volatility == "HIGH" {
+		policy.Regime = HIGH_VOL
 		policy.MinVolume = 10000000.0              // higher volume limit
 		policy.AllowedTiers = []Tier{TierA, TierB} // Tier C limited
 		policy.MaxFinalExecute = 2                 // limit executes

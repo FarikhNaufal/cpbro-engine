@@ -23,10 +23,11 @@ func (uc *CandidateArbiterUsecase) Arbitrate(candidates []QuantResult, policy Ma
 		return selected, rejected
 	}
 
-	isChaos := strings.Contains(strings.ToUpper(policy.Reason), "CHAOS")
-	isChop := strings.Contains(strings.ToUpper(policy.Reason), "CHOP")
-	isRiskOff := strings.Contains(strings.ToUpper(policy.Reason), "RISK_OFF")
-	isAltSupportive := strings.Contains(strings.ToUpper(policy.Reason), "ALT_SUPPORTIVE")
+	regime := policy.EffectiveRegime()
+	isChaos := regime == BTC_CHAOS
+	isChop := regime == CHOP_RANGE
+	isRiskOff := regime == RISK_OFF
+	isAltSupportive := regime == ALT_SUPPORTIVE
 
 	// Group by symbol
 	symbolGroups := make(map[string][]QuantResult)

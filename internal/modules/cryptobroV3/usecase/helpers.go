@@ -374,7 +374,7 @@ func LowestLow(candles []dto.Candle, period int) float64 {
 }
 
 // PopulateSnapshots builds high-fidelity TechnicalSnapshot and StructureSnapshot for use in selectors & gates.
-func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundingRate float64, latestPrice float64, priceChange24h float64, openInterest float64) (*TechnicalSnapshot, *StructureSnapshot) {
+func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundingRate float64, latestPrice float64, priceChange24h float64, openInterest float64, oiChangePct float64) (*TechnicalSnapshot, *StructureSnapshot) {
 	m15Closed := GetClosedCandlesOnly(m15, 15*time.Minute)
 	h1Closed := GetClosedCandlesOnly(h1, time.Hour)
 	h4Closed := GetClosedCandlesOnly(h4, 4*time.Hour)
@@ -458,6 +458,7 @@ func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundi
 		FundingRate:     fundingRate,
 		PriceChange24h:  priceChange24h,
 	}
+	_ = latestPrice
 
 	tech.IndicatorValues[IndicatorADX] = adxVal
 
@@ -513,10 +514,26 @@ func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundi
 		if openInterest > 0 {
 			tech.IndicatorValues[IndicatorHasOIData] = 1.0
 		}
-		tech.IndicatorValues[IndicatorOIChange] = 0.0
-		tech.IndicatorValues[IndicatorExtremeOI] = 0.0
-		tech.IndicatorValues[IndicatorCrowdingScore] = 0.0
-		tech.IndicatorValues[IndicatorHasCrowdingEvidence] = 0.0
+		tech.OIChange = oiChangePct
+		tech.IndicatorValues[IndicatorOIChange] = oiChangePct
+
+		extremeOI := 0.0
+		if math.Abs(oiChangePct) >= 1.0 {
+			extremeOI = 1.0
+		}
+		tech.IndicatorValues[IndicatorExtremeOI] = extremeOI
+
+		crowdingScore := math.Max(
+			math.Min(1.0, math.Abs(fundingRate)/0.005),
+			math.Min(1.0, math.Abs(oiChangePct)/1.0),
+		)
+		tech.IndicatorValues[IndicatorCrowdingScore] = crowdingScore
+
+		hasEvidence := 0.0
+		if openInterest > 0 && (tech.IndicatorValues[IndicatorExtremeFunding] == 1.0 || math.Abs(oiChangePct) > 0) {
+			hasEvidence = 1.0
+		}
+		tech.IndicatorValues[IndicatorHasCrowdingEvidence] = hasEvidence
 
 		// Set pa_rejection dynamically
 		paRejection := -1.0

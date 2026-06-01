@@ -35,11 +35,30 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 		return false
 	}
 
-	reasonStr := strings.ToUpper(policy.Reason)
 	policyCtx := policy.Reason
+	regime := policy.Regime
+	reasonStr := strings.ToUpper(policy.Reason)
+	if regime == "" || regime == UNKNOWN {
+		switch {
+		case strings.Contains(reasonStr, "BTC_CHAOS") || strings.Contains(reasonStr, "CHAOS"):
+			regime = BTC_CHAOS
+		case strings.Contains(reasonStr, "COMPRESSION"):
+			regime = COMPRESSION
+		case strings.Contains(reasonStr, "ALT_SUPPORTIVE"):
+			regime = ALT_SUPPORTIVE
+		case strings.Contains(reasonStr, "BTC_DOMINANCE") || strings.Contains(reasonStr, "DOMINANCE"):
+			regime = BTC_DOMINANCE
+		case strings.Contains(reasonStr, "RISK_OFF"):
+			regime = RISK_OFF
+		case strings.Contains(reasonStr, "CHOP_RANGE") || strings.Contains(reasonStr, "SIDEWAYS"):
+			regime = CHOP_RANGE
+		}
+	}
+
+	hasDerivativesEvidence := tech != nil && tech.IndicatorValues != nil && tech.IndicatorValues[IndicatorHasCrowdingEvidence] == 1.0
 
 	// 1. BTC_CHAOS regime
-	if strings.Contains(reasonStr, "CHAOS") {
+	if regime == BTC_CHAOS {
 		// Default no trade. Only premium sweep or crowded positioning squeeze allowed.
 		if policy.AllowLong {
 			if isPlaybookAllowed(LIQUIDITY_SWEEP_REVERSAL) {
@@ -54,7 +73,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 					Status:        STRATEGY_SELECTED,
 				})
 			}
-			if isPlaybookAllowed(CROWDED_POSITIONING_SQUEEZE) {
+			if isPlaybookAllowed(CROWDED_POSITIONING_SQUEEZE) && hasDerivativesEvidence {
 				selections = append(selections, StrategySelection{
 					Symbol:        candidate.Symbol,
 					StrategyName:  string(CROWDED_POSITIONING_SQUEEZE),
@@ -80,7 +99,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 					Status:        STRATEGY_SELECTED,
 				})
 			}
-			if isPlaybookAllowed(CROWDED_POSITIONING_SQUEEZE) {
+			if isPlaybookAllowed(CROWDED_POSITIONING_SQUEEZE) && hasDerivativesEvidence {
 				selections = append(selections, StrategySelection{
 					Symbol:        candidate.Symbol,
 					StrategyName:  string(CROWDED_POSITIONING_SQUEEZE),
@@ -97,7 +116,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 	}
 
 	// 2. COMPRESSION regime
-	if strings.Contains(reasonStr, "COMPRESSION") {
+	if regime == COMPRESSION {
 		// Priority compression breakout retest. No reversal unless sweep/rejection is extremely strong.
 		if isPlaybookAllowed(COMPRESSION_BREAKOUT_RETEST) {
 			if policy.AllowLong {
@@ -129,7 +148,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 	}
 
 	// 3. ALT_SUPPORTIVE regime
-	if strings.Contains(reasonStr, "ALT_SUPPORTIVE") {
+	if regime == ALT_SUPPORTIVE {
 		// Priority LONG trend pullback. LONG breakout retest and lower sweep are also allowed.
 		// SHORT side is strictly restricted to LIQUIDITY_SWEEP_REVERSAL.
 		if policy.AllowLong {
@@ -188,7 +207,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 	}
 
 	// 4. BTC_DOMINANCE regime
-	if strings.Contains(reasonStr, "DOMINANCE") {
+	if regime == BTC_DOMINANCE {
 		// LONG allowed but restricted to PULLBACK_ONLY.
 		// SHORT restricted to SWEEP_ONLY (LIQUIDITY_SWEEP_REVERSAL).
 		if policy.AllowLong {
@@ -223,7 +242,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 	}
 
 	// 5. RISK_OFF regime
-	if strings.Contains(reasonStr, "RISK_OFF") || strings.Contains(reasonStr, "BEARISH") {
+	if regime == RISK_OFF {
 		// RISK_OFF policy is expected to bias defensive setups.
 		// Keep selections aligned with policy.AllowedPlaybooks to avoid dead branches.
 		if policy.AllowShort {
@@ -294,7 +313,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 	}
 
 	// 6. CHOP_RANGE regime
-	if strings.Contains(reasonStr, "CHOP_RANGE") {
+	if regime == CHOP_RANGE {
 		// Priority range edge reversal and liquidity sweep. Trend pullback lowered priority.
 		if isPlaybookAllowed(RANGE_EDGE_REVERSAL) {
 			if policy.AllowLong {
@@ -379,6 +398,9 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 
 	// 7. Fallback to evaluating allowed playbooks linearly
 	for _, p := range policy.AllowedPlaybooks {
+		if p == CROWDED_POSITIONING_SQUEEZE && !hasDerivativesEvidence {
+			continue
+		}
 		if policy.AllowLong {
 			selections = append(selections, StrategySelection{
 				Symbol:        candidate.Symbol,

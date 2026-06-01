@@ -111,8 +111,9 @@ func (uc *LocalGateUsecase) Evaluate(quant QuantResult, policy MarketPolicy, m15
 	}
 
 	// Tier C under high volatility or chaos check
-	isChaos := strings.Contains(strings.ToUpper(policy.Reason), "CHAOS")
-	isHighVol := strings.Contains(strings.ToUpper(policy.Reason), "HIGH_VOL")
+	regime := policy.EffectiveRegime()
+	isChaos := regime == BTC_CHAOS
+	isHighVol := regime == HIGH_VOL
 	if quant.Tier == TierC && (isChaos || isHighVol) {
 		return LocalGateResult{
 			Passed: false,

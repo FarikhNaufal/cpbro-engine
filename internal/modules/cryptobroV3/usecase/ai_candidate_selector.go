@@ -3,7 +3,6 @@ package usecase
 import (
 	"fmt"
 	"sort"
-	"strings"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 )
@@ -33,8 +32,8 @@ func (uc *AICandidateSelectorUsecase) SelectCandidates(candidates []QuantResult,
 		return selected, skipped
 	}
 
-	regime := policy.Reason
-	isChaos := strings.Contains(strings.ToUpper(regime), "CHAOS")
+	regime := policy.EffectiveRegime()
+	isChaos := regime == BTC_CHAOS
 
 	// Sort candidates:
 	// 1. Score DESC
@@ -160,9 +159,8 @@ func (uc *AICandidateSelectorUsecase) calculateRR(cand QuantResult) float64 {
 }
 
 // getPlaybookPriorityIndex maps playbook priority index based on the regime
-func (uc *AICandidateSelectorUsecase) getPlaybookPriorityIndex(playbook Playbook, regime string) int {
-	regimeUpper := strings.ToUpper(regime)
-	if strings.Contains(regimeUpper, "CHOP") {
+func (uc *AICandidateSelectorUsecase) getPlaybookPriorityIndex(playbook Playbook, regime MarketRegime) int {
+	if regime == CHOP_RANGE {
 		switch playbook {
 		case LIQUIDITY_SWEEP_REVERSAL:
 			return 0
@@ -175,7 +173,7 @@ func (uc *AICandidateSelectorUsecase) getPlaybookPriorityIndex(playbook Playbook
 		case TREND_PULLBACK:
 			return 4
 		}
-	} else if strings.Contains(regimeUpper, "CHAOS") {
+	} else if regime == BTC_CHAOS {
 		switch playbook {
 		case LIQUIDITY_SWEEP_REVERSAL:
 			return 0
@@ -184,20 +182,20 @@ func (uc *AICandidateSelectorUsecase) getPlaybookPriorityIndex(playbook Playbook
 		default:
 			return 99
 		}
-	} else if strings.Contains(regimeUpper, "RISK_OFF") {
+	} else if regime == RISK_OFF {
 		switch playbook {
-		case TREND_PULLBACK:
-			return 0
-		case COMPRESSION_BREAKOUT_RETEST:
-			return 1
 		case LIQUIDITY_SWEEP_REVERSAL:
-			return 2
-		case CROWDED_POSITIONING_SQUEEZE:
-			return 3
+			return 0
 		case RANGE_EDGE_REVERSAL:
+			return 1
+		case TREND_PULLBACK:
+			return 2
+		case COMPRESSION_BREAKOUT_RETEST:
+			return 3
+		case CROWDED_POSITIONING_SQUEEZE:
 			return 4
 		}
-	} else if strings.Contains(regimeUpper, "ALT_SUPPORTIVE") {
+	} else if regime == ALT_SUPPORTIVE {
 		switch playbook {
 		case TREND_PULLBACK:
 			return 0

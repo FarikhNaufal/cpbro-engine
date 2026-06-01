@@ -60,18 +60,23 @@ type GeminiPolicyContext struct {
 }
 
 type GeminiTechnicalContext struct {
-	RSI            float64 `json:"rsi"`
-	RSISlope       float64 `json:"rsi_slope"`
-	MFI            float64 `json:"mfi"`
-	MFISlope       float64 `json:"mfi_slope"`
-	ADX            float64 `json:"adx"`
-	ADXSlope       float64 `json:"adx_slope"`
-	ATR            float64 `json:"atr"`
-	ATRPercent     float64 `json:"atr_percent"`
-	VolumeRatio    float64 `json:"volume_ratio"`
-	OIChange       float64 `json:"oi_change"`
-	FundingRate    float64 `json:"funding_rate"`
-	PriceChange24h float64 `json:"price_change_24h"`
+	RSI                 float64 `json:"rsi"`
+	RSISlope            float64 `json:"rsi_slope"`
+	MFI                 float64 `json:"mfi"`
+	MFISlope            float64 `json:"mfi_slope"`
+	ADX                 float64 `json:"adx"`
+	ADXSlope            float64 `json:"adx_slope"`
+	ATR                 float64 `json:"atr"`
+	ATRPercent          float64 `json:"atr_percent"`
+	VolumeRatio         float64 `json:"volume_ratio"`
+	OIChange            float64 `json:"oi_change"`
+	CrowdingScore       float64 `json:"crowding_score"`
+	HasCrowdingEvidence bool    `json:"has_crowding_evidence"`
+	FundingRate         float64 `json:"funding_rate"`
+	PriceChange24h      float64 `json:"price_change_24h"`
+	BreakoutLevel       float64 `json:"breakout_level"`
+	RetestHold          bool    `json:"retest_hold"`
+	RetestTouches       int     `json:"retest_touches"`
 }
 
 type GeminiStructureContext struct {

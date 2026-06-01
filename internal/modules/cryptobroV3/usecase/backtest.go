@@ -549,7 +549,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 
 		// Populate snapshots
 		fr := fundingRates[req.Symbol]
-		tech, structure := PopulateSnapshots(closedM15, closedH1, closedH4, fr, latestPrice, symbolChangePercent, 0.0)
+		tech, structure := PopulateSnapshots(closedM15, closedH1, closedH4, fr, latestPrice, symbolChangePercent, 0.0, 0.0)
 		prelimData := MarketData{
 			Symbol:          req.Symbol,
 			FundingRate:     fr,

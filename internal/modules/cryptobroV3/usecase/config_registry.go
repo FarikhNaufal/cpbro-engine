@@ -228,6 +228,7 @@ func validateAndClampProfile(playbook Playbook, profile PlaybookThresholdProfile
 func getDefaultPolicies() map[string]MarketPolicy {
 	return map[string]MarketPolicy{
 		"DEFAULT": {
+			Regime:                 DEFAULT,
 			AllowLong:              true,
 			AllowShort:             true,
 			LongMode:               NORMAL,
@@ -251,6 +252,7 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			Reason:                 "Default normal policy",
 		},
 		"BTC_CHAOS": {
+			Regime:                 BTC_CHAOS,
 			AllowLong:              true,
 			AllowShort:             true,
 			LongMode:               NORMAL,
@@ -274,6 +276,7 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			Reason:                 "BTC_CHAOS active - strict restrictions applied",
 		},
 		"BTC_DOMINANCE": {
+			Regime:                 BTC_DOMINANCE,
 			AllowLong:              true,
 			AllowShort:             true,
 			LongMode:               PULLBACK_ONLY,
@@ -297,6 +300,7 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			Reason:                 "BTC_DOMINANCE active - altcoins restricted",
 		},
 		"ALT_SUPPORTIVE": {
+			Regime:                 ALT_SUPPORTIVE,
 			AllowLong:              true,
 			AllowShort:             true,
 			LongMode:               NORMAL,
@@ -320,6 +324,7 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			Reason:                 "ALT_SUPPORTIVE + BTC Bullish active - favorable conditions",
 		},
 		"RISK_OFF": {
+			Regime:                 RISK_OFF,
 			AllowLong:              true,
 			AllowShort:             true,
 			LongMode:               REVERSAL_ONLY,
@@ -343,6 +348,7 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			Reason:                 "RISK_OFF + BTC Bearish active - short bias",
 		},
 		"CHOP_RANGE": {
+			Regime:                 CHOP_RANGE,
 			AllowLong:              true,
 			AllowShort:             true,
 			LongMode:               REVERSAL_ONLY,
@@ -366,6 +372,7 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			Reason:                 "CHOP_RANGE active - mean reversion only",
 		},
 		"COMPRESSION": {
+			Regime:                 COMPRESSION,
 			AllowLong:              true,
 			AllowShort:             true,
 			LongMode:               BREAKOUT_RETEST_ONLY,

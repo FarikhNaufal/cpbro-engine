@@ -62,7 +62,7 @@ func (uc *PlaybookQuantEngineUsecase) RunEngine(
 	triggerPrice := lastM15.Close
 
 	// Build snapshots using PopulateSnapshots helper
-	techSnapPtr, structSnapPtr := PopulateSnapshots(data.M15Candles, data.H1Candles, data.H4Candles, data.FundingRate, data.LatestPrice, data.PriceChange24h, data.OpenInterestM15)
+	techSnapPtr, structSnapPtr := PopulateSnapshots(data.M15Candles, data.H1Candles, data.H4Candles, data.FundingRate, data.LatestPrice, data.PriceChange24h, data.OpenInterestM15, data.OIChangePct)
 	techSnap := *techSnapPtr
 	structSnap := *structSnapPtr
 
@@ -177,6 +177,43 @@ func (uc *PlaybookQuantEngineUsecase) RunEngine(
 		} else if direction == SHORT {
 			res.StopLoss = triggerPrice + (1.2 * atr)
 			res.TakeProfit = triggerPrice - (2.5 * atr)
+		}
+
+		// Breakout retest evidence (explicit, for scoring/AI context).
+		if len(m15Closed) >= 22 {
+			rangeHigh := HighestHigh(m15Closed[:len(m15Closed)-1], 20)
+			rangeLow := LowestLow(m15Closed[:len(m15Closed)-1], 20)
+			level := rangeHigh
+			if direction == SHORT {
+				level = rangeLow
+			}
+
+			retestTouches := 0.0
+			retestHold := 0.0
+			lookback := 5
+			if len(m15Closed) < lookback {
+				lookback = len(m15Closed)
+			}
+			start := len(m15Closed) - lookback
+			for i := start; i < len(m15Closed); i++ {
+				c := m15Closed[i]
+				if direction == LONG {
+					if c.Low <= level && c.Close >= level {
+						retestTouches++
+					}
+				} else if direction == SHORT {
+					if c.High >= level && c.Close <= level {
+						retestTouches++
+					}
+				}
+			}
+			if retestTouches > 0 {
+				retestHold = 1.0
+			}
+
+			techSnap.IndicatorValues[IndicatorBreakoutLevel] = level
+			techSnap.IndicatorValues[IndicatorRetestTouches] = retestTouches
+			techSnap.IndicatorValues[IndicatorRetestHold] = retestHold
 		}
 
 	case RANGE_EDGE_REVERSAL:

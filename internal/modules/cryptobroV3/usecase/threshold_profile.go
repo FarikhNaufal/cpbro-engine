@@ -3,7 +3,6 @@ package usecase
 import (
 	"fmt"
 	"math"
-	"strings"
 )
 
 type PlaybookThresholdProfile struct {
@@ -175,8 +174,7 @@ func GetPlaybookThresholdProfile(playbook Playbook, policy MarketPolicy, tier Ti
 	}
 
 	// 1. BTCChaos active - stricter profile limits
-	isChaos := strings.Contains(strings.ToUpper(policy.Reason), "CHAOS")
-	if isChaos {
+	if policy.EffectiveRegime() == BTC_CHAOS {
 		if profile.MinScoreAI < 7.8 {
 			profile.MinScoreAI = 7.8
 		}

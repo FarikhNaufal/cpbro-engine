@@ -118,11 +118,15 @@ func (s *GeminiService) AuditCandidate(ctx context.Context, req dto.AIAuditReque
 	atrPercentStr := fmt.Sprintf("%0.2f%%", p.Technical.ATRPercent)
 	volRatioStr := fmt.Sprintf("%0.2f", p.Technical.VolumeRatio)
 
-	oiChangeStr := "N/A"
-	if p.Technical.OIChange != 0.0 {
-		oiChangeStr = fmt.Sprintf("%0.2f%%", p.Technical.OIChange)
-	} else {
-		oiChangeStr = "N/A (Open Interest data not available/fetched in live scanner)"
+	oiChangeStr := fmt.Sprintf("%0.2f%%", p.Technical.OIChange)
+	if !p.Technical.HasCrowdingEvidence && p.Technical.OIChange == 0.0 {
+		oiChangeStr += " (limited derivatives context)"
+	}
+
+	crowdingScoreStr := fmt.Sprintf("%0.2f", p.Technical.CrowdingScore)
+	breakoutLevelStr := "N/A"
+	if p.Technical.BreakoutLevel > 0 {
+		breakoutLevelStr = fmt.Sprintf("%0.5f", p.Technical.BreakoutLevel)
 	}
 
 	fundingRateStr := fmt.Sprintf("%0.5f", p.Technical.FundingRate)
@@ -173,8 +177,13 @@ Technical Context:
 - ATR Percent: %s
 - Volume Ratio: %s
 - OI Change: %s
+- Crowding Score: %s
+- Has Crowding Evidence: %v
 - Funding Rate: %s
 - Price Change 24h: %s
+- Breakout Level (if applicable): %s
+- Retest Hold (if applicable): %v
+- Retest Touches (if applicable): %d
 
 Structure Context:
 - H4 Trend: %s
@@ -222,7 +231,7 @@ Address these specific evaluation questions:
 7. Is the suggested action to execute-if-not-stale, wait retest, watch only, or reject?`,
 		p.Candidate.Symbol, p.Candidate.Direction, p.Candidate.Playbook, p.Candidate.SetupType, p.Candidate.Tier, p.Candidate.Score, p.Candidate.Grade,
 		p.Policy.Regime, p.Policy.BtcTrend, p.Policy.BtcScore, p.Policy.BtcChaos, p.Policy.LongMode, p.Policy.ShortMode, allowedPlaybooksStr, allowedTiersStr, p.Policy.MinScoreExecute, p.Policy.MinRRExecute, p.Policy.MinADXExecute,
-		rsiValStr, rsiSlopeStr, mfiValStr, mfiSlopeStr, adxValStr, adxSlopeStr, atrValStr, atrPercentStr, volRatioStr, oiChangeStr, fundingRateStr, priceChange24hStr,
+		rsiValStr, rsiSlopeStr, mfiValStr, mfiSlopeStr, adxValStr, adxSlopeStr, atrValStr, atrPercentStr, volRatioStr, oiChangeStr, crowdingScoreStr, p.Technical.HasCrowdingEvidence, fundingRateStr, priceChange24hStr, breakoutLevelStr, p.Technical.RetestHold, p.Technical.RetestTouches,
 		p.Structure.H4Trend, p.Structure.H1Trend, p.Structure.M15Structure, p.Structure.H1Structure, supportVal, resistanceVal, sessionHighVal, sessionLowVal, liqUpperVal, liqLowerVal, p.Structure.SweepSide, p.Structure.HasLiquiditySweep, p.Structure.HasVolumeConfirmation, p.Structure.Bos, p.Structure.Choch, structureIncompleteReason,
 		p.TradePlan.ProposedEntry, p.TradePlan.ProposedSL, p.TradePlan.ProposedTP1, p.TradePlan.ProposedTP2, p.TradePlan.RR, p.TradePlan.InvalidationReason,
 		m15CandlesText,

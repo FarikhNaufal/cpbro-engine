@@ -11,11 +11,15 @@ import (
 
 type MarketDataUsecase struct {
 	provider MarketDataProvider
+
+	oiMu             sync.Mutex
+	lastOpenInterest map[string]float64
 }
 
 func NewMarketDataUsecase(provider MarketDataProvider) *MarketDataUsecase {
 	return &MarketDataUsecase{
-		provider: provider,
+		provider:         provider,
+		lastOpenInterest: make(map[string]float64),
 	}
 }
 
@@ -44,10 +48,7 @@ func (uc *MarketDataUsecase) FetchMarketData(ctx context.Context, symbol string,
 		m15          []dto.Candle
 		h1           []dto.Candle
 		h4           []dto.Candle
-		btcH1        []dto.Candle
-		ethH1        []dto.Candle
 		openInterest float64
-		latestPrice  float64
 	)
 
 	// Concurrency limit of 3 concurrent requests to prevent rate limits
@@ -102,28 +103,6 @@ func (uc *MarketDataUsecase) FetchMarketData(ctx context.Context, symbol string,
 			},
 		},
 		{
-			name: "BTCH1Candles",
-			fn: func(ctx context.Context) error {
-				res, err := uc.provider.FetchClosedCandles(ctx, "BTCUSDT", "1h", 50)
-				if err != nil {
-					return err
-				}
-				btcH1 = res
-				return nil
-			},
-		},
-		{
-			name: "ETHH1Candles",
-			fn: func(ctx context.Context) error {
-				res, err := uc.provider.FetchClosedCandles(ctx, "ETHUSDT", "1h", 50)
-				if err != nil {
-					return err
-				}
-				ethH1 = res
-				return nil
-			},
-		},
-		{
 			name: "OpenInterest",
 			fn: func(ctx context.Context) error {
 				res, err := uc.provider.FetchOpenInterest(ctx, symbol)
@@ -131,17 +110,6 @@ func (uc *MarketDataUsecase) FetchMarketData(ctx context.Context, symbol string,
 					return err
 				}
 				openInterest = res
-				return nil
-			},
-		},
-		{
-			name: "LatestPrice",
-			fn: func(ctx context.Context) error {
-				res, err := uc.provider.FetchLatestPrice(ctx, symbol)
-				if err != nil {
-					return err
-				}
-				latestPrice = res
 				return nil
 			},
 		},
@@ -182,16 +150,26 @@ func (uc *MarketDataUsecase) FetchMarketData(ctx context.Context, symbol string,
 		fundingRate = val
 	}
 
+	oiChangePct := 0.0
+	if openInterest > 0 {
+		uc.oiMu.Lock()
+		prev, hasPrev := uc.lastOpenInterest[symbol]
+		uc.lastOpenInterest[symbol] = openInterest
+		uc.oiMu.Unlock()
+
+		if hasPrev && prev > 0 {
+			oiChangePct = ((openInterest - prev) / prev) * 100.0
+		}
+	}
+
 	return MarketData{
 		Symbol:          symbol,
 		M15Candles:      m15,
 		H1Candles:       h1,
 		H4Candles:       h4,
-		BTCH1Candles:    btcH1,
-		ETHH1Candles:    ethH1,
 		OpenInterestM15: openInterest,
+		OIChangePct:     oiChangePct,
 		FundingRate:     fundingRate,
-		LatestPrice:     latestPrice,
 		LastUpdated:     time.Now(),
 	}, nil
 }

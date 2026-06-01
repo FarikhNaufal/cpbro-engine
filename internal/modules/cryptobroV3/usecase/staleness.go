@@ -3,7 +3,6 @@ package usecase
 import (
 	"fmt"
 	"math"
-	"strings"
 	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
@@ -52,10 +51,10 @@ func (uc *StalenessUsecase) Evaluate(quant QuantResult, review PlanReview, polic
 	distance := math.Abs(latestPrice - entry)
 	distancePct := (distance / latestPrice) * 100
 
-	regime := strings.ToUpper(policy.Reason)
-	isChaos := strings.Contains(regime, "CHAOS")
-	isHighVol := strings.Contains(regime, "HIGH_VOL") || isChaos
-	isLowVol := strings.Contains(regime, "LOW_VOL")
+	regime := policy.EffectiveRegime()
+	isChaos := regime == BTC_CHAOS
+	isHighVol := regime == HIGH_VOL || isChaos
+	isLowVol := regime == LOW_VOL
 
 	// Get profile
 	profile := GetPlaybookThresholdProfile(quant.Playbook, policy, quant.Tier)

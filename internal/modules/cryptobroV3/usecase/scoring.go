@@ -211,9 +211,9 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 		notes = append(notes, fmt.Sprintf("BreakoutStrength: +%0.1f", breakScore))
 
 		// 3. Retest quality (Max 25)
-		// "near_range_edge" is used here as a proxy for retest hold evidence.
+		retestHold := tech.IndicatorValues[IndicatorRetestHold]
 		retestScore := 5.0
-		if nearRangeEdge == 1.0 {
+		if retestHold == 1.0 {
 			retestScore = 25.0
 		}
 		rawScore += retestScore
@@ -238,15 +238,15 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 		notes = append(notes, fmt.Sprintf("RRScore: +%0.1f", rrScore))
 
 		// Playbook specific penalties
-		if policy.RequireFreshEntry && nearRangeEdge == 0.0 {
+		if policy.RequireFreshEntry && retestHold == 0.0 {
 			rawScore -= 30.0
 			notes = append(notes, "PENALTY: Breakout retest required but no retest hold evidence (-30)")
 		}
-		if resolvedDirection == LONG && nearRangeEdge == 0.0 {
+		if resolvedDirection == LONG && retestHold == 0.0 {
 			rawScore -= 20.0
 			notes = append(notes, "PENALTY: LONG breakout entry missing clear retest support hold (-20)")
 		}
-		if resolvedDirection == SHORT && nearRangeEdge == 0.0 {
+		if resolvedDirection == SHORT && retestHold == 0.0 {
 			rawScore -= 20.0
 			notes = append(notes, "PENALTY: SHORT breakout entry missing clear retest resistance reject (-20)")
 		}
@@ -398,14 +398,15 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 	}
 
 	// 3. PriceChange24h terlalu liar
-	isLiar := strings.Contains(strings.ToUpper(policy.Reason), "CHAOS") || strings.Contains(strings.ToUpper(policy.Reason), "VOL")
+	regime := policy.EffectiveRegime()
+	isLiar := regime == BTC_CHAOS || regime == HIGH_VOL
 	if isLiar {
 		penalty += 15.0
 		notes = append(notes, "GLOBAL PENALTY: PriceChange24h or regime volatility is too wild (-15)")
 	}
 
 	// 4. Tier C saat chaos / high vol
-	isChaos := strings.Contains(strings.ToUpper(policy.Reason), "CHAOS") || strings.Contains(strings.ToUpper(policy.Reason), "HIGH")
+	isChaos := regime == BTC_CHAOS || regime == HIGH_VOL
 	if isChaos && quant.Tier == TierC {
 		penalty += 20.0
 		notes = append(notes, "GLOBAL PENALTY: Tier C trading under chaos/high vol regime (-20)")

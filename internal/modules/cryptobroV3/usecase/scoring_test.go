@@ -76,10 +76,9 @@ func TestScoring_PlaybookCalculations(t *testing.T) {
 			TechnicalSnapshot: TechnicalSnapshot{
 				RSI: 50.0,
 				IndicatorValues: map[string]float64{
-					"contraction":  1.0,
-					"volume_spike": 1.0,
-					// Used as proxy for retest hold evidence for this playbook.
-					"near_range_edge": 1.0,
+					"contraction":       1.0,
+					"volume_spike":      1.0,
+					IndicatorRetestHold: 1.0,
 				},
 			},
 		}
@@ -107,9 +106,9 @@ func TestScoring_PlaybookCalculations(t *testing.T) {
 			TechnicalSnapshot: TechnicalSnapshot{
 				RSI: 50.0,
 				IndicatorValues: map[string]float64{
-					"contraction":     1.0,
-					"volume_spike":    1.0,
-					"near_range_edge": 1.0,
+					"contraction":       1.0,
+					"volume_spike":      1.0,
+					IndicatorRetestHold: 1.0,
 				},
 			},
 		}
@@ -123,9 +122,9 @@ func TestScoring_PlaybookCalculations(t *testing.T) {
 			TechnicalSnapshot: TechnicalSnapshot{
 				RSI: 50.0,
 				IndicatorValues: map[string]float64{
-					"contraction":     1.0,
-					"volume_spike":    1.0,
-					"near_range_edge": 0.0,
+					"contraction":       1.0,
+					"volume_spike":      1.0,
+					IndicatorRetestHold: 0.0,
 				},
 			},
 		}
@@ -183,6 +182,58 @@ func TestScoring_PlaybookCalculations(t *testing.T) {
 
 func TestScoring_Penalties(t *testing.T) {
 	uc := NewScoringUsecase()
+
+	t.Run("Tier C penalty applies only to Tier C under chaos/high vol", func(t *testing.T) {
+		policy := MarketPolicy{
+			AllowLong:    true,
+			AllowShort:   true,
+			LongMode:     NORMAL,
+			ShortMode:    NORMAL,
+			AllowedTiers: []Tier{TierA, TierB, TierC},
+			Regime:       BTC_CHAOS,
+		}
+
+		baseTech := TechnicalSnapshot{
+			RSI:  45.0,
+			MACD: 1.0,
+			IndicatorValues: map[string]float64{
+				IndicatorADX:         25.0,
+				IndicatorVolumeSpike: 1.0,
+			},
+		}
+
+		quantTierA := &QuantResult{
+			Playbook:          TREND_PULLBACK,
+			Direction:         LONG,
+			Tier:              TierA,
+			IndicatorMet:      true,
+			TriggerPrice:      100.0,
+			StopLoss:          98.0,
+			TakeProfit:        105.0,
+			H4Trend:           "BULLISH",
+			H1Trend:           "BULLISH",
+			TechnicalSnapshot: baseTech,
+		}
+		quantTierC := &QuantResult{
+			Playbook:          TREND_PULLBACK,
+			Direction:         LONG,
+			Tier:              TierC,
+			IndicatorMet:      true,
+			TriggerPrice:      100.0,
+			StopLoss:          98.0,
+			TakeProfit:        105.0,
+			H4Trend:           "BULLISH",
+			H1Trend:           "BULLISH",
+			TechnicalSnapshot: baseTech,
+		}
+
+		scoreA := uc.Calculate(quantTierA, LONG, policy)
+		scoreC := uc.Calculate(quantTierC, LONG, policy)
+
+		assert.True(t, scoreA > scoreC, "Tier C should be penalized under BTC_CHAOS")
+		assert.NotContains(t, quantTierA.Reason, "Tier C trading under chaos/high vol regime")
+		assert.Contains(t, quantTierC.Reason, "Tier C trading under chaos/high vol regime")
+	})
 
 	t.Run("Policy direction disallowance penalty", func(t *testing.T) {
 		policy := MarketPolicy{
@@ -265,5 +316,61 @@ func TestScoring_Penalties(t *testing.T) {
 		scoreA := uc.Calculate(&qa, LONG, policy)
 		scoreC := uc.Calculate(&qc, LONG, policy)
 		assert.True(t, scoreA > scoreC, "Tier C should be penalized under chaos/high vol while Tier A should not")
+	})
+
+	t.Run("COMPRESSION retest evidence is not inverted by RequireFreshEntry", func(t *testing.T) {
+		policyLoose := MarketPolicy{
+			AllowLong:         true,
+			AllowShort:        true,
+			LongMode:          NORMAL,
+			ShortMode:         NORMAL,
+			RequireFreshEntry: false,
+		}
+		policyStrict := MarketPolicy{
+			AllowLong:         true,
+			AllowShort:        true,
+			LongMode:          NORMAL,
+			ShortMode:         NORMAL,
+			RequireFreshEntry: true,
+		}
+
+		quantLoose := &QuantResult{
+			Playbook:     COMPRESSION_BREAKOUT_RETEST,
+			Direction:    LONG,
+			Tier:         TierA,
+			IndicatorMet: true,
+			TriggerPrice: 100.0,
+			StopLoss:     98.0,
+			TakeProfit:   105.0,
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI: 50.0,
+				IndicatorValues: map[string]float64{
+					"contraction":       1.0,
+					"volume_spike":      1.0,
+					IndicatorRetestHold: 1.0,
+				},
+			},
+		}
+		quantStrict := &QuantResult{
+			Playbook:     COMPRESSION_BREAKOUT_RETEST,
+			Direction:    LONG,
+			Tier:         TierA,
+			IndicatorMet: true,
+			TriggerPrice: 100.0,
+			StopLoss:     98.0,
+			TakeProfit:   105.0,
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI: 50.0,
+				IndicatorValues: map[string]float64{
+					"contraction":       1.0,
+					"volume_spike":      1.0,
+					IndicatorRetestHold: 1.0,
+				},
+			},
+		}
+
+		scoreLoose := uc.Calculate(quantLoose, LONG, policyLoose)
+		scoreStrict := uc.Calculate(quantStrict, LONG, policyStrict)
+		assert.True(t, scoreStrict >= scoreLoose, "Strict fresh-entry policy should not invert retest quality scoring when evidence exists")
 	})
 }

@@ -231,7 +231,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 		}
 
 		// 4. Chop range check (Not allowed unless permitted)
-		if strings.Contains(strings.ToUpper(policy.Reason), "CHOP_RANGE") {
+		if policy.Regime == CHOP_RANGE {
 			allowed := false
 			for _, p := range policy.AllowedPlaybooks {
 				if p == TREND_PULLBACK {

@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
@@ -21,11 +22,14 @@ const (
 type MarketRegime string
 
 const (
+	DEFAULT        MarketRegime = "DEFAULT"
 	ALT_SUPPORTIVE MarketRegime = "ALT_SUPPORTIVE"
 	BTC_DOMINANCE  MarketRegime = "BTC_DOMINANCE"
 	RISK_OFF       MarketRegime = "RISK_OFF"
 	CHOP_RANGE     MarketRegime = "CHOP_RANGE"
 	COMPRESSION    MarketRegime = "COMPRESSION"
+	LOW_VOL        MarketRegime = "LOW_VOL"
+	HIGH_VOL       MarketRegime = "HIGH_VOL"
 	BTC_CHAOS      MarketRegime = "BTC_CHAOS"
 	UNKNOWN        MarketRegime = "UNKNOWN"
 )
@@ -119,6 +123,7 @@ type MarketContextData struct {
 }
 
 type MarketPolicy struct {
+	Regime                 MarketRegime `json:"regime"`
 	AllowLong              bool         `json:"allow_long"`
 	AllowShort             bool         `json:"allow_short"`
 	LongMode               PolicyMode   `json:"long_mode"`
@@ -145,6 +150,36 @@ type MarketPolicy struct {
 	Reason                 string       `json:"reason"`
 }
 
+// EffectiveRegime returns a stable regime value for downstream logic.
+// It prefers the explicit Regime field, but falls back to parsing Reason for backward compatibility.
+func (p MarketPolicy) EffectiveRegime() MarketRegime {
+	if p.Regime != "" && p.Regime != UNKNOWN {
+		return p.Regime
+	}
+
+	reason := strings.ToUpper(p.Reason)
+	switch {
+	case strings.Contains(reason, "BTC_CHAOS") || strings.Contains(reason, "CHAOS"):
+		return BTC_CHAOS
+	case strings.Contains(reason, "HIGH_VOL"):
+		return HIGH_VOL
+	case strings.Contains(reason, "LOW_VOL"):
+		return LOW_VOL
+	case strings.Contains(reason, "COMPRESSION"):
+		return COMPRESSION
+	case strings.Contains(reason, "ALT_SUPPORTIVE"):
+		return ALT_SUPPORTIVE
+	case strings.Contains(reason, "BTC_DOMINANCE") || strings.Contains(reason, "DOMINANCE"):
+		return BTC_DOMINANCE
+	case strings.Contains(reason, "RISK_OFF"):
+		return RISK_OFF
+	case strings.Contains(reason, "CHOP_RANGE") || strings.Contains(reason, "SIDEWAYS"):
+		return CHOP_RANGE
+	}
+
+	return p.Regime
+}
+
 type UniverseCandidate struct {
 	Symbol string `json:"symbol"`
 	Tier   Tier   `json:"tier"`
@@ -166,6 +201,7 @@ type MarketData struct {
 	BTCH1Candles    []dto.Candle `json:"btc_h1_candles"`
 	ETHH1Candles    []dto.Candle `json:"eth_h1_candles"`
 	OpenInterestM15 float64      `json:"open_interest_m15"`
+	OIChangePct     float64      `json:"oi_change_pct"`
 	FundingRate     float64      `json:"funding_rate"`
 	LatestPrice     float64      `json:"latest_price"`
 	PriceChange24h  float64      `json:"price_change_24h"`

@@ -204,10 +204,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	}
 
 	type candlesCache struct {
-		m15 []dto.Candle
-		h1  []dto.Candle
-		h4  []dto.Candle
-		err error
+		data MarketData
+		err  error
 	}
 	candlesMap := make(map[string]candlesCache)
 	var mapMu sync.Mutex
@@ -222,16 +220,14 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			m15, h1, h4, fetchErr := uc.marketDataUsecase.FetchCandles(ctx, pair)
+			md, fetchErr := uc.marketDataUsecase.FetchMarketData(ctx, pair, fundingRates)
 			if fetchErr != nil {
 				GetGlobalMetrics().IncrementMarketDataError()
 			}
 			mapMu.Lock()
 			candlesMap[pair] = candlesCache{
-				m15: m15,
-				h1:  h1,
-				h4:  h4,
-				err: fetchErr,
+				data: md,
+				err:  fetchErr,
 			}
 			mapMu.Unlock()
 		}(cand.Symbol)
@@ -264,14 +260,14 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			continue
 		}
 
-		if len(cache.m15) == 0 {
+		if len(cache.data.M15Candles) == 0 {
 			policyRejectedSummary = append(policyRejectedSummary, fmt.Sprintf("%s: m15 candles empty", pair))
 			continue
 		}
 
 		// Validate staleness of raw candles
 		GetGlobalMetrics().AddStalenessChecked(1)
-		if !uc.stalenessUsecase.IsFresh(cache.m15) {
+		if !uc.stalenessUsecase.IsFresh(cache.data.M15Candles) {
 			GetGlobalMetrics().AddStalenessCount(1)
 			policyRejectedSummary = append(policyRejectedSummary, fmt.Sprintf("%s: raw candles are stale", pair))
 			continue
@@ -279,24 +275,35 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 		// Choose strategy playbooks
 		latestPrice := tickerLastPrice[pair]
-		if latestPrice == 0 && len(cache.m15) > 0 {
-			latestPrice = cache.m15[len(cache.m15)-1].Close
+		if latestPrice == 0 && len(cache.data.M15Candles) > 0 {
+			latestPrice = cache.data.M15Candles[len(cache.data.M15Candles)-1].Close
 		}
 
-		fr := fundingRates[pair]
+		fr := cache.data.FundingRate
 		priceChange24h := 0.0
 		if t, ok := tickerMap[pair]; ok {
 			priceChange24h = t.PriceChangePercent
 		}
-		tech, structure := PopulateSnapshots(cache.m15, cache.h1, cache.h4, fr, latestPrice, priceChange24h, 0.0)
+		tech, structure := PopulateSnapshots(
+			cache.data.M15Candles,
+			cache.data.H1Candles,
+			cache.data.H4Candles,
+			fr,
+			latestPrice,
+			priceChange24h,
+			cache.data.OpenInterestM15,
+			cache.data.OIChangePct,
+		)
 		prelimData := MarketData{
-			Symbol:         pair,
-			FundingRate:    fr,
-			M15Candles:     cache.m15,
-			H1Candles:      cache.h1,
-			H4Candles:      cache.h4,
-			LatestPrice:    latestPrice,
-			PriceChange24h: priceChange24h,
+			Symbol:          pair,
+			FundingRate:     fr,
+			M15Candles:      cache.data.M15Candles,
+			H1Candles:       cache.data.H1Candles,
+			H4Candles:       cache.data.H4Candles,
+			LatestPrice:     latestPrice,
+			PriceChange24h:  priceChange24h,
+			OpenInterestM15: cache.data.OpenInterestM15,
+			OIChangePct:     cache.data.OIChangePct,
 		}
 
 		selections := uc.strategySelectorUsecase.SelectPlaybooks(policy, candidate, prelimData, tech, structure)
@@ -329,7 +336,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 			quantResult := uc.playbookQuantEngineUsecase.RunEngine(playbook, sel.Direction, prelimData, policy)
 			quantResult.Tier = candidate.Tier
-			quantResult.RawKlines = cache.m15
+			quantResult.RawKlines = cache.data.M15Candles
 
 			reconciliationDir := uc.conflictResolverUsecase.Resolve(quantResult.Direction, "NEUTRAL")
 			_ = uc.scoringUsecase.Calculate(&quantResult, reconciliationDir, policy)
@@ -398,7 +405,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	for _, qResult := range selectedCandidates {
 		pair := qResult.Symbol
 		cache := candlesMap[pair]
-		lgRes := uc.localGateUsecase.Evaluate(qResult, policy, cache.m15)
+		lgRes := uc.localGateUsecase.Evaluate(qResult, policy, cache.data.M15Candles)
 		localGateMap[pair] = lgRes
 		if lgRes.Passed {
 			localCandidates = append(localCandidates, qResult)
@@ -462,7 +469,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 					SuggestedAction: "WATCH_ONLY",
 				}
 			} else {
-				auditResponse, auditErr = uc.aiAuditorUsecase.Audit(ctx, qr, policy, cache.m15, cache.h1, cache.h4)
+				auditResponse, auditErr = uc.aiAuditorUsecase.Audit(ctx, qr, policy, cache.data.M15Candles, cache.data.H1Candles, cache.data.H4Candles)
 				aiDuration := time.Since(aiStart)
 				GetGlobalMetrics().AddAILatency(aiDuration)
 			}
@@ -555,8 +562,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		if t, exists := tickerMap[pair]; exists {
 			latestPrice = t.LastPrice
 		}
-		if latestPrice == 0 && len(cache.m15) > 0 {
-			latestPrice = cache.m15[len(cache.m15)-1].Close
+		if latestPrice == 0 && len(cache.data.M15Candles) > 0 {
+			latestPrice = cache.data.M15Candles[len(cache.data.M15Candles)-1].Close
 		}
 
 		stalenessRes := uc.stalenessUsecase.Evaluate(qResult, planReview, policy, latestPrice)
@@ -575,7 +582,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			latestPrice,
 			activeSignals,
 			historySignals,
-			cache.m15,
+			cache.data.M15Candles,
 		)
 
 		ctxMap[pair] = candContext{
@@ -694,7 +701,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			StopLoss:                  finalDecision.StopLoss,
 			TakeProfit1:               tp1,
 			TakeProfit2:               tp2,
-			MarketRegime:              policy.Reason,
+			MarketRegime:              string(policy.Regime),
 			PolicyMode:                activeMode,
 			ThresholdProfileSummary:   finalDecision.ThresholdProfileSummary,
 			RejectOrWatchReason:       finalDecision.Reason,
@@ -742,7 +749,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				RR:                      finalDecision.RR,
 				QuantScore:              finalDecision.Score,
 				AIConfidence:            finalDecision.AIConfidence,
-				MarketRegime:            policy.Reason,
+				MarketRegime:            string(policy.Regime),
 				PolicyMode:              activeMode,
 				ThresholdProfileSummary: finalDecision.ThresholdProfileSummary,
 				CreatedAt:               time.Now(),
@@ -795,7 +802,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		CandidatesFound:                 len(decisions),
 		StartTime:                       scanStart,
 		Duration:                        time.Since(scanStart).String(),
-		ActiveRegime:                    policy.Reason,
+		ActiveRegime:                    string(policy.Regime),
 		BtcTrend:                        btcTrend,
 		TotalTickers:                    totalTickers,
 		TotalUniversePass:               len(candidates),
@@ -881,7 +888,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		ConfigVersion:                   GetGlobalConfigRegistry().GetVersion(),
 		ScanID:                          scanID,
 		MarketPolicy:                    policy.Reason,
-		MarketRegime:                    policy.Reason,
+		MarketRegime:                    string(policy.Regime),
 		TotalTickers:                    totalTickers,
 		TotalUniversePass:               len(candidates),
 		TotalUniverseRejected:           totalTickers - len(candidates),

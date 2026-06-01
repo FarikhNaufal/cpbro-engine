@@ -83,6 +83,11 @@ func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy
 	oiChange := quant.TechnicalSnapshot.OIChange
 	fundingRate := quant.TechnicalSnapshot.FundingRate
 	priceChange24h := quant.TechnicalSnapshot.PriceChange24h
+	crowdingScore := quant.TechnicalSnapshot.IndicatorValues[IndicatorCrowdingScore]
+	hasCrowdingEvidence := quant.TechnicalSnapshot.IndicatorValues[IndicatorHasCrowdingEvidence] == 1.0
+	breakoutLevel := quant.TechnicalSnapshot.IndicatorValues[IndicatorBreakoutLevel]
+	retestHold := quant.TechnicalSnapshot.IndicatorValues[IndicatorRetestHold] == 1.0
+	retestTouches := int(quant.TechnicalSnapshot.IndicatorValues[IndicatorRetestTouches])
 
 	// Policy summary representation
 	var allowedPlaybooks []string
@@ -130,7 +135,7 @@ func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy
 			Grade:     GetGrade(quant.Score),
 		},
 		Policy: dto.GeminiPolicyContext{
-			Regime:           policy.Reason,
+			Regime:           string(policy.Regime),
 			BtcTrend:         policy.BtcTrend,
 			BtcScore:         policy.BtcScore,
 			BtcChaos:         policy.BtcChaos,
@@ -143,18 +148,23 @@ func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy
 			MinADXExecute:    policy.MinADXExecute,
 		},
 		Technical: dto.GeminiTechnicalContext{
-			RSI:            rsiVal,
-			RSISlope:       rsiSlope,
-			MFI:            mfiVal,
-			MFISlope:       mfiSlope,
-			ADX:            adxVal,
-			ADXSlope:       adxSlope,
-			ATR:            atrVal,
-			ATRPercent:     atrPercent,
-			VolumeRatio:    volumeRatio,
-			OIChange:       oiChange,
-			FundingRate:    fundingRate,
-			PriceChange24h: priceChange24h,
+			RSI:                 rsiVal,
+			RSISlope:            rsiSlope,
+			MFI:                 mfiVal,
+			MFISlope:            mfiSlope,
+			ADX:                 adxVal,
+			ADXSlope:            adxSlope,
+			ATR:                 atrVal,
+			ATRPercent:          atrPercent,
+			VolumeRatio:         volumeRatio,
+			OIChange:            oiChange,
+			CrowdingScore:       crowdingScore,
+			HasCrowdingEvidence: hasCrowdingEvidence,
+			FundingRate:         fundingRate,
+			PriceChange24h:      priceChange24h,
+			BreakoutLevel:       breakoutLevel,
+			RetestHold:          retestHold,
+			RetestTouches:       retestTouches,
 		},
 		Structure: dto.GeminiStructureContext{
 			H4Trend:               quant.H4Trend,
