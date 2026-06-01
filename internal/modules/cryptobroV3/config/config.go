@@ -80,6 +80,9 @@ type TelegramConfig struct {
 	StatusChatID                  string `json:"-"`
 	StatusAllowSignalChatFallback bool   `json:"status_allow_signal_chat_fallback"`
 	RequestTimeoutSeconds         int    `json:"request_timeout_seconds"`
+	OpsBootEnabled                bool   `json:"ops_boot_enabled"`
+	OpsScanEnabled                bool   `json:"ops_scan_enabled"`
+	OpsAdminEnabled               bool   `json:"ops_admin_enabled"`
 }
 
 // ConcurrencyConfig rate limits for parallel execution loops
@@ -239,6 +242,9 @@ func LoadConfigFromEnv() (*Config, error) {
 			StatusChatID:                  getEnv("TELEGRAM_STATUS_CHAT_ID", ""),
 			StatusAllowSignalChatFallback: getEnvBool("TELEGRAM_STATUS_ALLOW_SIGNAL_CHAT_FALLBACK", false),
 			RequestTimeoutSeconds:         getEnvInt("TELEGRAM_REQUEST_TIMEOUT_SECONDS", 10),
+			OpsBootEnabled:                getEnvBool("TELEGRAM_OPS_BOOT_ENABLED", true),
+			OpsScanEnabled:                getEnvBool("TELEGRAM_OPS_SCAN_ENABLED", false),
+			OpsAdminEnabled:               getEnvBool("TELEGRAM_OPS_ADMIN_ENABLED", false),
 		},
 		Concurrency: ConcurrencyConfig{
 			MaxMarketDataConcurrency: getEnvInt("MAX_MARKETDATA_CONCURRENCY", 10),
@@ -471,6 +477,9 @@ func SafeConfigView(cfg *Config) map[string]any {
 			"signal_chat_id_set":                cfg.Telegram.SignalChatID != "" || cfg.Telegram.ChatID != "",
 			"status_chat_id_set":                cfg.Telegram.StatusChatID != "",
 			"status_allow_signal_chat_fallback": cfg.Telegram.StatusAllowSignalChatFallback,
+			"ops_boot_enabled":                  cfg.Telegram.OpsBootEnabled,
+			"ops_scan_enabled":                  cfg.Telegram.OpsScanEnabled,
+			"ops_admin_enabled":                 cfg.Telegram.OpsAdminEnabled,
 		},
 		"concurrency": map[string]any{
 			"max_marketdata_concurrency": cfg.Concurrency.MaxMarketDataConcurrency,

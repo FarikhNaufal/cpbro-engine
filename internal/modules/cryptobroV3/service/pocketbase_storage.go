@@ -549,6 +549,9 @@ func parsePBTime(v any) time.Time {
 	if !ok || strings.TrimSpace(s) == "" {
 		return time.Time{}
 	}
+	// PocketBase date format uses space instead of 'T' (e.g. "2026-06-01 12:45:20.385Z").
+	// We normalize it to RFC3339 format before parsing.
+	s = strings.Replace(s, " ", "T", 1)
 	t, err := time.Parse(time.RFC3339Nano, s)
 	if err == nil {
 		return t

@@ -12,12 +12,14 @@ import (
 )
 
 type OpsNotificationUsecase struct {
-	notifier OpsNotificationService
+	notifier     OpsNotificationService
+	adminEnabled bool
 }
 
 func NewOpsNotificationUsecase(notifier OpsNotificationService) *OpsNotificationUsecase {
 	return &OpsNotificationUsecase{
-		notifier: notifier,
+		notifier:     notifier,
+		adminEnabled: false,
 	}
 }
 
@@ -192,8 +194,18 @@ func (uc *OpsNotificationUsecase) SendScanFailed(ctx context.Context, scanID str
 }
 
 func (uc *OpsNotificationUsecase) SendAdminWarningAIError(ctx context.Context, scanID, symbol, playbook, finalStatus, reason string) {
+	if uc == nil || !uc.adminEnabled {
+		return
+	}
 	msg := FormatAdminWarning(scanID, symbol, playbook, finalStatus, reason)
 	uc.send(ctx, msg)
+}
+
+func (uc *OpsNotificationUsecase) SetAdminEnabled(enabled bool) {
+	if uc == nil {
+		return
+	}
+	uc.adminEnabled = enabled
 }
 
 func (uc *OpsNotificationUsecase) send(ctx context.Context, msg string) {

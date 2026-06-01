@@ -149,23 +149,26 @@ func main() {
 	conflictResolverUC := usecase.NewConflictResolverUsecase()
 	signalNotificationUC := usecase.NewSignalNotificationUsecase(telegramService, storageUC)
 	opsNotificationUC := usecase.NewOpsNotificationUsecase(telegramService)
+	opsNotificationUC.SetAdminEnabled(cfg.Telegram.OpsAdminEnabled)
 	monitoringUC := usecase.NewMonitoringUsecase(binanceService, storageUC)
 	feedbackUC := usecase.NewFeedbackUsecase(storageUC)
 
 	{
 		startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
-		opsNotificationUC.SendBootStatus(
-			startCtx,
-			cfg.App.Name,
-			cfg.App.Env,
-			cfg.App.Version,
-			cfg.HTTP.Port,
-			cfg.Safety.AlertOnly,
-			cfg.Safety.BinanceReadOnly,
-			cfg.Scanner.Enabled,
-			cfg.Monitoring.Enabled,
-		)
+		if cfg.Telegram.OpsBootEnabled {
+			opsNotificationUC.SendBootStatus(
+				startCtx,
+				cfg.App.Name,
+				cfg.App.Env,
+				cfg.App.Version,
+				cfg.HTTP.Port,
+				cfg.Safety.AlertOnly,
+				cfg.Safety.BinanceReadOnly,
+				cfg.Scanner.Enabled,
+				cfg.Monitoring.Enabled,
+			)
+		}
 	}
 
 	scannerUC := usecase.NewScannerUsecase(
@@ -280,7 +283,9 @@ func startStartupScan(ctx context.Context, cfg *config.Config, scannerUC *usecas
 		slog.Info("Startup scan trigger: executing initial scan")
 		boundary := time.Now().Truncate(15 * time.Minute)
 		scanID := boundary.Format("20060102150405")
-		opsUC.SendScanStarted(ctx, scanID, boundary, "startup M15 close scan")
+		if cfg.Telegram.OpsScanEnabled {
+			opsUC.SendScanStarted(ctx, scanID, boundary, "startup M15 close scan")
+		}
 
 		if !scannerRunning.CompareAndSwap(false, true) {
 			slog.Warn("Startup scan skipped: scan already in progress")
@@ -296,14 +301,18 @@ func startStartupScan(ctx context.Context, cfg *config.Config, scannerUC *usecas
 		})
 		if err != nil {
 			slog.Error("Startup scan failed", "error", err)
-			opsUC.SendScanFailed(ctx, scanID, boundary, err)
+			if cfg.Telegram.OpsScanEnabled {
+				opsUC.SendScanFailed(ctx, scanID, boundary, err)
+			}
 		} else {
 			usecase.GetGlobalMetrics().SetLastScanTime(time.Now())
 			usecase.GetGlobalMetrics().SetLastSuccessScan(time.Now())
 
 			latest, loadErr := storageUC.LoadLatestResult()
 			if loadErr == nil && latest != nil && latest.ScanID != "" {
-				opsUC.SendScanDone(ctx, latest)
+				if cfg.Telegram.OpsScanEnabled {
+					opsUC.SendScanDone(ctx, latest)
+				}
 			}
 		}
 	}()
@@ -346,7 +355,9 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 
 					slog.Info("Background worker trigger: executing M15 scan", "boundary", boundary.Format("15:04:05"))
 					scanID := boundary.Format("20060102150405")
-					opsUC.SendScanStarted(ctx, scanID, boundary, "M15 close scan")
+					if cfg.Telegram.OpsScanEnabled {
+						opsUC.SendScanStarted(ctx, scanID, boundary, "M15 close scan")
+					}
 
 					if !scannerRunning.CompareAndSwap(false, true) {
 						slog.Warn("Scan worker skipped: scan already in progress")
@@ -362,14 +373,18 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 					})
 					if err != nil {
 						slog.Error("Background scan failed", "error", err)
-						opsUC.SendScanFailed(ctx, scanID, boundary, err)
+						if cfg.Telegram.OpsScanEnabled {
+							opsUC.SendScanFailed(ctx, scanID, boundary, err)
+						}
 					} else {
 						usecase.GetGlobalMetrics().SetLastScanTime(time.Now())
 						usecase.GetGlobalMetrics().SetLastSuccessScan(time.Now())
 
 						latest, loadErr := storageUC.LoadLatestResult()
 						if loadErr == nil && latest != nil && latest.ScanID != "" {
-							opsUC.SendScanDone(ctx, latest)
+							if cfg.Telegram.OpsScanEnabled {
+								opsUC.SendScanDone(ctx, latest)
+							}
 						}
 					}
 

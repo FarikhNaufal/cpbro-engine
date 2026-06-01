@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -34,6 +35,12 @@ type PocketBaseClient struct {
 	loginRetryMax int
 
 	mu sync.Mutex
+}
+
+// DoJSON is a thin exported wrapper around the internal request helper.
+// It exists to support tooling (eg. one-off migrations) without exposing internal details.
+func (c *PocketBaseClient) DoJSON(ctx context.Context, method, path string, query url.Values, body any, out any) error {
+	return c.doJSON(ctx, method, path, query, body, out)
 }
 
 type pocketBaseAuthResponse struct {
@@ -143,6 +150,7 @@ func (c *PocketBaseClient) login(ctx context.Context, path string) (string, erro
 		return "", errors.New("pocketbase auth returned empty token")
 	}
 	c.token = out.Token
+	slog.Info("PocketBase login succeeded", "auth_mode", string(c.authMode), "host", pocketBaseHost(c.baseURL))
 	return c.token, nil
 }
 
@@ -191,6 +199,7 @@ func (c *PocketBaseClient) doJSON(ctx context.Context, method, path string, quer
 
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			if attempt < maxAttempts && c.authMode != PocketBaseAuthModeToken {
+				slog.Warn("PocketBase auth failed; retrying login", "status_code", resp.StatusCode, "attempt", attempt, "max_attempts", maxAttempts, "auth_mode", string(c.authMode), "host", pocketBaseHost(c.baseURL))
 				c.clearToken()
 				time.Sleep(time.Duration(attempt*100) * time.Millisecond)
 				continue
@@ -217,4 +226,12 @@ func sanitizePBBody(b []byte) string {
 		s = s[:300] + "...(truncated)"
 	}
 	return s
+}
+
+func pocketBaseHost(baseURL string) string {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	return u.Host
 }

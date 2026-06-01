@@ -270,6 +270,7 @@ func TestOpsNotification_ScanDoneSummary_NoEntrySLTP(t *testing.T) {
 func TestOpsNotification_AdminWarningAIError_NonSignal(t *testing.T) {
 	mockSvc := &mockNotificationService{}
 	uc := usecase.NewOpsNotificationUsecase(mockSvc)
+	uc.SetAdminEnabled(true)
 	uc.SendAdminWarningAIError(context.Background(), "scan-1", "SOLUSDT", "TREND_PULLBACK", "AI_ERROR_REVIEW", "AI timeout")
 	if len(mockSvc.opsMessages) != 1 {
 		t.Fatalf("expected 1 ops message, got %d", len(mockSvc.opsMessages))
