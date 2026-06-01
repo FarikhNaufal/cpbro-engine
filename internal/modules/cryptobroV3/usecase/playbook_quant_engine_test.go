@@ -79,6 +79,63 @@ func TestQuantEngineSafetyChecks(t *testing.T) {
 	}
 }
 
+func TestQuantEngine_CompressionBreakoutRetest_SetsSetupTypeToRetest(t *testing.T) {
+	engine := NewPlaybookQuantEngineUsecase()
+
+	// Build M15 candles where the last candles retest a prior range high and hold above it.
+	m15Candles := make([]dto.Candle, 30)
+	for i := 0; i < 30; i++ {
+		m15Candles[i] = dto.Candle{
+			Time:  time.Now().Add(-time.Duration(30-i) * 15 * time.Minute),
+			Open:  100.0,
+			High:  110.0,
+			Low:   99.0,
+			Close: 100.0,
+			Vol:   10.0,
+		}
+	}
+	// Define a clear range high on the prior 20 candles (excluding the last candle).
+	// HighestHigh(m15Closed[:len-1], 20) will see 110.0 as the level.
+	for i := 0; i < 29; i++ {
+		m15Candles[i].High = 110.0
+		m15Candles[i].Low = 99.0
+		m15Candles[i].Close = 100.0
+	}
+	// Retest/hold in the last candle: dip to level and close back above.
+	m15Candles[29].Low = 109.5
+	m15Candles[29].Close = 110.5
+
+	// Minimal HTF candles (trend is not used to gate COMPRESSION inside RunEngine).
+	h1Candles := make([]dto.Candle, 60)
+	for i := range h1Candles {
+		h1Candles[i] = dto.Candle{Close: 100.0}
+	}
+	h4Candles := make([]dto.Candle, 60)
+	for i := range h4Candles {
+		h4Candles[i] = dto.Candle{Close: 100.0}
+	}
+
+	data := MarketData{
+		Symbol:      "TESTUSDT",
+		M15Candles:  m15Candles,
+		H1Candles:   h1Candles,
+		H4Candles:   h4Candles,
+		LatestPrice: m15Candles[29].Close,
+	}
+	policy := MarketPolicy{
+		AllowLong:  true,
+		AllowShort: true,
+	}
+
+	res := engine.RunEngine(COMPRESSION_BREAKOUT_RETEST, LONG, data, policy)
+	if res.SetupType != "BREAKOUT_RETEST" {
+		t.Fatalf("expected SetupType=BREAKOUT_RETEST when retest evidence exists, got %q", res.SetupType)
+	}
+	if res.TechnicalSnapshot.IndicatorValues[IndicatorRetestHold] != 1.0 {
+		t.Fatalf("expected IndicatorRetestHold=1.0, got %v", res.TechnicalSnapshot.IndicatorValues[IndicatorRetestHold])
+	}
+}
+
 func TestQuantEngine_DebugSaveRawKlines_DefaultDisabled(t *testing.T) {
 	t.Setenv("DEBUG_SAVE_RAW_KLINES", "false")
 	debugDir := t.TempDir()

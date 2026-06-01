@@ -209,6 +209,9 @@ func (uc *PlaybookQuantEngineUsecase) RunEngine(
 			}
 			if retestTouches > 0 {
 				retestHold = 1.0
+				// Mark setup as a true retest stage so LocalGate/FinalGate will not treat it as
+				// "first breakout candle" (which must be WATCH-only).
+				res.SetupType = "BREAKOUT_RETEST"
 			}
 
 			techSnap.IndicatorValues[IndicatorBreakoutLevel] = level

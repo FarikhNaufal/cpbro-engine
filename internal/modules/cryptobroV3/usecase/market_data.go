@@ -51,6 +51,11 @@ func (uc *MarketDataUsecase) FetchMarketData(ctx context.Context, symbol string,
 		openInterest float64
 	)
 
+	// NOTE:
+	// TREND_PULLBACK requires H4 EMA(200) for trend alignment checks.
+	// Fetching too few H4 candles makes the playbook permanently ineligible (systemic bug).
+	const h4TrendCandleLimit = 210
+
 	// Concurrency limit of 3 concurrent requests to prevent rate limits
 	sem := make(chan struct{}, 3)
 	var wg sync.WaitGroup
@@ -94,7 +99,7 @@ func (uc *MarketDataUsecase) FetchMarketData(ctx context.Context, symbol string,
 		{
 			name: "H4Candles",
 			fn: func(ctx context.Context) error {
-				res, err := uc.provider.FetchClosedCandles(ctx, symbol, "4h", 50)
+				res, err := uc.provider.FetchClosedCandles(ctx, symbol, "4h", h4TrendCandleLimit)
 				if err != nil {
 					return err
 				}
@@ -186,7 +191,9 @@ func (uc *MarketDataUsecase) FetchCandles(ctx context.Context, symbol string) (m
 		return nil, nil, nil, fmt.Errorf("failed to fetch H1 candles: %w", err)
 	}
 
-	h4, err = uc.provider.FetchClosedCandles(ctx, symbol, "4h", 50)
+	// Keep consistent with FetchMarketData() to avoid systemic playbook ineligibility.
+	const h4TrendCandleLimit = 210
+	h4, err = uc.provider.FetchClosedCandles(ctx, symbol, "4h", h4TrendCandleLimit)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to fetch H4 candles: %w", err)
 	}
