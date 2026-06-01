@@ -173,6 +173,38 @@ func (h *Handler) GetLatest(c *gin.Context) {
 		return
 	}
 
+	// Dynamically enrich signal status using the latest signal journal monitoring status
+	if journal, err := h.storageUC.LoadSignalJournal(); err == nil {
+		latestJournal := make(map[string]usecase.SignalJournal)
+		for _, item := range journal {
+			if _, exists := latestJournal[item.Symbol]; !exists {
+				latestJournal[item.Symbol] = item
+			}
+		}
+		for i, sig := range res.ExecuteSignals {
+			if item, exists := latestJournal[sig.Symbol]; exists {
+				diff := sig.ReconciledTime.Sub(item.CreatedAt)
+				if diff < 0 {
+					diff = -diff
+				}
+				if diff < 2*time.Hour {
+					res.ExecuteSignals[i].Status = string(item.Status)
+				}
+			}
+		}
+		for i, sig := range res.Watchlist {
+			if item, exists := latestJournal[sig.Symbol]; exists {
+				diff := sig.ReconciledTime.Sub(item.CreatedAt)
+				if diff < 0 {
+					diff = -diff
+				}
+				if diff < 2*time.Hour {
+					res.Watchlist[i].Status = string(item.Status)
+				}
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, ok("latest result retrieved successfully", usecase.NormalizeLatestResultForFrontend(res)))
 }
 
