@@ -114,6 +114,10 @@ type SignalJournalResponse struct {
 	MarketRegime            string  `json:"market_regime"`
 	PolicyMode              string  `json:"policy_mode"`
 	ThresholdProfileSummary string  `json:"threshold_profile_summary"`
+	BreakoutLevel           float64 `json:"breakout_level,omitempty"`
+	RetestTouches           float64 `json:"retest_touches,omitempty"`
+	RetestHold              bool    `json:"retest_hold,omitempty"`
+	HasDerivativesEvidence  bool    `json:"has_derivatives_evidence,omitempty"`
 	CreatedAt               string  `json:"created_at"`
 	ExpiresAt               string  `json:"expires_at"`
 	Status                  string  `json:"status"`
@@ -319,6 +323,10 @@ type DecisionAuditRow struct {
 	MarketRegime              string  `json:"market_regime"`
 	PolicyMode                string  `json:"policy_mode"`
 	ThresholdProfileSummary   string  `json:"threshold_profile_summary"`
+	BreakoutLevel             float64 `json:"breakout_level,omitempty"`
+	RetestTouches             float64 `json:"retest_touches,omitempty"`
+	RetestHold                bool    `json:"retest_hold,omitempty"`
+	HasDerivativesEvidence    bool    `json:"has_derivatives_evidence,omitempty"`
 	RejectOrWatchReason       string  `json:"reject_or_watch_reason"`
 	CreatedAt                 string  `json:"created_at"`
 	HypotheticalEntry         float64 `json:"hypothetical_entry"`

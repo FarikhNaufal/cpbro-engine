@@ -24,6 +24,10 @@
       { "name": "market_regime", "type": "text" },
       { "name": "policy_mode", "type": "text" },
       { "name": "threshold_profile_summary", "type": "text" },
+      { "name": "breakout_level", "type": "number" },
+      { "name": "retest_touches", "type": "number" },
+      { "name": "retest_hold", "type": "bool" },
+      { "name": "has_derivatives_evidence", "type": "bool" },
 
       { "name": "created_at", "type": "date" },
       { "name": "expires_at", "type": "date" },

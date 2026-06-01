@@ -214,6 +214,10 @@ func NormalizeJournalForFrontend(items []SignalJournal, limit int, offset int, f
 			Reason:                  item.Reason,
 			NotificationStatus:      item.NotificationStatus,
 			NotificationError:       item.NotificationError,
+			BreakoutLevel:           item.BreakoutLevel,
+			RetestTouches:           item.RetestTouches,
+			RetestHold:              item.RetestHold,
+			HasDerivativesEvidence:  item.HasDerivativesEvidence,
 		})
 	}
 
@@ -484,6 +488,10 @@ func NormalizeDecisionAuditForFrontend(audits []DecisionAudit, limit, offset int
 			MarketRegime:              item.MarketRegime,
 			PolicyMode:                item.PolicyMode,
 			ThresholdProfileSummary:   item.ThresholdProfileSummary,
+			BreakoutLevel:             item.BreakoutLevel,
+			RetestTouches:             item.RetestTouches,
+			RetestHold:                item.RetestHold,
+			HasDerivativesEvidence:    item.HasDerivativesEvidence,
 			RejectOrWatchReason:       item.RejectOrWatchReason,
 			CreatedAt:                 createdStr,
 			HypotheticalEntry:         item.HypotheticalEntry,
