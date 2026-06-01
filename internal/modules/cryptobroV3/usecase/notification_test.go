@@ -118,28 +118,31 @@ func TestSignalNotification_SendV3Signals_SuccessAndFilters(t *testing.T) {
 	}
 
 	msg := mockSvc.signalMessages[0]
-	if !strings.Contains(msg, "[CRYPTOBRO V3 SIGNAL]") {
+	if !strings.Contains(msg, "CRYPTOBRO V3 SIGNAL") {
 		t.Errorf("missing header, got %s", msg)
 	}
-	if !strings.Contains(msg, "<b>Symbol:</b> BTCUSDT") {
+	if !strings.Contains(msg, "FINAL_EXECUTE") {
+		t.Errorf("missing final execute label, got %s", msg)
+	}
+	if !strings.Contains(msg, "Symbol      : BTCUSDT") {
 		t.Errorf("missing Symbol, got %s", msg)
 	}
-	if !strings.Contains(msg, "<b>Market Policy:</b> AllowLong=true, AllowShort=true, MinScore=7.0, MinRR=1.5, MaxExecute=3") {
+	if !strings.Contains(msg, "Policy      : AllowLong=true, AllowShort=true, MinScore=7.0, MinRR=1.5, MaxExecute=3") {
 		t.Errorf("missing Market Policy, got %s", msg)
 	}
-	if !strings.Contains(msg, "<b>Threshold Profile:</b> Playbook=TREND_PULLBACK, MinScore=7.0, MinRR=1.5, RequireADX=true") {
+	if !strings.Contains(msg, "Profile     : Playbook=TREND_PULLBACK, MinScore=7.0, MinRR=1.5, RequireADX=true") {
 		t.Errorf("missing Threshold Profile, got %s", msg)
 	}
-	if !strings.Contains(msg, "<b>TP1:</b> 52000.0000") {
+	if !strings.Contains(msg, "TP1         : 52000.0000") {
 		t.Errorf("incorrect TP1 scaling, got %s", msg)
 	}
-	if !strings.Contains(msg, "<b>TP2:</b> 54000.0000") {
+	if !strings.Contains(msg, "TP2         : 54000.0000") {
 		t.Errorf("incorrect TP2, got %s", msg)
 	}
-	if !strings.Contains(msg, "<b>Grade/Score:</b> S / 8.20") {
+	if !strings.Contains(msg, "Grade/Score : S / 8.20") {
 		t.Errorf("incorrect grade or score representation, got %s", msg)
 	}
-	if !strings.Contains(msg, "<i>Mode: Alert-only, manual execution.</i>") {
+	if !strings.Contains(msg, "<i>Alert-only. Manual execution.</i>") {
 		t.Errorf("missing manual execution warning, got %s", msg)
 	}
 }

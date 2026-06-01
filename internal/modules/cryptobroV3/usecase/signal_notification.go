@@ -153,25 +153,28 @@ func (uc *SignalNotificationUsecase) SendV3Signals(
 			escapedR := html.EscapeString(reason)
 			escapedK := html.EscapeString(risk)
 			return fmt.Sprintf(
-				"<b>[CRYPTOBRO V3 SIGNAL]</b>\n\n"+
-					"<b>Symbol:</b> %s\n"+
-					"<b>Direction:</b> %s\n"+
-					"<b>Playbook:</b> %s\n"+
-					"<b>Grade/Score:</b> %s / %s (Req: %s)\n"+
-					"<b>Market Regime:</b> %s\n"+
-					"<b>Market Policy:</b> %s\n"+
-					"<b>Threshold Profile:</b> %s\n"+
-					"<b>Entry:</b> %s\n"+
-					"<b>SL:</b> %s\n"+
-					"<b>TP1:</b> %s\n"+
-					"<b>TP2:</b> %s\n"+
-					"<b>RR:</b> %s (Req: %s)\n"+
-					"<b>AI Sentiment:</b> %s (HIGH)\n"+
-					"<b>AI Reason:</b> %s\n"+
-					"<b>AI Risk:</b> %s\n"+
-					"<b>Staleness:</b> %s\n"+
-					"<b>Time:</b> %s\n\n"+
-					"<i>Mode: Alert-only, manual execution.</i>",
+				"🟣 <b>CRYPTOBRO V3 SIGNAL</b>\n"+
+					"<b>FINAL_EXECUTE</b>\n\n"+
+					"<pre>\n"+
+					"Symbol      : %s\n"+
+					"Direction   : %s\n"+
+					"Playbook    : %s\n"+
+					"Grade/Score : %s / %s (Req: %s)\n"+
+					"Regime      : %s\n"+
+					"Staleness   : %s\n"+
+					"AI          : %s (HIGH)\n\n"+
+					"Entry       : %s\n"+
+					"SL          : %s\n"+
+					"TP1         : %s\n"+
+					"TP2         : %s\n"+
+					"RR          : %s (Req: %s)\n\n"+
+					"Policy      : %s\n"+
+					"Profile     : %s\n"+
+					"Time        : %s\n"+
+					"</pre>\n\n"+
+					"<b>AI Reason</b>\n%s\n\n"+
+					"<b>AI Risk</b>\n%s\n\n"+
+					"<i>Alert-only. Manual execution.</i>",
 				escapedSymbol,
 				escapedDirection,
 				escapedPlaybook,
@@ -179,19 +182,19 @@ func (uc *SignalNotificationUsecase) SendV3Signals(
 				scoreStr,
 				reqScoreStr,
 				escapedRegime,
-				escapedPolicySummary,
-				escapedThresholdProfileSummary,
+				escapedStaleness,
+				escapedSentiment,
 				entryStr,
 				slStr,
 				tp1Str,
 				tp2Str,
 				rrStr,
 				reqRRStr,
-				escapedSentiment,
+				escapedPolicySummary,
+				escapedThresholdProfileSummary,
+				escapedTime,
 				escapedR,
 				escapedK,
-				escapedStaleness,
-				escapedTime,
 			)
 		}
 
