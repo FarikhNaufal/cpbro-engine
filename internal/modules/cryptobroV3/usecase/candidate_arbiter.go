@@ -152,7 +152,13 @@ func (uc *CandidateArbiterUsecase) Arbitrate(candidates []QuantResult, policy Ma
 	}
 
 	for _, group := range symbolGroups {
-		// Filter based on specific market regimes (Chaos, Risk Off, Alt Supportive)
+		// Filter based on specific market regimes.
+		//
+		// IMPORTANT:
+		// - Policy.AllowedPlaybooks + policy modes (LongMode/ShortMode) are the source of truth.
+		// - Arbiter must not introduce additional regime-only hard blocks that contradict policy,
+		//   otherwise strategies become "dead" and the system loses versatility.
+		// - We keep BTC_CHAOS as an additional safety clamp (premium-only).
 		var activeCandidates []QuantResult
 		for _, cand := range group {
 			if isChaos {
@@ -166,38 +172,6 @@ func (uc *CandidateArbiterUsecase) Arbitrate(candidates []QuantResult, policy Ma
 					cand.Status = ARBITER_REJECTED
 					cand.Reason = fmt.Sprintf("BTCChaos: only S+ Sweep and Squeeze allowed, got playbook %s score %0.1f", cand.Playbook, cand.Score)
 					rejected = append(rejected, cand)
-				}
-			} else if isRiskOff {
-				// LONG candidates: Only LIQUIDITY_SWEEP_REVERSAL & CROWDED_POSITIONING_SQUEEZE and must be premium (score >= 7.8)
-				if cand.Direction == LONG {
-					isSweep := cand.Playbook == LIQUIDITY_SWEEP_REVERSAL
-					isSqueeze := cand.Playbook == CROWDED_POSITIONING_SQUEEZE
-					isPremium := cand.Score >= 7.8
-					if (isSweep || isSqueeze) && isPremium {
-						activeCandidates = append(activeCandidates, cand)
-					} else {
-						cand.Status = ARBITER_REJECTED
-						cand.Reason = fmt.Sprintf("RiskOff LONG filter: only premium (score >= 7.8) Sweep/Squeeze allowed, got playbook %s score %0.1f", cand.Playbook, cand.Score)
-						rejected = append(rejected, cand)
-					}
-				} else {
-					activeCandidates = append(activeCandidates, cand)
-				}
-			} else if isAltSupportive {
-				// SHORT candidates: Only LIQUIDITY_SWEEP_REVERSAL & CROWDED_POSITIONING_SQUEEZE and must be premium (score >= 7.8)
-				if cand.Direction == SHORT {
-					isSweep := cand.Playbook == LIQUIDITY_SWEEP_REVERSAL
-					isSqueeze := cand.Playbook == CROWDED_POSITIONING_SQUEEZE
-					isPremium := cand.Score >= 7.8
-					if (isSweep || isSqueeze) && isPremium {
-						activeCandidates = append(activeCandidates, cand)
-					} else {
-						cand.Status = ARBITER_REJECTED
-						cand.Reason = fmt.Sprintf("AltSupportive SHORT filter: only premium (score >= 7.8) Sweep/Squeeze allowed, got playbook %s score %0.1f", cand.Playbook, cand.Score)
-						rejected = append(rejected, cand)
-					}
-				} else {
-					activeCandidates = append(activeCandidates, cand)
 				}
 			} else {
 				activeCandidates = append(activeCandidates, cand)
@@ -398,30 +372,25 @@ func (uc *CandidateArbiterUsecase) getPlaybookPriorityIndex(playbook Playbook, d
 	}
 
 	if isRiskOff {
-		if dir == SHORT {
-			switch playbook {
-			case TREND_PULLBACK:
-				return 0
-			case COMPRESSION_BREAKOUT_RETEST:
-				return 1
-			case LIQUIDITY_SWEEP_REVERSAL:
-				return 2
-			default:
-				return 99
-			}
-		} else { // LONG
-			switch playbook {
-			case LIQUIDITY_SWEEP_REVERSAL:
-				return 0
-			case CROWDED_POSITIONING_SQUEEZE:
-				return 1
-			default:
-				return 99
-			}
+		// Defensive regime: prioritize reversal-style playbooks (policy should already restrict AllowedPlaybooks).
+		switch playbook {
+		case LIQUIDITY_SWEEP_REVERSAL:
+			return 0
+		case RANGE_EDGE_REVERSAL:
+			return 1
+		case CROWDED_POSITIONING_SQUEEZE:
+			return 2
+		case TREND_PULLBACK:
+			return 3
+		case COMPRESSION_BREAKOUT_RETEST:
+			return 4
+		default:
+			return 99
 		}
 	}
 
 	if isAltSupportive {
+		// Favor LONG continuation-style playbooks; SHORT should generally be reversal-only via policy.
 		if dir == LONG {
 			switch playbook {
 			case TREND_PULLBACK:
@@ -430,18 +399,28 @@ func (uc *CandidateArbiterUsecase) getPlaybookPriorityIndex(playbook Playbook, d
 				return 1
 			case LIQUIDITY_SWEEP_REVERSAL:
 				return 2
-			default:
-				return 99
-			}
-		} else { // SHORT
-			switch playbook {
-			case LIQUIDITY_SWEEP_REVERSAL:
-				return 0
 			case CROWDED_POSITIONING_SQUEEZE:
-				return 1
+				return 3
+			case RANGE_EDGE_REVERSAL:
+				return 4
 			default:
 				return 99
 			}
+		}
+
+		switch playbook {
+		case LIQUIDITY_SWEEP_REVERSAL:
+			return 0
+		case RANGE_EDGE_REVERSAL:
+			return 1
+		case CROWDED_POSITIONING_SQUEEZE:
+			return 2
+		case TREND_PULLBACK:
+			return 3
+		case COMPRESSION_BREAKOUT_RETEST:
+			return 4
+		default:
+			return 99
 		}
 	}
 

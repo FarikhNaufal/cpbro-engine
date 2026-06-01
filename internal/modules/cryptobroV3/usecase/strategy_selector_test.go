@@ -87,6 +87,25 @@ func TestSelectPlaybooksRegimes(t *testing.T) {
 		t.Errorf("RISK_OFF: LONG sweep reversal should be allowed")
 	}
 
+	// 2b. RISK_OFF with SHORT trend pullback enabled by policy
+	policyRiskOffTrend := MarketPolicy{
+		AllowLong:  true,
+		AllowShort: true,
+		AllowedPlaybooks: []Playbook{
+			TREND_PULLBACK,
+			LIQUIDITY_SWEEP_REVERSAL,
+			RANGE_EDGE_REVERSAL,
+		},
+		Reason: "RISK_OFF + BTC Bearish active - short bias",
+	}
+	selectionsRiskOffTrend := selector.SelectPlaybooks(policyRiskOffTrend, candidate, prelimData, tech, structure)
+	if ok, p := hasSelection(selectionsRiskOffTrend, TREND_PULLBACK, SHORT); !ok || p != 3 {
+		t.Errorf("RISK_OFF: Expected SHORT trend pullback to be selectable with priority 3 when allowed by policy, got ok=%v priority=%d", ok, p)
+	}
+	if ok, _ := hasSelection(selectionsRiskOffTrend, TREND_PULLBACK, LONG); ok {
+		t.Errorf("RISK_OFF: LONG trend pullback should remain disabled by selector behavior")
+	}
+
 	// 3. CHOP_RANGE
 	policyChop := MarketPolicy{
 		AllowLong:  true,

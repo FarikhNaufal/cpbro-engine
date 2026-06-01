@@ -134,6 +134,43 @@ func TestCandidateArbiter_BTCChaosRules(t *testing.T) {
 	}
 }
 
+func TestCandidateArbiter_RiskOff_AllowsRangeEdgeReversalLongWhenPolicyAllows(t *testing.T) {
+	arbiter := NewCandidateArbiterUsecase()
+
+	policy := MarketPolicy{
+		Regime:       RISK_OFF,
+		AllowLong:    true,
+		AllowShort:   true,
+		AllowedTiers: []Tier{TierA, TierB, TierC},
+		AllowedPlaybooks: []Playbook{
+			LIQUIDITY_SWEEP_REVERSAL,
+			RANGE_EDGE_REVERSAL,
+		},
+		Reason: "RISK_OFF active - short bias",
+	}
+
+	candidates := []QuantResult{
+		{
+			Symbol:    "ETHUSDT",
+			Direction: LONG,
+			Playbook:  RANGE_EDGE_REVERSAL,
+			Score:     7.9,
+			Tier:      TierA,
+		},
+	}
+
+	selected, rejected := arbiter.Arbitrate(candidates, policy)
+	if len(selected) != 1 {
+		t.Fatalf("Expected 1 selected candidate, got %d", len(selected))
+	}
+	if selected[0].Playbook != RANGE_EDGE_REVERSAL {
+		t.Errorf("Expected RANGE_EDGE_REVERSAL to be selectable under RISK_OFF when policy allows it, got %s", selected[0].Playbook)
+	}
+	if len(rejected) != 0 {
+		t.Fatalf("Expected 0 rejected candidates, got %d", len(rejected))
+	}
+}
+
 func TestCandidateArbiter_NaNSafetyGuard(t *testing.T) {
 	arbiter := NewCandidateArbiterUsecase()
 

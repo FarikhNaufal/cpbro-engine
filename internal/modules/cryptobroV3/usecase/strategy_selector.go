@@ -246,6 +246,18 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 		// RISK_OFF policy is expected to bias defensive setups.
 		// Keep selections aligned with policy.AllowedPlaybooks to avoid dead branches.
 		if policy.AllowShort {
+			if isPlaybookAllowed(TREND_PULLBACK) {
+				selections = append(selections, StrategySelection{
+					Symbol:        candidate.Symbol,
+					StrategyName:  string(TREND_PULLBACK),
+					Direction:     SHORT,
+					Priority:      3,
+					Reason:        "SHORT trend pullback continuation allowed in RISK_OFF regime",
+					PolicyContext: policyCtx,
+					Tier:          candidate.Tier,
+					Status:        STRATEGY_SELECTED,
+				})
+			}
 			if isPlaybookAllowed(LIQUIDITY_SWEEP_REVERSAL) {
 				selections = append(selections, StrategySelection{
 					Symbol:        candidate.Symbol,

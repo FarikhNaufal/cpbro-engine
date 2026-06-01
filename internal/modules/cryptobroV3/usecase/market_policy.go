@@ -152,7 +152,9 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 		policy.ShortMode = NORMAL
 		policy.LongMode = REVERSAL_ONLY
 		policy.AllowedTiers = []Tier{TierA, TierB}
-		policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, RANGE_EDGE_REVERSAL}
+		// Bear market: prioritize SHORT continuation (trend pullback) + defensive reversals.
+		// LONG should remain reversal-only via LongMode=REVERSAL_ONLY.
+		policy.AllowedPlaybooks = []Playbook{TREND_PULLBACK, LIQUIDITY_SWEEP_REVERSAL, RANGE_EDGE_REVERSAL}
 		policy.MaxSymbols = 50
 		policy.MaxAICandidates = 3
 		policy.MinScoreExecute = 7.4
@@ -212,14 +214,25 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 		policy.MaxSymbols = 75
 		policy.MinVolume = 500000.0     // looser volume constraint
 		policy.RequireFreshEntry = true // avoid fake breakouts
-		policy.Reason = "LOW_VOL active - cautious watch mode"
+		// Low volatility tends to be mean-reverting unless a true compression breakout retest appears.
+		// Prefer reversal playbooks; do not force trend continuation in low-vol grind.
+		policy.LongMode = REVERSAL_ONLY
+		policy.ShortMode = REVERSAL_ONLY
+		policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, RANGE_EDGE_REVERSAL}
+		policy.RequireAIConfidence = AIConfidenceHigh
+		policy.Reason = "LOW_VOL active - reversal/watch mode"
 	} else if volatility == "HIGH" {
 		policy.Regime = HIGH_VOL
 		policy.MinVolume = 10000000.0              // higher volume limit
 		policy.AllowedTiers = []Tier{TierA, TierB} // Tier C limited
 		policy.MaxFinalExecute = 2                 // limit executes
 		policy.StalenessATRMultiplier = 0.8        // stricter staleness
-		policy.Reason = "HIGH_VOL active - risk reduction mode"
+		// High volatility: allow only higher-quality playbooks and reduce breadth.
+		// Keep sweep reversals as primary; trend pullback can still be valid if policy allows it.
+		policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, TREND_PULLBACK, COMPRESSION_BREAKOUT_RETEST}
+		policy.RequireAIConfidence = AIConfidenceHigh
+		policy.RequireFreshEntry = true
+		policy.Reason = "HIGH_VOL active - strict risk reduction mode"
 	}
 
 	return policy
