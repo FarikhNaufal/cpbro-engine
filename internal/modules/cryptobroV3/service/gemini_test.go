@@ -36,3 +36,60 @@ func TestFormatCompactCandles(t *testing.T) {
 		t.Errorf("Expected RFC3339 format, but got raw HH:MM format: %s", result)
 	}
 }
+
+func TestValidateAuditResponseRejectsInconsistentExecuteAction(t *testing.T) {
+	res := validAuditResponseForTest()
+	res.Confidence = "MEDIUM"
+
+	err := validateAuditResponse(res)
+	if err == nil {
+		t.Fatalf("expected inconsistent EXECUTE_IF_NOT_STALE response to be rejected")
+	}
+	if !strings.Contains(err.Error(), "EXECUTE_IF_NOT_STALE requires HIGH confidence") {
+		t.Fatalf("expected HIGH confidence consistency error, got %v", err)
+	}
+}
+
+func TestValidateAuditResponseRejectsWaitWithExecuteAction(t *testing.T) {
+	res := validAuditResponseForTest()
+	res.Decision = "WAIT"
+
+	err := validateAuditResponse(res)
+	if err == nil {
+		t.Fatalf("expected WAIT + EXECUTE_IF_NOT_STALE response to be rejected")
+	}
+	if !strings.Contains(err.Error(), "decision WAIT requires WAIT_RETEST or WATCH_ONLY") {
+		t.Fatalf("expected WAIT consistency error, got %v", err)
+	}
+}
+
+func TestValidateAuditResponseAcceptsConservativeWait(t *testing.T) {
+	res := validAuditResponseForTest()
+	res.Decision = "WAIT"
+	res.Confidence = "MEDIUM"
+	res.EntryTiming = "LATE"
+	res.SuggestedAction = "WAIT_RETEST"
+	res.HasConfirmation = false
+	res.CandleNarrative = "CHOP"
+
+	if err := validateAuditResponse(res); err != nil {
+		t.Fatalf("expected conservative WAIT response to be accepted, got %v", err)
+	}
+}
+
+func validAuditResponseForTest() dto.AIAuditResponse {
+	return dto.AIAuditResponse{
+		Decision:         "CONFIRM",
+		Confidence:       "HIGH",
+		CandleNarrative:  "CONTINUATION",
+		Last5CandlesBias: "BULLISH",
+		HasRejection:     true,
+		HasConfirmation:  true,
+		EntryTiming:      "FRESH",
+		ConflictWithBot:  false,
+		SuggestedAction:  "EXECUTE_IF_NOT_STALE",
+		PlanFeedback:     "Plan is aligned with closed candles",
+		Reason:           "Confirmation candle supports direction",
+		Risk:             "Normal execution risk",
+	}
+}

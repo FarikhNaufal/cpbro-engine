@@ -373,6 +373,50 @@ func LowestLow(candles []dto.Candle, period int) float64 {
 	return low
 }
 
+func DescribeCandleStructure(candles []dto.Candle, timeframe string, dominantTrend string) (string, bool, bool) {
+	closed := candles
+	if len(closed) < 3 {
+		return timeframe + "_INSUFFICIENT_STRUCTURE_DATA", false, false
+	}
+
+	last := closed[len(closed)-1]
+	lookback := 20
+	if len(closed)-1 < lookback {
+		lookback = len(closed) - 1
+	}
+
+	prior := closed[:len(closed)-1]
+	priorHigh := HighestHigh(prior, lookback)
+	priorLow := LowestLow(prior, lookback)
+
+	bullishBreak := priorHigh > 0 && last.Close > priorHigh
+	bearishBreak := priorLow > 0 && last.Close < priorLow
+
+	if bullishBreak {
+		if dominantTrend == "BEARISH" {
+			return timeframe + "_BULLISH_CHOCH", false, true
+		}
+		return timeframe + "_BULLISH_BOS", true, false
+	}
+	if bearishBreak {
+		if dominantTrend == "BULLISH" {
+			return timeframe + "_BEARISH_CHOCH", false, true
+		}
+		return timeframe + "_BEARISH_BOS", true, false
+	}
+
+	prev := closed[len(closed)-2]
+	prev2 := closed[len(closed)-3]
+	if last.Close > prev.Close && prev.Close > prev2.Close {
+		return timeframe + "_BULLISH_CONTINUATION", false, false
+	}
+	if last.Close < prev.Close && prev.Close < prev2.Close {
+		return timeframe + "_BEARISH_CONTINUATION", false, false
+	}
+
+	return timeframe + "_RANGE_BOUND", false, false
+}
+
 // PopulateSnapshots builds high-fidelity TechnicalSnapshot and StructureSnapshot for use in selectors & gates.
 func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundingRate float64, latestPrice float64, priceChange24h float64, openInterest float64, oiChangePct float64) (*TechnicalSnapshot, *StructureSnapshot) {
 	m15Closed := GetClosedCandlesOnly(m15, 15*time.Minute)
@@ -606,10 +650,18 @@ func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundi
 		resistance = liquidityUpper
 	}
 
+	m15Structure, bos, choch := DescribeCandleStructure(m15Closed, "M15", h1Trend)
+	h1Structure, _, _ := DescribeCandleStructure(h1Closed, "H1", h4Trend)
+	sweepLow := tech.IndicatorValues[IndicatorSweepLow] == 1.0
+	sweepHigh := tech.IndicatorValues[IndicatorSweepHigh] == 1.0
+
 	structure := &StructureSnapshot{
-		MarketStructure: "CHOP",
+		MarketStructure: m15Structure,
+		H1Structure:     h1Structure,
+		BOS:             bos,
+		CHOCH:           choch,
 		Timeframe:       "M15",
-		Notes:           fmt.Sprintf("H4Trend: %s | H1Trend: %s", h4Trend, h1Trend),
+		Notes:           fmt.Sprintf("M15Structure: %s | H1Structure: %s | H4Trend: %s | H1Trend: %s | sweep_low=%v | sweep_high=%v", m15Structure, h1Structure, h4Trend, h1Trend, sweepLow, sweepHigh),
 		Highs:           highs,
 		Lows:            lows,
 		Support:         support,
@@ -618,11 +670,6 @@ func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundi
 		SessionLow:      sessionLow,
 		LiquidityUpper:  liquidityUpper,
 		LiquidityLower:  liquidityLower,
-	}
-	if h4Trend == "BULLISH" {
-		structure.MarketStructure = "BULLISH_BOS"
-	} else if h4Trend == "BEARISH" {
-		structure.MarketStructure = "BEARISH_BOS"
 	}
 
 	return tech, structure

@@ -137,6 +137,35 @@ func TestPlanReconciliation_Rules(t *testing.T) {
 		}
 	})
 
+	t.Run("Breakout retest execute-if-not-stale keeps plan valid when retest evidence exists", func(t *testing.T) {
+		quant := QuantResult{
+			Playbook:  COMPRESSION_BREAKOUT_RETEST,
+			Direction: LONG,
+			SetupType: "BREAKOUT_RETEST",
+			TechnicalSnapshot: TechnicalSnapshot{
+				IndicatorValues: map[string]float64{
+					IndicatorRetestHold: 1.0,
+				},
+			},
+		}
+		ai := dto.AIAuditResponse{
+			Decision:         "CONFIRM",
+			Confidence:       "HIGH",
+			CandleNarrative:  "CONTINUATION",
+			Last5CandlesBias: "BULLISH",
+			HasConfirmation:  true,
+			EntryTiming:      "FRESH",
+			SuggestedAction:  "EXECUTE_IF_NOT_STALE",
+		}
+		review := reconciler.Reconcile(quant, ai)
+		if review.NeedRetest {
+			t.Errorf("Expected NeedRetest=false when bot and AI both have breakout retest evidence")
+		}
+		if review.Status != PLAN_VALID {
+			t.Errorf("Expected status PLAN_VALID, got %s with reason %q", review.Status, review.Reason)
+		}
+	})
+
 	// Rule 11: Protect entry/SL/TP final (Unchanged values)
 	t.Run("Rule 11 - Protect final price parameters", func(t *testing.T) {
 		quant := QuantResult{

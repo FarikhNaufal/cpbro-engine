@@ -4,17 +4,20 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 	"cpbro-engine/internal/modules/cryptobroV3/entity"
 )
 
 type mockAIAuditorService struct {
-	response *dto.AIAuditResponse
-	err      error
+	response    *dto.AIAuditResponse
+	err         error
+	lastRequest dto.AIAuditRequest
 }
 
 func (m *mockAIAuditorService) AuditCandidate(ctx context.Context, req dto.AIAuditRequest) (*dto.AIAuditResponse, error) {
+	m.lastRequest = req
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -182,6 +185,61 @@ func TestAIAuditor_ConflictRejection(t *testing.T) {
 	}
 	if res.Decision != "REJECT" || res.SuggestedAction != "REJECT" {
 		t.Errorf("Expected Decision and SuggestedAction to be REJECT, got Decision=%s Action=%s", res.Decision, res.SuggestedAction)
+	}
+}
+
+func TestAIAuditor_UsesStructuredH1ContextInPayload(t *testing.T) {
+	mockResponse := &dto.AIAuditResponse{
+		Decision:         "CONFIRM",
+		Confidence:       "HIGH",
+		CandleNarrative:  "CONTINUATION",
+		Last5CandlesBias: "BULLISH",
+		HasRejection:     true,
+		HasConfirmation:  true,
+		EntryTiming:      "FRESH",
+		ConflictWithBot:  false,
+		SuggestedAction:  "EXECUTE_IF_NOT_STALE",
+		PlanFeedback:     "Retest held cleanly",
+		Reason:           "Closed candles support continuation",
+		Risk:             "Normal continuation risk",
+	}
+
+	mockService := &mockAIAuditorService{response: mockResponse}
+	storage := NewStorageUsecase(&mockStorageRepository{})
+	auditor := NewAIAuditorUsecase(mockService, storage)
+
+	quant := QuantResult{
+		Symbol:          "NEARUSDT",
+		Direction:       LONG,
+		Playbook:        COMPRESSION_BREAKOUT_RETEST,
+		SetupType:       "BREAKOUT_RETEST",
+		Score:           8.5,
+		MarketStructure: "M15_BULLISH_BOS",
+		StructureSnapshot: StructureSnapshot{
+			H1Structure: "H1_RANGE_BOUND",
+			Notes:       "H4Trend: BULLISH | H1Trend: BULLISH",
+		},
+		TradePlan: TradePlan{
+			EntryPrice: 5.0,
+			StopLoss:   4.5,
+			TakeProfit: 6.0,
+		},
+	}
+
+	policy := MarketPolicy{Reason: "Normal"}
+	m15 := []dto.Candle{
+		{Time: time.Now().Add(-45 * time.Minute), Open: 5, High: 5.1, Low: 4.9, Close: 5.0, Vol: 100},
+		{Time: time.Now().Add(-30 * time.Minute), Open: 5, High: 5.2, Low: 4.95, Close: 5.1, Vol: 120},
+		{Time: time.Now().Add(-15 * time.Minute), Open: 5.1, High: 5.25, Low: 5.05, Close: 5.2, Vol: 130},
+	}
+
+	_, err := auditor.Audit(context.Background(), quant, policy, m15, nil, nil)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if mockService.lastRequest.Payload.Structure.H1Structure != "H1_RANGE_BOUND" {
+		t.Fatalf("expected AI payload to use StructureSnapshot.H1Structure, got %q", mockService.lastRequest.Payload.Structure.H1Structure)
 	}
 }
 

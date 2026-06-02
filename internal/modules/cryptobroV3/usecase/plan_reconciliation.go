@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
+	"strings"
 )
 
 type PlanReconciliationUsecase struct{}
@@ -125,15 +126,18 @@ func (uc *PlanReconciliationUsecase) Reconcile(quant QuantResult, ai dto.AIAudit
 	// Rule 11: Breakout retest -> AI must see retest hold or continuation. Chase breakout -> NeedRetest true
 	if quant.Playbook == COMPRESSION_BREAKOUT_RETEST {
 		validRetest := ai.CandleNarrative == "CONTINUATION" || ai.CandleNarrative == "REJECTION" || ai.HasConfirmation
+		hasBotRetestEvidence := strings.Contains(strings.ToUpper(quant.SetupType), "RETEST") ||
+			GetIndicator(quant.TechnicalSnapshot.IndicatorValues, IndicatorRetestHold) == 1.0
 		if !validRetest {
 			review.Conflicted = true
 			review.Status = PLAN_CONFLICT
 			review.Reason = "Breakout retest lacks valid retest hold or continuation narrative"
 		}
-		if ai.EntryTiming == "LATE" || ai.SuggestedAction == "EXECUTE_IF_NOT_STALE" {
+		if !hasBotRetestEvidence || ai.EntryTiming == "LATE" || ai.SuggestedAction == "WAIT_RETEST" {
 			review.NeedRetest = true
 			if review.Status != PLAN_CONFLICT {
 				review.Status = PLAN_NEED_RETEST
+				review.Reason = "Breakout retest needs confirmed retest hold before execute"
 			}
 		}
 	}

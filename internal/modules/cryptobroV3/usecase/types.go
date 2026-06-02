@@ -228,6 +228,7 @@ type TechnicalSnapshot struct {
 
 type StructureSnapshot struct {
 	MarketStructure string    `json:"market_structure"`
+	H1Structure     string    `json:"h1_structure"`
 	BOS             bool      `json:"bos"`
 	CHOCH           bool      `json:"choch"`
 	Highs           []float64 `json:"highs"`

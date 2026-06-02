@@ -485,5 +485,34 @@ func validateAuditResponse(res dto.AIAuditResponse) error {
 		return fmt.Errorf("missing required field 'risk'")
 	}
 
+	if res.Decision == "REJECT" && res.SuggestedAction != "REJECT" {
+		return fmt.Errorf("inconsistent AI response: decision REJECT requires suggested_action REJECT")
+	}
+
+	if res.Decision == "WAIT" && res.SuggestedAction != "WAIT_RETEST" && res.SuggestedAction != "WATCH_ONLY" {
+		return fmt.Errorf("inconsistent AI response: decision WAIT requires WAIT_RETEST or WATCH_ONLY")
+	}
+
+	if res.SuggestedAction == "EXECUTE_IF_NOT_STALE" {
+		if res.Decision != "CONFIRM" {
+			return fmt.Errorf("inconsistent AI response: EXECUTE_IF_NOT_STALE requires decision CONFIRM")
+		}
+		if res.Confidence != "HIGH" {
+			return fmt.Errorf("inconsistent AI response: EXECUTE_IF_NOT_STALE requires HIGH confidence")
+		}
+		if res.ConflictWithBot {
+			return fmt.Errorf("inconsistent AI response: EXECUTE_IF_NOT_STALE cannot conflict with bot")
+		}
+		if res.EntryTiming != "FRESH" && res.EntryTiming != "ACCEPTABLE" {
+			return fmt.Errorf("inconsistent AI response: EXECUTE_IF_NOT_STALE requires fresh or acceptable entry timing")
+		}
+		if !res.HasConfirmation {
+			return fmt.Errorf("inconsistent AI response: EXECUTE_IF_NOT_STALE requires confirmation candle")
+		}
+		if res.CandleNarrative == "UNCLEAR" || res.CandleNarrative == "CHOP" {
+			return fmt.Errorf("inconsistent AI response: EXECUTE_IF_NOT_STALE requires clear non-chop candle narrative")
+		}
+	}
+
 	return nil
 }

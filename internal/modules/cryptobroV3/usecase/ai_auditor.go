@@ -170,7 +170,7 @@ func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy
 			H4Trend:               quant.H4Trend,
 			H1Trend:               quant.H1Trend,
 			M15Structure:          quant.MarketStructure,
-			H1Structure:           quant.StructureSnapshot.Notes,
+			H1Structure:           quant.StructureSnapshot.H1Structure,
 			Support:               quant.StructureSnapshot.Support,
 			Resistance:            quant.StructureSnapshot.Resistance,
 			SessionHigh:           quant.StructureSnapshot.SessionHigh,
