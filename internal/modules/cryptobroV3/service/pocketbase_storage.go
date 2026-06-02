@@ -129,7 +129,7 @@ func (s *PocketBaseStorageService) saveSignalJournalUnlocked(journal []usecase.S
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	existing, err := s.mapSignalIDToRecordID(ctx)
+	existing, err := s.mapSignalIDToRecords(ctx)
 	if err != nil {
 		return err
 	}
@@ -139,7 +139,51 @@ func (s *PocketBaseStorageService) saveSignalJournalUnlocked(journal []usecase.S
 			continue
 		}
 		payload := encodeSignalJournal(entry)
-		if recID, ok := existing[entry.ID]; ok && strings.TrimSpace(recID) != "" {
+		
+		var recID string
+		var shouldUpdate = true
+		if extRecord, ok := existing[entry.ID]; ok {
+			recID, _ = extRecord["id"].(string)
+			shouldUpdate = false
+			
+			// Compare critical fields
+			if extStatus, _ := extRecord["status"].(string); extStatus != string(entry.Status) {
+				shouldUpdate = true
+			}
+			if toFloat(extRecord["latest_price"]) != entry.LatestPrice {
+				shouldUpdate = true
+			}
+			if toFloat(extRecord["pnl_percentage"]) != entry.PnlPercentage {
+				shouldUpdate = true
+			}
+			if toFloat(extRecord["mfe"]) != entry.MFE || toFloat(extRecord["mae"]) != entry.MAE {
+				shouldUpdate = true
+			}
+			if !parsePBTime(extRecord["expires_at"]).Equal(entry.ExpiresAt) {
+				shouldUpdate = true
+			}
+			if !parsePBTime(extRecord["closed_at"]).Equal(entry.ClosedAt) {
+				shouldUpdate = true
+			}
+			if extReason, _ := extRecord["outcome_reason"].(string); extReason != entry.OutcomeReason {
+				shouldUpdate = true
+			}
+			if extT1, _ := extRecord["time_to_tp1"].(string); extT1 != entry.TimeToTP1 {
+				shouldUpdate = true
+			}
+			if extT2, _ := extRecord["time_to_tp2"].(string); extT2 != entry.TimeToTP2 {
+				shouldUpdate = true
+			}
+			if extTsl, _ := extRecord["time_to_sl"].(string); extTsl != entry.TimeToSL {
+				shouldUpdate = true
+			}
+		}
+		
+		if !shouldUpdate {
+			continue
+		}
+
+		if recID != "" {
 			if err := s.client.doJSON(ctx, "PATCH", "/api/collections/signal_journals/records/"+recID, nil, payload, nil); err != nil {
 				return err
 			}
@@ -158,7 +202,10 @@ func (s *PocketBaseStorageService) saveSignalJournalUnlocked(journal []usecase.S
 				return err
 			}
 			if id, _ := created["id"].(string); id != "" {
-				existing[entry.ID] = id
+				if existing[entry.ID] == nil {
+					existing[entry.ID] = make(map[string]any)
+				}
+				existing[entry.ID]["id"] = id
 			}
 		}
 	}
@@ -358,6 +405,23 @@ func (s *PocketBaseStorageService) mapSignalIDToRecordID(ctx context.Context) (m
 		recID, _ := it["id"].(string)
 		if sigID != "" && recID != "" {
 			m[sigID] = recID
+		}
+	}
+	return m, nil
+}
+
+func (s *PocketBaseStorageService) mapSignalIDToRecords(ctx context.Context) (map[string]map[string]any, error) {
+	items, err := s.listAll(ctx, "signal_journals", url.Values{
+		"perPage": []string{"200"},
+	})
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]map[string]any, len(items))
+	for _, it := range items {
+		sigID, _ := it["signal_id"].(string)
+		if sigID != "" {
+			m[sigID] = it
 		}
 	}
 	return m, nil
