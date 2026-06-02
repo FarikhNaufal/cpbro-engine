@@ -101,11 +101,17 @@ func main() {
 	}
 
 	// 3. Initialize Services (Binance, Gemini, Telegram)
-	binanceService := service.NewBinanceReadonlyService(cfg.Binance.APIKey, cfg.Binance.APISecret)
+	binanceService := service.NewBinanceReadonlyServiceWithOptions(
+		cfg.Binance.APIKey,
+		cfg.Binance.APISecret,
+		time.Duration(cfg.Binance.RequestTimeoutSeconds)*time.Second,
+		cfg.Binance.MaxRetry,
+		time.Duration(cfg.Binance.RetryBackoffMs)*time.Millisecond,
+	)
 
 	var geminiService *service.GeminiService
 	if cfg.Gemini.APIKey != "" {
-		geminiService, err = service.NewGeminiService(cfg.Gemini.Model)
+		geminiService, err = service.NewGeminiServiceWithTimeout(cfg.Gemini.Model, time.Duration(cfg.Gemini.RequestTimeoutSeconds)*time.Second)
 		if err != nil {
 			log.Printf("warning: Gemini service failed to initialize: %v (AI audits will fail)", err)
 		}
@@ -283,15 +289,16 @@ func startStartupScan(ctx context.Context, cfg *config.Config, scannerUC *usecas
 		slog.Info("Startup scan trigger: executing initial scan")
 		boundary := time.Now().Truncate(15 * time.Minute)
 		scanID := boundary.Format("20060102150405")
-		if cfg.Telegram.OpsScanEnabled {
-			opsUC.SendScanStarted(ctx, scanID, boundary, "startup M15 close scan")
-		}
 
 		if !scannerRunning.CompareAndSwap(false, true) {
 			slog.Warn("Startup scan skipped: scan already in progress")
 			return
 		}
 		defer scannerRunning.Store(false)
+
+		if cfg.Telegram.OpsScanEnabled {
+			opsUC.SendScanStarted(ctx, scanID, boundary, "startup M15 close scan")
+		}
 
 		scanCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Scanner.ContextTimeoutSeconds)*time.Second)
 		defer cancel()
@@ -355,15 +362,16 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 
 					slog.Info("Background worker trigger: executing M15 scan", "boundary", boundary.Format("15:04:05"))
 					scanID := boundary.Format("20060102150405")
-					if cfg.Telegram.OpsScanEnabled {
-						opsUC.SendScanStarted(ctx, scanID, boundary, "M15 close scan")
-					}
 
 					if !scannerRunning.CompareAndSwap(false, true) {
 						slog.Warn("Scan worker skipped: scan already in progress")
 						return
 					}
 					defer scannerRunning.Store(false)
+
+					if cfg.Telegram.OpsScanEnabled {
+						opsUC.SendScanStarted(ctx, scanID, boundary, "M15 close scan")
+					}
 
 					scanCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Scanner.ContextTimeoutSeconds)*time.Second)
 					defer cancel()
@@ -388,14 +396,6 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 						}
 					}
 
-					if cfg.Evaluation.Enabled && cfg.Evaluation.AutoRun {
-						evalErr := feedbackUC.GenerateEvaluationReport()
-						if evalErr != nil {
-							slog.Error("Background evaluation failed", "error", evalErr)
-						} else {
-							usecase.GetGlobalMetrics().SetLastEvaluationTime(time.Now())
-						}
-					}
 				}()
 			}
 		}

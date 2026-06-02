@@ -182,3 +182,91 @@ func TestConfigRegistry_SafetyCompliance(t *testing.T) {
 		t.Errorf("Checksums should not be none, got: %s", version)
 	}
 }
+
+func TestConfigRegistry_RegimePolicyDriftIsClamped(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	policyJSON := `{
+		"version": "v-drift",
+		"policies": {
+			"BTC_CHAOS": {
+				"allow_long": true,
+				"allow_short": true,
+				"long_mode": "NORMAL",
+				"short_mode": "NORMAL",
+				"allowed_tiers": ["A", "B", "C"],
+				"allowed_playbooks": ["TREND_PULLBACK", "LIQUIDITY_SWEEP_REVERSAL", "COMPRESSION_BREAKOUT_RETEST", "RANGE_EDGE_REVERSAL", "CROWDED_POSITIONING_SQUEEZE"],
+				"max_symbols": 100,
+				"max_ai_candidates": 5,
+				"max_final_execute": 5,
+				"min_volume": 1000000.0,
+				"max_price_move_24h": 0.20,
+				"min_score_ai": 6.0,
+				"min_score_execute": 8.0,
+				"min_rr_execute": 1.5,
+				"require_ai_confidence": "MEDIUM",
+				"require_fresh_entry": false
+			},
+			"RISK_OFF": {
+				"allow_long": true,
+				"allow_short": true,
+				"long_mode": "REVERSAL_ONLY",
+				"short_mode": "NORMAL",
+				"allowed_tiers": ["A", "B"],
+				"allowed_playbooks": ["LIQUIDITY_SWEEP_REVERSAL", "RANGE_EDGE_REVERSAL"],
+				"max_symbols": 50,
+				"max_ai_candidates": 3,
+				"max_final_execute": 5,
+				"min_volume": 1000000.0,
+				"max_price_move_24h": 0.10,
+				"min_score_ai": 6.0,
+				"min_score_execute": 7.4,
+				"min_rr_execute": 1.7
+			}
+		}
+	}`
+	playbookJSON := `{"version":"v-empty","profiles":{}}`
+
+	policyPath := filepath.Join(tmpDir, "policy.json")
+	playbookPath := filepath.Join(tmpDir, "playbook.json")
+	if err := os.WriteFile(policyPath, []byte(policyJSON), 0644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+	if err := os.WriteFile(playbookPath, []byte(playbookJSON), 0644); err != nil {
+		t.Fatalf("write playbook: %v", err)
+	}
+
+	reg, err := LoadConfigRegistry(policyPath, playbookPath)
+	if err != nil {
+		t.Fatalf("LoadConfigRegistry: %v", err)
+	}
+
+	chaos, _ := reg.GetMarketPolicy("BTC_CHAOS")
+	if chaos.MaxAICandidates != 1 || chaos.MaxFinalExecute != 1 {
+		t.Fatalf("BTC_CHAOS quota not clamped: max_ai=%d max_execute=%d", chaos.MaxAICandidates, chaos.MaxFinalExecute)
+	}
+	if chaos.MinVolume < 10000000 || chaos.MaxPriceMove24h > 0.12 || chaos.MinScoreAI < 7.8 || chaos.MinScoreExecute < 8.5 {
+		t.Fatalf("BTC_CHAOS safety thresholds not clamped: %+v", chaos)
+	}
+	if len(chaos.AllowedTiers) != 2 || chaos.AllowedTiers[0] != TierA || chaos.AllowedTiers[1] != TierB {
+		t.Fatalf("BTC_CHAOS tiers should be A/B only, got %+v", chaos.AllowedTiers)
+	}
+	if len(chaos.AllowedPlaybooks) != 2 || chaos.AllowedPlaybooks[0] != LIQUIDITY_SWEEP_REVERSAL || chaos.AllowedPlaybooks[1] != CROWDED_POSITIONING_SQUEEZE {
+		t.Fatalf("BTC_CHAOS playbooks should be premium only, got %+v", chaos.AllowedPlaybooks)
+	}
+
+	riskOff, _ := reg.GetMarketPolicy("RISK_OFF")
+	hasTrendPullback := false
+	for _, playbook := range riskOff.AllowedPlaybooks {
+		if playbook == TREND_PULLBACK {
+			hasTrendPullback = true
+			break
+		}
+	}
+	if !hasTrendPullback {
+		t.Fatalf("RISK_OFF should keep SHORT trend pullback available in AllowedPlaybooks")
+	}
+	if riskOff.MaxPriceMove24h < 0.15 {
+		t.Fatalf("RISK_OFF max move should not be clamped below short-continuation guardrail, got %0.2f", riskOff.MaxPriceMove24h)
+	}
+}

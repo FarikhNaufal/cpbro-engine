@@ -149,6 +149,22 @@ func (r *ConfigRegistry) GetVersion() string {
 // Helper: validate and clamp policy configurations to prevent weakening hard rules
 func validateAndClampPolicy(name string, policy MarketPolicy) MarketPolicy {
 	// Baseline rules: MinScoreExecute cannot drop below 7.0, MinRRExecute cannot drop below 1.5
+	if policy.MinVolume <= 0 {
+		slog.Warn("Enforcing hard limit: MinVolume clamped to 1,000,000", "policy", name, "original", policy.MinVolume)
+		policy.MinVolume = 1000000.0
+	}
+	if policy.MaxPriceMove24h <= 0 {
+		slog.Warn("Enforcing hard limit: MaxPriceMove24h clamped to 0.15", "policy", name, "original", policy.MaxPriceMove24h)
+		policy.MaxPriceMove24h = 0.15
+	}
+	if policy.MaxSymbols < 1 {
+		slog.Warn("Enforcing hard limit: MaxSymbols clamped to 1", "policy", name, "original", policy.MaxSymbols)
+		policy.MaxSymbols = 1
+	}
+	if policy.MaxAICandidates < 1 {
+		slog.Warn("Enforcing hard limit: MaxAICandidates clamped to 1", "policy", name, "original", policy.MaxAICandidates)
+		policy.MaxAICandidates = 1
+	}
 	if policy.MinScoreExecute < 7.0 {
 		slog.Warn("Enforcing hard limit: MinScoreExecute clamped to 7.0", "policy", name, "original", policy.MinScoreExecute)
 		policy.MinScoreExecute = 7.0
@@ -164,8 +180,28 @@ func validateAndClampPolicy(name string, policy MarketPolicy) MarketPolicy {
 
 	// Specific checks for chaos mode to ensure safety
 	if name == "BTC_CHAOS" {
-		if policy.MinScoreExecute < 8.2 {
-			policy.MinScoreExecute = 8.2
+		policy.AllowedTiers = []Tier{TierA, TierB}
+		policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, CROWDED_POSITIONING_SQUEEZE}
+		if policy.MaxSymbols > 35 {
+			policy.MaxSymbols = 35
+		}
+		if policy.MaxAICandidates > 1 {
+			policy.MaxAICandidates = 1
+		}
+		if policy.MaxFinalExecute > 1 {
+			policy.MaxFinalExecute = 1
+		}
+		if policy.MinVolume < 10000000.0 {
+			policy.MinVolume = 10000000.0
+		}
+		if policy.MaxPriceMove24h > 0.12 {
+			policy.MaxPriceMove24h = 0.12
+		}
+		if policy.MinScoreAI < 7.8 {
+			policy.MinScoreAI = 7.8
+		}
+		if policy.MinScoreExecute < 8.5 {
+			policy.MinScoreExecute = 8.5
 		}
 		if policy.MinRRExecute < 2.0 {
 			policy.MinRRExecute = 2.0
@@ -173,8 +209,25 @@ func validateAndClampPolicy(name string, policy MarketPolicy) MarketPolicy {
 		policy.RequireAIConfidence = AIConfidenceHigh
 		policy.RequireFreshEntry = true
 	}
+	if name == "RISK_OFF" {
+		policy.AllowedPlaybooks = ensurePlaybook(policy.AllowedPlaybooks, TREND_PULLBACK)
+		policy.AllowedPlaybooks = ensurePlaybook(policy.AllowedPlaybooks, LIQUIDITY_SWEEP_REVERSAL)
+		policy.AllowedPlaybooks = ensurePlaybook(policy.AllowedPlaybooks, RANGE_EDGE_REVERSAL)
+		if policy.MaxPriceMove24h < 0.15 {
+			policy.MaxPriceMove24h = 0.15
+		}
+	}
 
 	return policy
+}
+
+func ensurePlaybook(playbooks []Playbook, playbook Playbook) []Playbook {
+	for _, existing := range playbooks {
+		if existing == playbook {
+			return playbooks
+		}
+	}
+	return append(playbooks, playbook)
 }
 
 // Helper: validate and clamp playbook thresholds to prevent weakening hard rules

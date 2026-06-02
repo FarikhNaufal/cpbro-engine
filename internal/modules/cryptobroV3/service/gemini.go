@@ -14,14 +14,22 @@ import (
 )
 
 type GeminiService struct {
-	client *genai.Client
-	model  string
+	client         *genai.Client
+	model          string
+	requestTimeout time.Duration
 }
 
 func NewGeminiService(modelName string) (*GeminiService, error) {
+	return NewGeminiServiceWithTimeout(modelName, 25*time.Second)
+}
+
+func NewGeminiServiceWithTimeout(modelName string, requestTimeout time.Duration) (*GeminiService, error) {
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	if apiKey == "" {
 		return nil, fmt.Errorf("GEMINI_API_KEY environment variable is not set")
+	}
+	if requestTimeout <= 0 {
+		requestTimeout = 25 * time.Second
 	}
 
 	ctx := context.Background()
@@ -37,8 +45,9 @@ func NewGeminiService(modelName string) (*GeminiService, error) {
 	}
 
 	return &GeminiService{
-		client: client,
-		model:  modelName,
+		client:         client,
+		model:          modelName,
+		requestTimeout: requestTimeout,
 	}, nil
 }
 
@@ -63,6 +72,12 @@ func formatCompactCandles(candles []dto.Candle, count int) string {
 
 // AuditCandidate runs the structured AI Candle Auditor on raw kline structures.
 func (s *GeminiService) AuditCandidate(ctx context.Context, req dto.AIAuditRequest) (*dto.AIAuditResponse, error) {
+	if s.requestTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.requestTimeout)
+		defer cancel()
+	}
+
 	p := req.Payload
 
 	// Format allowed playbooks/tiers
@@ -437,6 +452,11 @@ payload (JSON):
 
 // Ping runs a fast 1-token query to verify Gemini API connection and credentials.
 func (s *GeminiService) Ping(ctx context.Context) error {
+	if s.requestTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.requestTimeout)
+		defer cancel()
+	}
 	config := &genai.GenerateContentConfig{
 		MaxOutputTokens: 1,
 	}

@@ -220,3 +220,71 @@ func TestPocketBaseStorageService_SaveAndLoadEvaluationReport(t *testing.T) {
 		t.Fatalf("expected win_rate=50, got %v", loaded.Metrics["win_rate"])
 	}
 }
+
+func TestPocketBaseStorageService_FallbackWhenPocketBaseUnavailable(t *testing.T) {
+	httpClient := &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			rr := httptest.NewRecorder()
+			http.Error(rr, "pocketbase down", http.StatusInternalServerError)
+			return rr.Result(), nil
+		}),
+	}
+
+	tmpDir := t.TempDir()
+	fallback, err := NewJSONStorageService(filepath.Join(tmpDir, "storage"))
+	if err != nil {
+		t.Fatalf("NewJSONStorageService: %v", err)
+	}
+	client, err := NewPocketBaseClientWithHTTPClient("http://pocketbase.local", httpClient, 2*time.Second, PocketBaseAuthModeToken, "static-token", "", "", 0)
+	if err != nil {
+		t.Fatalf("NewPocketBaseClient: %v", err)
+	}
+	st, err := NewPocketBaseStorageService(fallback, client)
+	if err != nil {
+		t.Fatalf("NewPocketBaseStorageService: %v", err)
+	}
+
+	entry := usecase.SignalJournal{
+		ID:         "sig_fallback",
+		Symbol:     "ETHUSDT",
+		Direction:  usecase.SHORT,
+		Playbook:   usecase.LIQUIDITY_SWEEP_REVERSAL,
+		EntryPrice: 100,
+		StopLoss:   102,
+		TP1:        97,
+		TP2:        95,
+		RR:         2,
+		Status:     usecase.MONITORING,
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	}
+
+	if err := st.AppendSignalJournal(entry); err != nil {
+		t.Fatalf("AppendSignalJournal should fall back to JSON, got: %v", err)
+	}
+	journal, err := st.LoadSignalJournal()
+	if err != nil {
+		t.Fatalf("LoadSignalJournal should fall back to JSON, got: %v", err)
+	}
+	if len(journal) != 1 || journal[0].ID != entry.ID {
+		t.Fatalf("expected fallback journal row, got %+v", journal)
+	}
+
+	report := &usecase.EvaluationReport{
+		GeneratedAt:     time.Now().UTC(),
+		TotalSignals:    1,
+		Metrics:         map[string]float64{"win_rate": 100},
+		GateBugFindings: []string{},
+		Recommendations: []usecase.ThresholdRecommendation{},
+	}
+	if err := st.SaveEvaluationReport(report); err != nil {
+		t.Fatalf("SaveEvaluationReport should fall back to JSON, got: %v", err)
+	}
+	loadedReport, err := st.LoadEvaluationReport()
+	if err != nil {
+		t.Fatalf("LoadEvaluationReport should fall back to JSON, got: %v", err)
+	}
+	if loadedReport == nil || loadedReport.TotalSignals != 1 {
+		t.Fatalf("expected fallback evaluation report, got %+v", loadedReport)
+	}
+}

@@ -541,7 +541,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 		}
 
 		// Staleness check on closed candles (prevents executing stale ticks)
-		if !uc.stalenessUsecase.IsFresh(closedM15) {
+		if !uc.stalenessUsecase.IsFreshAt(closedM15, currentTick, 15*time.Minute) {
 			staleDetections++
 			currentTick = currentTick.Add(15 * time.Minute)
 			continue

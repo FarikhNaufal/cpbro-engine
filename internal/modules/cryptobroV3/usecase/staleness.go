@@ -20,15 +20,28 @@ func NewStalenessUsecase(maxStaleness time.Duration) *StalenessUsecase {
 
 // IsFresh checks if the latest closed candle timestamp is within maxStaleness.
 func (uc *StalenessUsecase) IsFresh(m15Candles []dto.Candle) bool {
+	return uc.IsFreshAt(m15Candles, time.Now(), 15*time.Minute)
+}
+
+// IsFreshAt checks closed-candle freshness against a supplied clock.
+// This keeps live scans tied to wall-clock time while allowing historical backtests
+// to validate gaps without comparing old candles to the current real time.
+func (uc *StalenessUsecase) IsFreshAt(m15Candles []dto.Candle, now time.Time, timeframe time.Duration) bool {
 	if len(m15Candles) == 0 {
 		return false
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if timeframe <= 0 {
+		timeframe = 15 * time.Minute
 	}
 
 	lastCandle := m15Candles[len(m15Candles)-1]
 	// dto.Candle.Time is treated as candle open-time in this project.
-	// For M15 closed-candle freshness, approximate close-time as open+15m.
-	lastCloseTime := lastCandle.Time.Add(15 * time.Minute)
-	return time.Since(lastCloseTime) <= uc.maxStaleness
+	// For closed-candle freshness, approximate close-time as open+timeframe.
+	lastCloseTime := lastCandle.Time.Add(timeframe)
+	return !lastCloseTime.After(now) && now.Sub(lastCloseTime) <= uc.maxStaleness
 }
 
 // Evaluate performs the ATR-based or percentage-based live price staleness validation.

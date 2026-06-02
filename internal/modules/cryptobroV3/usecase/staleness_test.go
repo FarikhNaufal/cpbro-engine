@@ -3,6 +3,8 @@ package usecase
 import (
 	"testing"
 	"time"
+
+	"cpbro-engine/internal/modules/cryptobroV3/dto"
 )
 
 func TestStalenessCheck_Evaluate(t *testing.T) {
@@ -162,4 +164,22 @@ func TestStalenessCheck_Evaluate(t *testing.T) {
 			t.Fatalf("Expected tight high-vol policy to be LATE, got %s", tight.Status)
 		}
 	})
+}
+
+func TestStalenessCheck_IsFreshAtSupportsHistoricalBacktestClock(t *testing.T) {
+	uc := NewStalenessUsecase(30 * time.Minute)
+	now := time.Date(2026, 5, 24, 12, 30, 0, 0, time.UTC)
+	candles := []dto.Candle{
+		{Time: now.Add(-30 * time.Minute), Close: 100},
+		{Time: now.Add(-15 * time.Minute), Close: 101},
+	}
+
+	if !uc.IsFreshAt(candles, now, 15*time.Minute) {
+		t.Fatalf("expected historical closed candle to be fresh at simulated current tick")
+	}
+
+	staleNow := now.Add(45 * time.Minute)
+	if uc.IsFreshAt(candles, staleNow, 15*time.Minute) {
+		t.Fatalf("expected historical candle gap to be stale")
+	}
 }

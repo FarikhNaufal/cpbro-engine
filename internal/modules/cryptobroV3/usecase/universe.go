@@ -155,8 +155,12 @@ func (uc *UniverseUsecase) FilterUniverse(
 	})
 
 	// 10. Limit candidates to policy.MaxSymbols
-	if len(candidates) > policy.MaxSymbols {
-		excess := candidates[policy.MaxSymbols:]
+	maxSymbols := policy.MaxSymbols
+	if maxSymbols <= 0 {
+		maxSymbols = 1
+	}
+	if len(candidates) > maxSymbols {
+		excess := candidates[maxSymbols:]
 		for _, c := range excess {
 			rejected = append(rejected, UniverseRejected{
 				Symbol: c.Symbol,
@@ -164,7 +168,7 @@ func (uc *UniverseUsecase) FilterUniverse(
 				Reason: "excluded due to MaxSymbols limit",
 			})
 		}
-		candidates = candidates[:policy.MaxSymbols]
+		candidates = candidates[:maxSymbols]
 	}
 
 	return candidates, rejected
