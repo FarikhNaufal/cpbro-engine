@@ -33,7 +33,7 @@ func NewGeminiService(modelName string) (*GeminiService, error) {
 	}
 
 	if modelName == "" {
-		modelName = "gemini-2.5-flash"
+		modelName = "gemini-3.1-flash-lite"
 	}
 
 	return &GeminiService{
