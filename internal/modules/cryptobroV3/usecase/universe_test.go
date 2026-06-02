@@ -42,15 +42,16 @@ func TestFilterUniverse(t *testing.T) {
 	candidates, rejected := uc.FilterUniverse(tickers, fundingRates, policy)
 
 	// Verify Candidates
-	// Expected candidates passed: ETHUSDT, SOLUSDT, XRPUSDT, DOGEUSDT (sorted by volume)
-	// But limit is MaxSymbols = 3. So only top 3 by volume: ETHUSDT, SOLUSDT, XRPUSDT.
+	// Expected candidates passed: ETHUSDT, SOLUSDT, XRPUSDT, DOGEUSDT, HIGHFUNDUSDT (sorted by volume).
+	// HIGHFUNDUSDT is liquid enough to pass the funding guardrail; downstream squeeze/gates decide.
+	// But limit is MaxSymbols = 3. So only top 3 by volume: ETHUSDT, SOLUSDT, HIGHFUNDUSDT.
 	// DOGEUSDT should be rejected due to MaxSymbols limit.
 	if len(candidates) != 3 {
 		t.Fatalf("Expected 3 candidates, got %d", len(candidates))
 	}
 
 	// Verify sorting (volume desc)
-	if candidates[0].Symbol != "ETHUSDT" || candidates[1].Symbol != "SOLUSDT" || candidates[2].Symbol != "XRPUSDT" {
+	if candidates[0].Symbol != "ETHUSDT" || candidates[1].Symbol != "SOLUSDT" || candidates[2].Symbol != "HIGHFUNDUSDT" {
 		t.Errorf("Unexpected candidates or sorting: %+v", candidates)
 	}
 
@@ -61,8 +62,8 @@ func TestFilterUniverse(t *testing.T) {
 	if candidates[1].Tier != TierB {
 		t.Errorf("Expected SOLUSDT to be TierB, got %v", candidates[1].Tier)
 	}
-	if candidates[2].Tier != TierC {
-		t.Errorf("Expected XRPUSDT to be TierC, got %v", candidates[2].Tier)
+	if candidates[2].Tier != TierB {
+		t.Errorf("Expected HIGHFUNDUSDT to be TierB, got %v", candidates[2].Tier)
 	}
 
 	// Verify Rejected Lists and Reasons
@@ -82,9 +83,9 @@ func TestFilterUniverse(t *testing.T) {
 		"LTCBTC":       "not a USDT pair",
 		"USDCUSDT":     "abnormal or fiat/stable peg symbol",
 		"ADAUSDT":      "volume below policy minimum threshold",
-		"HIGHFUNDUSDT": "funding rate exceeds max absolute limit",
 		"HIGHMOVEUSDT": "24h price move exceeds policy limit",
-		"DOGEUSDT":     "excluded due to MaxSymbols limit",
+		"DOGEUSDT":     "volume below policy minimum threshold",
+		"XRPUSDT":      "excluded due to MaxSymbols limit",
 	}
 
 	for sym, expectedReason := range expectedRejections {
@@ -95,6 +96,62 @@ func TestFilterUniverse(t *testing.T) {
 			t.Errorf("Expected rejection reason for %s to be %q, got %q", sym, expectedReason, reason)
 		}
 	}
+}
+
+func TestFilterUniverseDynamicThresholds(t *testing.T) {
+	uc := NewUniverseUsecase()
+
+	t.Run("BTC chaos rejects overextended move and low-liquidity funding", func(t *testing.T) {
+		policy := MarketPolicy{
+			Regime:          BTC_CHAOS,
+			AllowedTiers:    []Tier{TierA, TierB},
+			MaxSymbols:      10,
+			MinVolume:       10000000.0,
+			MaxFundingAbs:   0.01,
+			MaxPriceMove24h: 0.12,
+		}
+		tickers := []dto.Ticker24h{
+			{Symbol: "LIQUIDUSDT", QuoteVolume: 250000000.0, PriceChangePercent: 9.0},
+			{Symbol: "PUMPUSDT", QuoteVolume: 250000000.0, PriceChangePercent: 14.0},
+			{Symbol: "FUNDEDUSDT", QuoteVolume: 80000000.0, PriceChangePercent: 4.0},
+		}
+		fundingRates := map[string]float64{"FUNDEDUSDT": 0.015}
+
+		candidates, rejected := uc.FilterUniverse(tickers, fundingRates, policy)
+		if len(candidates) != 1 || candidates[0].Symbol != "LIQUIDUSDT" {
+			t.Fatalf("expected only LIQUIDUSDT to pass chaos universe guardrails, got %+v", candidates)
+		}
+
+		rejectedMap := make(map[string]string)
+		for _, r := range rejected {
+			rejectedMap[r.Symbol] = r.Reason
+		}
+		if rejectedMap["PUMPUSDT"] != "24h price move exceeds policy limit" {
+			t.Fatalf("expected PUMPUSDT price move rejection, got %q", rejectedMap["PUMPUSDT"])
+		}
+		if rejectedMap["FUNDEDUSDT"] != "funding rate exceeds limit without sufficient liquidity guardrail" {
+			t.Fatalf("expected FUNDEDUSDT funding/liquidity rejection, got %q", rejectedMap["FUNDEDUSDT"])
+		}
+	})
+
+	t.Run("Risk off allows liquid A/B move within short-continuation guardrail", func(t *testing.T) {
+		policy := MarketPolicy{
+			Regime:          RISK_OFF,
+			AllowedTiers:    []Tier{TierA, TierB},
+			MaxSymbols:      10,
+			MinVolume:       1000000.0,
+			MaxFundingAbs:   0.005,
+			MaxPriceMove24h: 0.18,
+		}
+		tickers := []dto.Ticker24h{
+			{Symbol: "SOLUSDT", QuoteVolume: 120000000.0, PriceChangePercent: -16.0},
+		}
+
+		candidates, _ := uc.FilterUniverse(tickers, nil, policy)
+		if len(candidates) != 1 || candidates[0].Symbol != "SOLUSDT" {
+			t.Fatalf("expected liquid risk-off mover to pass coarse universe filter, got %+v", candidates)
+		}
+	})
 }
 
 func TestFilterUniverseTiers(t *testing.T) {

@@ -82,7 +82,10 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 		policy.MaxSymbols = 35
 		policy.MaxAICandidates = 1
 		policy.MaxFinalExecute = 1
-		policy.MinScoreExecute = 8.2
+		policy.MinVolume = 10000000.0
+		policy.MaxPriceMove24h = 0.12
+		policy.MinScoreAI = 7.8
+		policy.MinScoreExecute = 8.5
 		policy.MinRRExecute = 2.0
 		policy.RequireAIConfidence = AIConfidenceHigh
 		policy.RequireFreshEntry = true
@@ -160,7 +163,7 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 		policy.MinScoreExecute = 7.4
 		policy.MinRRExecute = 1.7
 		policy.MaxFundingAbs = 0.005  // tighter funding check
-		policy.MaxPriceMove24h = 0.10 // tighter price movement
+		policy.MaxPriceMove24h = 0.18 // allow liquid SHORT continuation while downstream gates restrict LONG reversal
 		policy.Reason = "RISK_OFF + BTC Bearish active - short bias"
 		return policy
 	}
@@ -211,8 +214,10 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 	// 7. Modifiers based on Volatility
 	if volatility == "LOW" {
 		policy.Regime = LOW_VOL
-		policy.MaxSymbols = 75
-		policy.MinVolume = 500000.0     // looser volume constraint
+		policy.MaxSymbols = 40
+		policy.MaxAICandidates = 2
+		policy.MinVolume = 750000.0 // slightly looser, but still avoids illiquid flood
+		policy.AllowedTiers = []Tier{TierA, TierB}
 		policy.RequireFreshEntry = true // avoid fake breakouts
 		// Low volatility tends to be mean-reverting unless a true compression breakout retest appears.
 		// Prefer reversal playbooks; do not force trend continuation in low-vol grind.

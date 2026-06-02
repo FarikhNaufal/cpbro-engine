@@ -373,4 +373,93 @@ func TestScoring_Penalties(t *testing.T) {
 		scoreStrict := uc.Calculate(quantStrict, LONG, policyStrict)
 		assert.True(t, scoreStrict >= scoreLoose, "Strict fresh-entry policy should not invert retest quality scoring when evidence exists")
 	})
+
+	t.Run("Funding penalty is sign aware for normal playbooks", func(t *testing.T) {
+		policy := MarketPolicy{
+			AllowLong:  true,
+			AllowShort: true,
+			LongMode:   NORMAL,
+			ShortMode:  NORMAL,
+		}
+
+		longPositiveFunding := &QuantResult{
+			Playbook:     TREND_PULLBACK,
+			Direction:    LONG,
+			IndicatorMet: true,
+			TriggerPrice: 100.0,
+			StopLoss:     98.0,
+			TakeProfit:   105.0,
+			H4Trend:      "BULLISH",
+			H1Trend:      "BULLISH",
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI:  45.0,
+				MACD: 1.0,
+				IndicatorValues: map[string]float64{
+					IndicatorADX:            25.0,
+					IndicatorVolumeSpike:    1.0,
+					IndicatorExtremeFunding: 1.0,
+					IndicatorFundingRate:    0.006,
+				},
+			},
+		}
+		longNegativeFunding := *longPositiveFunding
+		longNegativeFunding.TechnicalSnapshot = TechnicalSnapshot{
+			RSI:  45.0,
+			MACD: 1.0,
+			IndicatorValues: map[string]float64{
+				IndicatorADX:            25.0,
+				IndicatorVolumeSpike:    1.0,
+				IndicatorExtremeFunding: 1.0,
+				IndicatorFundingRate:    -0.006,
+			},
+		}
+
+		scorePositive := uc.Calculate(longPositiveFunding, LONG, policy)
+		scoreNegative := uc.Calculate(&longNegativeFunding, LONG, policy)
+
+		assert.True(t, scoreNegative > scorePositive, "positive funding should penalize LONG more than negative funding")
+		assert.Contains(t, longPositiveFunding.Reason, "positive funding rate unfavorable for LONGs")
+		assert.NotContains(t, longNegativeFunding.Reason, "positive funding rate unfavorable for LONGs")
+	})
+
+	t.Run("Crowded squeeze rewards funding only when direction supports squeeze", func(t *testing.T) {
+		policy := MarketPolicy{AllowLong: true, AllowShort: true, LongMode: NORMAL, ShortMode: NORMAL}
+		base := QuantResult{
+			Playbook:     CROWDED_POSITIONING_SQUEEZE,
+			Direction:    LONG,
+			IndicatorMet: true,
+			TriggerPrice: 100.0,
+			StopLoss:     98.0,
+			TakeProfit:   105.0,
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI: 50.0,
+				IndicatorValues: map[string]float64{
+					IndicatorExtremeFunding: 1.0,
+					IndicatorExtremeOI:      1.0,
+					IndicatorPARejection:    1.0,
+					IndicatorSweepLow:       1.0,
+				},
+			},
+		}
+
+		supportive := base
+		supportive.TechnicalSnapshot.IndicatorValues[IndicatorFundingRate] = -0.006
+		against := base
+		against.TechnicalSnapshot = TechnicalSnapshot{
+			RSI: 50.0,
+			IndicatorValues: map[string]float64{
+				IndicatorExtremeFunding: 1.0,
+				IndicatorExtremeOI:      1.0,
+				IndicatorPARejection:    1.0,
+				IndicatorSweepLow:       1.0,
+				IndicatorFundingRate:    0.006,
+			},
+		}
+
+		scoreSupportive := uc.Calculate(&supportive, LONG, policy)
+		scoreAgainst := uc.Calculate(&against, LONG, policy)
+
+		assert.True(t, scoreSupportive > scoreAgainst, "negative funding should support LONG squeeze more than positive funding")
+		assert.Contains(t, against.Reason, "funding direction does not support proposed squeeze")
+	})
 }

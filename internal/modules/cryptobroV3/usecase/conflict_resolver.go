@@ -277,17 +277,30 @@ func (uc *ConflictResolverUsecase) resolveSymbolConflict(cands []FinalDecision, 
 // GetDynamicCooldownMinutes maps score and market policy to minutes of cooldown.
 func (uc *ConflictResolverUsecase) GetDynamicCooldownMinutes(score float64, policy MarketPolicy) int {
 	regime := policy.EffectiveRegime()
+	policyCooldown := policy.CooldownMinutes
 	cooldown := 10 // Default
+	if policyCooldown > 0 {
+		cooldown = policyCooldown
+	}
 	if regime == LOW_VOL {
-		cooldown = 15
+		cooldown = maxInt(cooldown, 15)
 	} else if regime == HIGH_VOL {
-		cooldown = 5
+		if policyCooldown > 0 {
+			cooldown = maxInt(cooldown, 5)
+		} else {
+			cooldown = 5
+		}
 	}
 
-	// S/S+ grades (score >= 7.8) can get 2 mins cooldown if policy is not chaos
+	// S/S+ grades (score >= 7.8) can get 2 mins cooldown if policy is not chaos,
+	// but never below an explicit policy cooldown.
 	grade := getGrade(score)
 	if (grade == "S" || grade == "S+") && regime != BTC_CHAOS {
-		cooldown = 2
+		if policyCooldown > 0 {
+			cooldown = maxInt(policyCooldown, 2)
+		} else {
+			cooldown = 2
+		}
 	}
 
 	// Chaos mode enforces minimum 10 minutes
@@ -296,6 +309,13 @@ func (uc *ConflictResolverUsecase) GetDynamicCooldownMinutes(score float64, poli
 	}
 
 	return cooldown
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // sortDecisions sorts decisions using the 5 priority levels

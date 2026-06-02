@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -35,6 +36,13 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 	extremeFunding := tech.IndicatorValues[IndicatorExtremeFunding]
 	extremeOI := tech.IndicatorValues[IndicatorExtremeOI]
 	paRejection := tech.IndicatorValues[IndicatorPARejection]
+	fundingRate := tech.IndicatorValues[IndicatorFundingRate]
+	if fundingRate == 0 {
+		fundingRate = tech.FundingRate
+	}
+	fundingAbs := math.Abs(fundingRate)
+	fundingExtreme := extremeFunding == 1.0 || fundingAbs > 0.003
+	supportsSqueezeDirection := (resolvedDirection == LONG && fundingRate < 0) || (resolvedDirection == SHORT && fundingRate > 0)
 
 	// Calculate RR (Risk-to-Reward)
 	rr := 1.0
@@ -311,18 +319,22 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 	case CROWDED_POSITIONING_SQUEEZE:
 		// 1. Crowding evidence (Max 25)
 		crowdScore := 5.0
-		if extremeFunding == 1.0 {
+		if fundingExtreme && supportsSqueezeDirection {
 			crowdScore = 25.0
 		} else if extremeOI == 1.0 {
 			crowdScore = 15.0
+		} else if fundingExtreme {
+			crowdScore = 8.0
 		}
 		rawScore += crowdScore
 		notes = append(notes, fmt.Sprintf("CrowdEvidence: +%0.1f", crowdScore))
 
 		// 2. OI/funding context (Max 20)
 		contextScore := 5.0
-		if extremeFunding == 1.0 && extremeOI == 1.0 {
+		if fundingExtreme && supportsSqueezeDirection && extremeOI == 1.0 {
 			contextScore = 20.0
+		} else if extremeOI == 1.0 || (fundingExtreme && supportsSqueezeDirection) {
+			contextScore = 12.0
 		}
 		rawScore += contextScore
 		notes = append(notes, fmt.Sprintf("OIFundContext: +%0.1f", contextScore))
@@ -366,9 +378,13 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 			rawScore -= 25.0
 			notes = append(notes, "PENALTY: SHORT squeeze missing failed breakout rejection (-25)")
 		}
-		if extremeFunding == 0.0 && extremeOI == 0.0 {
+		if !fundingExtreme && extremeOI == 0.0 {
 			rawScore -= 25.0
 			notes = append(notes, "PENALTY: Squeeze missing crowding derivatives data (-25)")
+		}
+		if fundingExtreme && !supportsSqueezeDirection {
+			rawScore -= 15.0
+			notes = append(notes, "PENALTY: Squeeze funding direction does not support proposed squeeze (-15)")
 		}
 	}
 
@@ -386,13 +402,11 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 	}
 
 	// 2. Funding berat melawan arah
-	if resolvedDirection == LONG && extremeFunding == 1.0 {
-		// Long has penalty if funding is highly positive (costly)
+	if quant.Playbook != CROWDED_POSITIONING_SQUEEZE && resolvedDirection == LONG && fundingExtreme && fundingRate > 0 {
 		penalty += 15.0
 		notes = append(notes, "GLOBAL PENALTY: positive funding rate unfavorable for LONGs (-15)")
 	}
-	if resolvedDirection == SHORT && extremeFunding == 1.0 {
-		// Short has penalty if funding is highly negative (costly)
+	if quant.Playbook != CROWDED_POSITIONING_SQUEEZE && resolvedDirection == SHORT && fundingExtreme && fundingRate < 0 {
 		penalty += 15.0
 		notes = append(notes, "GLOBAL PENALTY: negative funding rate unfavorable for SHORTs (-15)")
 	}

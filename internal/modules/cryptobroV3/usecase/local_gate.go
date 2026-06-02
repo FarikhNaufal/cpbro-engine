@@ -181,6 +181,13 @@ func (uc *LocalGateUsecase) Evaluate(quant QuantResult, policy MarketPolicy, m15
 	}
 	minRR := math.Max(policy.MinRRExecute, profile.MinRR)
 	if rr < minRR {
+		if rr >= 1.5 {
+			return LocalGateResult{
+				Passed: false,
+				Status: LOCAL_WATCH,
+				Reason: fmt.Sprintf("Risk-to-Reward ratio %0.2f is below policy requirement %0.2f but above hard minimum 1.50", rr, minRR),
+			}
+		}
 		return LocalGateResult{
 			Passed: false,
 			Status: LOCAL_REJECT,

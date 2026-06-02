@@ -80,6 +80,12 @@ func (uc *StalenessUsecase) Evaluate(quant QuantResult, review PlanReview, polic
 	} else if isLowVol {
 		threshold = math.Min(threshold+0.05, 0.50)
 	}
+	if policy.StalenessATRMultiplier > 0 {
+		policyScale := policy.StalenessATRMultiplier / 1.5
+		policyScale = math.Max(0.50, math.Min(policyScale, 1.20))
+		threshold *= policyScale
+	}
+	threshold = math.Max(0.15, threshold)
 
 	// Determine Fallback Pct threshold
 	var basePct float64
@@ -91,6 +97,11 @@ func (uc *StalenessUsecase) Evaluate(quant QuantResult, review PlanReview, polic
 		basePct = 0.25
 	} else {
 		basePct = 0.35
+	}
+	if policy.StalenessATRMultiplier > 0 {
+		policyScale := policy.StalenessATRMultiplier / 1.5
+		policyScale = math.Max(0.50, math.Min(policyScale, 1.20))
+		basePct *= policyScale
 	}
 
 	atrVal, hasATR := quant.TechnicalSnapshot.IndicatorValues[IndicatorATR]

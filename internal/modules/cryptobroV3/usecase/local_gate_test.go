@@ -101,6 +101,16 @@ func TestLocalGate_RuleChecks(t *testing.T) {
 		t.Errorf("Expected reject for low RR, got status %s reason %s", res.Status, res.Reason)
 	}
 
+	// 6b. RR above hard minimum but below stricter policy/profile requirement -> Watch
+	policyStrictRR := policy
+	policyStrictRR.MinRRExecute = 2.0
+	quantBorderlineRR := quantPass
+	quantBorderlineRR.TradePlan.TakeProfit = 5.8 // Reward = 0.8, Risk = 0.5 (RR = 1.6)
+	res = gate.Evaluate(quantBorderlineRR, policyStrictRR, m15)
+	if res.Passed || res.Status != LOCAL_WATCH {
+		t.Errorf("Expected watch for borderline RR below strict policy, got status %s reason %s", res.Status, res.Reason)
+	}
+
 	// 7. Rule 7: Score < MinScoreAI (deviation checks)
 	quantLowScore := quantPass
 	quantLowScore.Score = 7.3 // 7.3 is within 0.5 from 7.5 -> Watch

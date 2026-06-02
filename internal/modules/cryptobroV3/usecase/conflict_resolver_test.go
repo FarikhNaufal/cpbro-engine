@@ -166,6 +166,12 @@ func TestConflictResolver_CooldownRules(t *testing.T) {
 		t.Errorf("expected S grade cooldown to be 2, got %d", cooldownS)
 	}
 
+	// Explicit policy cooldown is the minimum guardrail
+	cooldownPolicyMin := uc.GetDynamicCooldownMinutes(8.5, usecase.MarketPolicy{Regime: usecase.DEFAULT, CooldownMinutes: 15})
+	if cooldownPolicyMin != 15 {
+		t.Errorf("expected explicit policy cooldown minimum to be 15, got %d", cooldownPolicyMin)
+	}
+
 	// BTCChaos forces minimum 10 mins
 	cooldownChaos := uc.GetDynamicCooldownMinutes(8.5, usecase.MarketPolicy{Reason: "BTC_CHAOS"})
 	if cooldownChaos != 10 {

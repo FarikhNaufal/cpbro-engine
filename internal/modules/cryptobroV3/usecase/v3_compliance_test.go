@@ -143,7 +143,7 @@ func TestMarketPolicyCompliance(t *testing.T) {
 		assert.Contains(t, policy.Reason, "BTC_CHAOS")
 		assert.Equal(t, 1, policy.MaxAICandidates)
 		assert.Equal(t, 1, policy.MaxFinalExecute)
-		assert.Equal(t, 8.2, policy.MinScoreExecute)
+		assert.Equal(t, 8.5, policy.MinScoreExecute)
 
 		// Tier C should be blocked
 		allowed, reason := uc.IsAllowed("SOLUSDT", policy, 15000000.0, 0.001, 0.05, TierC)

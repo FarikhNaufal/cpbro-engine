@@ -134,4 +134,32 @@ func TestStalenessCheck_Evaluate(t *testing.T) {
 			t.Errorf("Expected status MISSED, got %s", res3.Status)
 		}
 	})
+
+	t.Run("Policy staleness multiplier tightens threshold", func(t *testing.T) {
+		quant := QuantResult{
+			Playbook: TREND_PULLBACK,
+			Tier:     TierA,
+			TradePlan: TradePlan{
+				EntryPrice: 100.0,
+			},
+			TechnicalSnapshot: TechnicalSnapshot{
+				IndicatorValues: map[string]float64{
+					IndicatorATR: 10.0,
+				},
+			},
+		}
+		review := PlanReview{}
+		normalPolicy := MarketPolicy{Regime: DEFAULT, StalenessATRMultiplier: 1.5}
+		tightPolicy := MarketPolicy{Regime: HIGH_VOL, StalenessATRMultiplier: 0.8}
+
+		normal := uc.Evaluate(quant, review, normalPolicy, 103.0)
+		tight := uc.Evaluate(quant, review, tightPolicy, 103.0)
+
+		if normal.Status != FRESH {
+			t.Fatalf("Expected normal policy to be FRESH, got %s", normal.Status)
+		}
+		if tight.Status != LATE {
+			t.Fatalf("Expected tight high-vol policy to be LATE, got %s", tight.Status)
+		}
+	})
 }
