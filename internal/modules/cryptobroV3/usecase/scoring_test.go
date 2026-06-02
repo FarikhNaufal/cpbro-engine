@@ -462,4 +462,59 @@ func TestScoring_Penalties(t *testing.T) {
 		assert.True(t, scoreSupportive > scoreAgainst, "negative funding should support LONG squeeze more than positive funding")
 		assert.Contains(t, against.Reason, "funding direction does not support proposed squeeze")
 	})
+
+	t.Run("Extreme dump penalty for contra-directional LONG", func(t *testing.T) {
+		policy := MarketPolicy{
+			AllowLong:  true,
+			AllowShort: true,
+			LongMode:   NORMAL,
+			ShortMode:  NORMAL,
+		}
+
+		// LONG during -11% dump should get penalty
+		quantDump := &QuantResult{
+			Playbook:     LIQUIDITY_SWEEP_REVERSAL,
+			Direction:    LONG,
+			IndicatorMet: true,
+			TriggerPrice: 0.22907,
+			StopLoss:     0.226946,
+			TakeProfit:   0.2332,
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI: 48.0,
+				IndicatorValues: map[string]float64{
+					IndicatorSweepLow:      1.0,
+					IndicatorWickRejection: 1.0,
+					IndicatorVolumeSpike:   1.0,
+					IndicatorPARejection:   1.0,
+				},
+				PriceChange24h: -11.2, // Extreme dump
+			},
+		}
+
+		// Same setup but no extreme move
+		quantNormal := &QuantResult{
+			Playbook:     LIQUIDITY_SWEEP_REVERSAL,
+			Direction:    LONG,
+			IndicatorMet: true,
+			TriggerPrice: 0.22907,
+			StopLoss:     0.226946,
+			TakeProfit:   0.2332,
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI: 48.0,
+				IndicatorValues: map[string]float64{
+					IndicatorSweepLow:      1.0,
+					IndicatorWickRejection: 1.0,
+					IndicatorVolumeSpike:   1.0,
+					IndicatorPARejection:   1.0,
+				},
+				PriceChange24h: -3.0, // Normal dip
+			},
+		}
+
+		scoreDump := uc.Calculate(quantDump, LONG, policy)
+		scoreNormal := uc.Calculate(quantNormal, LONG, policy)
+
+		assert.True(t, scoreNormal > scoreDump, "LONG during extreme dump should score lower than normal dip")
+		assert.Contains(t, quantDump.Reason, "Contra-move entry during extreme 24h price change")
+	})
 }

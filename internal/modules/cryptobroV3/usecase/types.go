@@ -136,6 +136,8 @@ type MarketPolicy struct {
 	MinVolume              float64      `json:"min_volume"`
 	MaxFundingAbs          float64      `json:"max_funding_abs"`
 	MaxPriceMove24h        float64      `json:"max_price_move_24h"`
+	MaxPriceMove24hLong    float64      `json:"max_price_move_24h_long"`  // per-symbol max abs 24h dump for LONG entry
+	MaxPriceMove24hShort   float64      `json:"max_price_move_24h_short"` // per-symbol max abs 24h pump for SHORT entry
 	MinScoreAI             float64      `json:"min_score_ai"`
 	MinScoreExecute        float64      `json:"min_score_execute"`
 	MinRRExecute           float64      `json:"min_rr_execute"`

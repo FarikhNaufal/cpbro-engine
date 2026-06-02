@@ -50,6 +50,8 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 			MinVolume:              1000000.0,
 			MaxFundingAbs:          0.01,
 			MaxPriceMove24h:        0.20,
+			MaxPriceMove24hLong:    0.15,
+			MaxPriceMove24hShort:   0.15,
 			MinScoreAI:             6.0,
 			MinScoreExecute:        7.0,
 			MinRRExecute:           1.5,
@@ -84,6 +86,8 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 		policy.MaxFinalExecute = 1
 		policy.MinVolume = 10000000.0
 		policy.MaxPriceMove24h = 0.12
+		policy.MaxPriceMove24hLong = 0.05
+		policy.MaxPriceMove24hShort = 0.12
 		policy.MinScoreAI = 7.8
 		policy.MinScoreExecute = 8.5
 		policy.MinRRExecute = 2.0
@@ -114,6 +118,8 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 		policy.MaxAICandidates = 2
 		policy.MinScoreExecute = 7.2
 		policy.MinVolume = 5000000.0 // Min volume raised
+		policy.MaxPriceMove24hLong = 0.10
+		policy.MaxPriceMove24hShort = 0.15
 		policy.Reason = "BTC_DOMINANCE active - altcoins restricted"
 		return policy
 	}
@@ -137,6 +143,8 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 		policy.MaxAICandidates = 3
 		policy.MinScoreExecute = 7.0
 		policy.MinRRExecute = 1.5
+		policy.MaxPriceMove24hLong = 0.18
+		policy.MaxPriceMove24hShort = 0.10
 		policy.Reason = "ALT_SUPPORTIVE + BTC Bullish active - favorable conditions"
 		return policy
 	}
@@ -164,6 +172,8 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 		policy.MinRRExecute = 1.7
 		policy.MaxFundingAbs = 0.005  // tighter funding check
 		policy.MaxPriceMove24h = 0.18 // allow liquid SHORT continuation while downstream gates restrict LONG reversal
+		policy.MaxPriceMove24hLong = 0.08  // block LONG on symbols dumping >8%
+		policy.MaxPriceMove24hShort = 0.18 // SHORT allowed on heavy dumps
 		policy.Reason = "RISK_OFF + BTC Bearish active - short bias"
 		return policy
 	}
@@ -225,6 +235,8 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 		policy.ShortMode = REVERSAL_ONLY
 		policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, RANGE_EDGE_REVERSAL}
 		policy.RequireAIConfidence = AIConfidenceHigh
+		policy.MaxPriceMove24hLong = 0.10
+		policy.MaxPriceMove24hShort = 0.10
 		policy.Reason = "LOW_VOL active - reversal/watch mode"
 	} else if volatility == "HIGH" {
 		policy.Regime = HIGH_VOL
@@ -237,6 +249,8 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 		policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, TREND_PULLBACK, COMPRESSION_BREAKOUT_RETEST}
 		policy.RequireAIConfidence = AIConfidenceHigh
 		policy.RequireFreshEntry = true
+		policy.MaxPriceMove24hLong = 0.08
+		policy.MaxPriceMove24hShort = 0.10
 		policy.Reason = "HIGH_VOL active - strict risk reduction mode"
 	}
 

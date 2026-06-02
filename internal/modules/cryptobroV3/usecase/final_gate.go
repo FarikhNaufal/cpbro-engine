@@ -434,6 +434,54 @@ func (uc *FinalGateUsecase) Evaluate(
 		rejectReasons = append(rejectReasons, "TradePlan parameters invalid (e.g. SL or TP reversed)")
 	}
 
+	// 24. Symbol-level directional price move guard
+	// Block LONG entry when individual symbol has dumped beyond directional threshold,
+	// and block SHORT entry when individual symbol has pumped beyond directional threshold.
+	symbolPriceChange := quant.TechnicalSnapshot.PriceChange24h / 100.0 // convert from percent to ratio
+	if quant.Direction == LONG {
+		maxMoveLong := policy.MaxPriceMove24hLong
+		if maxMoveLong <= 0 {
+			maxMoveLong = policy.MaxPriceMove24h // fallback to symmetric limit
+		}
+		// Dump = negative price change. Abs of negative change exceeding limit = block LONG
+		if symbolPriceChange < 0 && math.Abs(symbolPriceChange) > maxMoveLong {
+			rejectReasons = append(rejectReasons,
+				fmt.Sprintf("Symbol 24h dump %0.1f%% exceeds directional LONG limit %0.1f%%",
+					symbolPriceChange*100, maxMoveLong*100))
+		}
+	} else if quant.Direction == SHORT {
+		maxMoveShort := policy.MaxPriceMove24hShort
+		if maxMoveShort <= 0 {
+			maxMoveShort = policy.MaxPriceMove24h // fallback to symmetric limit
+		}
+		// Pump = positive price change. Abs of positive change exceeding limit = block SHORT
+		if symbolPriceChange > 0 && math.Abs(symbolPriceChange) > maxMoveShort {
+			rejectReasons = append(rejectReasons,
+				fmt.Sprintf("Symbol 24h pump %0.1f%% exceeds directional SHORT limit %0.1f%%",
+					symbolPriceChange*100, maxMoveShort*100))
+		}
+	}
+
+	// 25. SL-to-ATR ratio guard
+	// Ensures stop loss distance is reasonable relative to current M15 ATR volatility.
+	// SL that is too tight relative to ATR will get stopped out by normal price noise.
+	atrFromSnapshot := quant.TechnicalSnapshot.IndicatorValues[IndicatorATR]
+	if atrFromSnapshot > 0 && entry > 0 && sl > 0 {
+		slDistance := math.Abs(entry - sl)
+		minSLMultiplier := 1.0 // minimum 1.0x ATR for SL distance
+		if quant.Playbook == LIQUIDITY_SWEEP_REVERSAL || quant.Playbook == RANGE_EDGE_REVERSAL {
+			minSLMultiplier = 1.2 // reversal playbooks need wider SL for sweep noise
+		}
+		if policy.EffectiveRegime() == BTC_CHAOS || policy.EffectiveRegime() == HIGH_VOL {
+			minSLMultiplier = 1.5 // high vol requires even wider SL
+		}
+		if slDistance < atrFromSnapshot*minSLMultiplier {
+			watchReasons = append(watchReasons,
+				fmt.Sprintf("SL distance %0.6f is only %0.2fx ATR (%0.6f), minimum required %0.1fx ATR",
+					slDistance, slDistance/atrFromSnapshot, atrFromSnapshot, minSLMultiplier))
+		}
+	}
+
 	// Playbook-specific execution safety rules
 	if quant.Playbook == TREND_PULLBACK {
 		trendAligned := false

@@ -197,6 +197,12 @@ func validateAndClampPolicy(name string, policy MarketPolicy) MarketPolicy {
 		if policy.MaxPriceMove24h > 0.12 {
 			policy.MaxPriceMove24h = 0.12
 		}
+		if policy.MaxPriceMove24hLong <= 0 || policy.MaxPriceMove24hLong > 0.05 {
+			policy.MaxPriceMove24hLong = 0.05
+		}
+		if policy.MaxPriceMove24hShort <= 0 || policy.MaxPriceMove24hShort > 0.12 {
+			policy.MaxPriceMove24hShort = 0.12
+		}
 		if policy.MinScoreAI < 7.8 {
 			policy.MinScoreAI = 7.8
 		}
@@ -215,6 +221,12 @@ func validateAndClampPolicy(name string, policy MarketPolicy) MarketPolicy {
 		policy.AllowedPlaybooks = ensurePlaybook(policy.AllowedPlaybooks, RANGE_EDGE_REVERSAL)
 		if policy.MaxPriceMove24h < 0.15 {
 			policy.MaxPriceMove24h = 0.15
+		}
+		if policy.MaxPriceMove24hLong <= 0 || policy.MaxPriceMove24hLong > 0.08 {
+			policy.MaxPriceMove24hLong = 0.08
+		}
+		if policy.MaxPriceMove24hShort <= 0 || policy.MaxPriceMove24hShort > 0.18 {
+			policy.MaxPriceMove24hShort = 0.18
 		}
 	}
 
@@ -294,6 +306,8 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			MinVolume:              1000000.0,
 			MaxFundingAbs:          0.01,
 			MaxPriceMove24h:        0.20,
+			MaxPriceMove24hLong:    0.15,
+			MaxPriceMove24hShort:   0.15,
 			MinScoreAI:             6.0,
 			MinScoreExecute:        7.0,
 			MinRRExecute:           1.5,
@@ -319,6 +333,8 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			MinVolume:              10000000.0,
 			MaxFundingAbs:          0.01,
 			MaxPriceMove24h:        0.12,
+			MaxPriceMove24hLong:    0.05,
+			MaxPriceMove24hShort:   0.12,
 			MinScoreAI:             7.8,
 			MinScoreExecute:        8.5,
 			MinRRExecute:           2.0,
@@ -343,6 +359,8 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			MinVolume:              5000000.0,
 			MaxFundingAbs:          0.01,
 			MaxPriceMove24h:        0.20,
+			MaxPriceMove24hLong:    0.10,
+			MaxPriceMove24hShort:   0.15,
 			MinScoreAI:             6.0,
 			MinScoreExecute:        7.2,
 			MinRRExecute:           1.5,
@@ -367,6 +385,8 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			MinVolume:              1000000.0,
 			MaxFundingAbs:          0.01,
 			MaxPriceMove24h:        0.20,
+			MaxPriceMove24hLong:    0.18,
+			MaxPriceMove24hShort:   0.10,
 			MinScoreAI:             6.0,
 			MinScoreExecute:        7.0,
 			MinRRExecute:           1.5,
@@ -391,6 +411,8 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			MinVolume:              1000000.0,
 			MaxFundingAbs:          0.005,
 			MaxPriceMove24h:        0.18,
+			MaxPriceMove24hLong:    0.08,
+			MaxPriceMove24hShort:   0.18,
 			MinScoreAI:             6.0,
 			MinScoreExecute:        7.4,
 			MinRRExecute:           1.7,

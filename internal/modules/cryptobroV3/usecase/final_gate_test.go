@@ -363,4 +363,185 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 			t.Errorf("expected status %s (confidence LOW is hard safety reject), got %s", FINAL_REJECT, res.Status)
 		}
 	})
+
+	// Rule 24: Symbol-level directional price move guard tests
+	t.Run("Rule24 LONG blocked during extreme dump", func(t *testing.T) {
+		pol := policy
+		pol.MaxPriceMove24hLong = 0.08  // 8% limit
+		pol.MaxPriceMove24hShort = 0.18 // 18% limit
+
+		q := baseQuant
+		q.Direction = LONG
+		q.TechnicalSnapshot = TechnicalSnapshot{
+			IndicatorValues: map[string]float64{
+				IndicatorADX: 25.0,
+			},
+			PriceChange24h: -11.2, // XLM-like: symbol dumped 11.2%
+		}
+
+		res := uc.Evaluate(q, baseLocalGate, baseAI, basePlanReview, baseStaleness, pol, 50000, nil, nil, nil)
+		if res.Status != FINAL_REJECT {
+			t.Errorf("expected FINAL_REJECT for LONG during -11.2%% dump (limit 8%%), got %s (reason: %s)", res.Status, res.Reason)
+		}
+	})
+
+	t.Run("Rule24 SHORT still allowed during dump", func(t *testing.T) {
+		pol := policy
+		pol.MaxPriceMove24hLong = 0.08
+		pol.MaxPriceMove24hShort = 0.18
+
+		q := baseQuant
+		q.Direction = SHORT
+		q.TradePlan.Direction = SHORT
+		q.TradePlan.StopLoss = 51000
+		q.TradePlan.TakeProfit = 48000
+		q.TechnicalSnapshot = TechnicalSnapshot{
+			IndicatorValues: map[string]float64{
+				IndicatorADX: 25.0,
+			},
+			PriceChange24h: -11.2, // dump but SHORT is fine
+		}
+
+		res := uc.Evaluate(q, baseLocalGate, baseAI, basePlanReview, baseStaleness, pol, 50000, nil, nil, nil)
+		// Should NOT be rejected by Rule 24 (dump doesn't block SHORT)
+		if res.Status == FINAL_REJECT {
+			if contains(res.Reason, "directional SHORT limit") {
+				t.Errorf("SHORT should NOT be blocked by Rule 24 during dump, got: %s", res.Reason)
+			}
+		}
+	})
+
+	t.Run("Rule24 LONG allowed during moderate move", func(t *testing.T) {
+		pol := policy
+		pol.MaxPriceMove24hLong = 0.15
+		pol.MaxPriceMove24hShort = 0.15
+
+		q := baseQuant
+		q.TechnicalSnapshot = TechnicalSnapshot{
+			IndicatorValues: map[string]float64{
+				IndicatorADX: 25.0,
+			},
+			PriceChange24h: -5.0, // moderate 5% dip, within 15% limit
+		}
+
+		res := uc.Evaluate(q, baseLocalGate, baseAI, basePlanReview, baseStaleness, pol, 50000, nil, nil, nil)
+		if res.Status == FINAL_REJECT {
+			if contains(res.Reason, "directional LONG limit") {
+				t.Errorf("LONG should NOT be blocked by Rule 24 during moderate -5%% move (limit 15%%), got: %s", res.Reason)
+			}
+		}
+	})
+
+	// Rule 25: SL-to-ATR ratio guard tests
+	t.Run("Rule25 SL too tight relative to ATR is WATCH", func(t *testing.T) {
+		q := baseQuant
+		q.Playbook = LIQUIDITY_SWEEP_REVERSAL
+		q.TradePlan.EntryPrice = 0.22907
+		q.TradePlan.StopLoss = 0.226946  // SL distance = 0.002124
+		q.TradePlan.TakeProfit = 0.2332
+		q.TriggerPrice = 0.22907
+		q.TechnicalSnapshot = TechnicalSnapshot{
+			IndicatorValues: map[string]float64{
+				IndicatorADX:           25.0,
+				IndicatorATR:           0.0139,  // ATR = 0.0139, SL = 0.002124 = 0.15x ATR
+				IndicatorWickRejection: 1.0,
+				IndicatorVolumeSpike:   1.0,
+				IndicatorSweepLow:      1.0,
+				IndicatorPARejection:   1.0,
+			},
+		}
+
+		ai := baseAI
+		ai.HasRejection = true
+		ai.HasConfirmation = true
+
+		res := uc.Evaluate(q, baseLocalGate, ai, basePlanReview, baseStaleness, policy, 0.22907, nil, nil, nil)
+		// SL distance 0.002124 / ATR 0.0139 = 0.15x ATR, far below 1.2x minimum → WATCH
+		if res.Status == FINAL_EXECUTE {
+			t.Errorf("expected non-EXECUTE status for SL too tight (0.15x ATR vs 1.2x required), got %s (reason: %s)", res.Status, res.Reason)
+		}
+	})
+
+	t.Run("Rule25 SL adequate passes", func(t *testing.T) {
+		q := baseQuant
+		q.TradePlan.EntryPrice = 50000
+		q.TradePlan.StopLoss = 49000    // SL distance = 1000
+		q.TradePlan.TakeProfit = 52000
+		q.TechnicalSnapshot = TechnicalSnapshot{
+			IndicatorValues: map[string]float64{
+				IndicatorADX: 25.0,
+				IndicatorATR: 500.0, // ATR = 500, SL distance = 1000 = 2.0x ATR → adequate
+			},
+		}
+
+		res := uc.Evaluate(q, baseLocalGate, baseAI, basePlanReview, baseStaleness, policy, 50000, nil, nil, nil)
+		if res.Status == FINAL_WATCH || res.Status == FINAL_REJECT {
+			if contains(res.Reason, "SL distance") {
+				t.Errorf("SL should be adequate (2.0x ATR), but got rejected/watched for SL: %s", res.Reason)
+			}
+		}
+	})
+
+	t.Run("Rule24 Registry Policies clamp and enforce directional check", func(t *testing.T) {
+		reg := NewDefaultConfigRegistry()
+		
+		// 1. BTC_CHAOS check
+		chaosPolicy, found := reg.GetMarketPolicy("BTC_CHAOS")
+		if !found {
+			t.Fatal("BTC_CHAOS policy not found in default registry")
+		}
+		
+		// Ensure clamp/validate worked
+		chaosPolicy = validateAndClampPolicy("BTC_CHAOS", chaosPolicy)
+		if chaosPolicy.MaxPriceMove24hLong != 0.05 {
+			t.Errorf("expected BTC_CHAOS MaxPriceMove24hLong = 0.05, got %f", chaosPolicy.MaxPriceMove24hLong)
+		}
+
+		qLong := baseQuant
+		qLong.Direction = LONG
+		qLong.TechnicalSnapshot = TechnicalSnapshot{
+			IndicatorValues: map[string]float64{IndicatorADX: 25.0},
+			PriceChange24h: -6.0, // -6% dump exceeds 5% chaos long limit
+		}
+
+		resLong := uc.Evaluate(qLong, baseLocalGate, baseAI, basePlanReview, baseStaleness, chaosPolicy, 50000, nil, nil, nil)
+		if resLong.Status != FINAL_REJECT || !contains(resLong.Reason, "exceeds directional LONG limit") {
+			t.Errorf("expected LONG to be rejected under BTC_CHAOS due to dump, got status %s (reason: %s)", resLong.Status, resLong.Reason)
+		}
+
+		// 2. RISK_OFF check
+		roPolicy, found := reg.GetMarketPolicy("RISK_OFF")
+		if !found {
+			t.Fatal("RISK_OFF policy not found in default registry")
+		}
+		roPolicy = validateAndClampPolicy("RISK_OFF", roPolicy)
+		if roPolicy.MaxPriceMove24hLong != 0.08 {
+			t.Errorf("expected RISK_OFF MaxPriceMove24hLong = 0.08, got %f", roPolicy.MaxPriceMove24hLong)
+		}
+
+		qRo := baseQuant
+		qRo.Direction = LONG
+		qRo.TechnicalSnapshot = TechnicalSnapshot{
+			IndicatorValues: map[string]float64{IndicatorADX: 25.0},
+			PriceChange24h: -9.0, // -9% dump exceeds 8% limit
+		}
+
+		resRo := uc.Evaluate(qRo, baseLocalGate, baseAI, basePlanReview, baseStaleness, roPolicy, 50000, nil, nil, nil)
+		if resRo.Status != FINAL_REJECT || !contains(resRo.Reason, "exceeds directional LONG limit") {
+			t.Errorf("expected LONG to be rejected under RISK_OFF due to dump, got status %s (reason: %s)", resRo.Status, resRo.Reason)
+		}
+	})
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr))
+}
+
+func containsStr(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

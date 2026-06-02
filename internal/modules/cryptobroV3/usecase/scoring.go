@@ -467,6 +467,18 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 		notes = append(notes, "GLOBAL PENALTY: Poor Risk-to-Reward ratio (< 1.5) (-15)")
 	}
 
+	// 10. Contra-directional extreme symbol price move penalty
+	// Penalizes LONG entries during heavy dumps and SHORT entries during heavy pumps.
+	absPriceChange24h := math.Abs(quant.TechnicalSnapshot.PriceChange24h)
+	if absPriceChange24h > 8.0 { // >8% 24h move on this specific symbol
+		isContraMove := (resolvedDirection == LONG && quant.TechnicalSnapshot.PriceChange24h < 0) ||
+			(resolvedDirection == SHORT && quant.TechnicalSnapshot.PriceChange24h > 0)
+		if isContraMove {
+			penalty += 20.0
+			notes = append(notes, fmt.Sprintf("GLOBAL PENALTY: Contra-move entry during extreme 24h price change %0.1f%% (-20)", quant.TechnicalSnapshot.PriceChange24h))
+		}
+	}
+
 	// Apply penalties
 	rawScore -= penalty
 
