@@ -173,7 +173,7 @@ func (h *Handler) GetLatest(c *gin.Context) {
 		return
 	}
 
-	// Dynamically enrich signal status using the latest signal journal monitoring status
+	// Dynamically enrich execute/watch statuses using their dedicated journals.
 	if journal, err := h.storageUC.LoadSignalJournal(); err == nil {
 		latestJournal := make(map[string]usecase.SignalJournal)
 		for _, item := range journal {
@@ -192,8 +192,16 @@ func (h *Handler) GetLatest(c *gin.Context) {
 				}
 			}
 		}
+	}
+	if watchJournal, err := h.storageUC.LoadWatchJournal(); err == nil {
+		latestWatchJournal := make(map[string]usecase.WatchJournal)
+		for _, item := range watchJournal {
+			if _, exists := latestWatchJournal[item.Symbol]; !exists {
+				latestWatchJournal[item.Symbol] = item
+			}
+		}
 		for i, sig := range res.Watchlist {
-			if item, exists := latestJournal[sig.Symbol]; exists {
+			if item, exists := latestWatchJournal[sig.Symbol]; exists {
 				diff := sig.ReconciledTime.Sub(item.CreatedAt)
 				if diff < 0 {
 					diff = -diff
@@ -357,6 +365,100 @@ func (h *Handler) GetJournal(c *gin.Context) {
 	)
 
 	c.JSON(http.StatusOK, ok("journal retrieved successfully", resp))
+}
+
+// GetWatchJournal godoc
+// @Summary      Get virtual watch signal journal
+// @Description  Reads watch_journal.json. Contains virtual watchlist monitoring outcomes only.
+// @Tags         journal
+// @Produce      json
+// @Param        symbol query string false "Filter by symbol"
+// @Param        playbook query string false "Filter by playbook"
+// @Param        status query string false "Filter by status"
+// @Param        limit query int false "Limit rows"
+// @Success      200 {object} dto.JournalAPIResponse
+// @Failure      400 {object} dto.ErrorAPIResponse
+// @Failure      500 {object} dto.ErrorAPIResponse
+// @Router       /watch-journal [get]
+func (h *Handler) GetWatchJournal(c *gin.Context) {
+	journal, err := h.storageUC.LoadWatchJournal()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, fail("failed to read watch journal", sanitizeErr(err.Error())))
+		return
+	}
+
+	filtered := []usecase.WatchJournal{}
+	symbolFilter := c.Query("symbol")
+	statusFilter := c.Query("status")
+	playbookFilter := c.Query("playbook")
+	directionFilter := c.Query("direction")
+
+	for _, item := range journal {
+		if symbolFilter != "" && !strings.EqualFold(item.Symbol, symbolFilter) {
+			continue
+		}
+		if statusFilter != "" && !strings.EqualFold(string(item.Status), statusFilter) {
+			continue
+		}
+		if playbookFilter != "" && !strings.EqualFold(string(item.Playbook), playbookFilter) {
+			continue
+		}
+		if directionFilter != "" && !strings.EqualFold(string(item.Direction), directionFilter) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].CreatedAt.After(filtered[j].CreatedAt)
+	})
+
+	limitStr := c.Query("limit")
+	limit := 100 // default limit
+	if limitStr != "" {
+		l, err := strconv.Atoi(limitStr)
+		if err != nil || l <= 0 {
+			c.JSON(http.StatusBadRequest, fail("invalid limit"))
+			return
+		}
+		limit = l
+	}
+	if limit > 500 {
+		limit = 500 // enforce max bounds
+	}
+
+	offsetStr := c.Query("offset")
+	offset := 0
+	if offsetStr != "" {
+		o, err := strconv.Atoi(offsetStr)
+		if err != nil || o < 0 {
+			c.JSON(http.StatusBadRequest, fail("invalid offset"))
+			return
+		}
+		offset = o
+	}
+
+	if offset > len(filtered) {
+		offset = len(filtered)
+	}
+	end := offset + limit
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+
+	resp := usecase.NormalizeJournalForFrontend(
+		filtered[offset:end],
+		limit,
+		offset,
+		dto.JournalFilters{
+			Symbol:    symbolFilter,
+			Playbook:  playbookFilter,
+			Status:    statusFilter,
+			Direction: directionFilter,
+		},
+	)
+
+	c.JSON(http.StatusOK, ok("watch journal retrieved successfully", resp))
 }
 
 // GetEvaluation godoc

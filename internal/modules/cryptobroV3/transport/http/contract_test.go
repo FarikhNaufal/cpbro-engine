@@ -17,6 +17,7 @@ import (
 type contractStorageRepo struct {
 	latest  *entity.LatestResult
 	journal []usecase.SignalJournal
+	watch   []usecase.WatchJournal
 	audits  []usecase.DecisionAudit
 }
 
@@ -38,6 +39,17 @@ func (m *contractStorageRepo) SaveSignalJournal(j []usecase.SignalJournal) error
 }
 func (m *contractStorageRepo) AppendSignalJournal(entry usecase.SignalJournal) error {
 	m.journal = append(m.journal, entry)
+	return nil
+}
+func (m *contractStorageRepo) LoadWatchJournal() ([]usecase.WatchJournal, error) {
+	return m.watch, nil
+}
+func (m *contractStorageRepo) SaveWatchJournal(j []usecase.WatchJournal) error {
+	m.watch = j
+	return nil
+}
+func (m *contractStorageRepo) AppendWatchJournal(entry usecase.WatchJournal) error {
+	m.watch = append(m.watch, entry)
 	return nil
 }
 func (m *contractStorageRepo) LoadAIAuditCache() (*entity.AIAuditCache, error) {

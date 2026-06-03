@@ -19,6 +19,7 @@ type complianceStorageRepo struct {
 	latestResult *entity.LatestResult
 	history      *entity.SignalHistory
 	journal      []SignalJournal
+	watchJournal []WatchJournal
 	evalReport   *EvaluationReport
 	audits       []DecisionAudit
 }
@@ -49,6 +50,17 @@ func (m *complianceStorageRepo) SaveSignalJournal(j []SignalJournal) error {
 }
 func (m *complianceStorageRepo) AppendSignalJournal(entry SignalJournal) error {
 	m.journal = append(m.journal, entry)
+	return nil
+}
+func (m *complianceStorageRepo) LoadWatchJournal() ([]WatchJournal, error) {
+	return m.watchJournal, nil
+}
+func (m *complianceStorageRepo) SaveWatchJournal(j []WatchJournal) error {
+	m.watchJournal = j
+	return nil
+}
+func (m *complianceStorageRepo) AppendWatchJournal(entry WatchJournal) error {
+	m.watchJournal = append(m.watchJournal, entry)
 	return nil
 }
 func (m *complianceStorageRepo) LoadAIAuditCache() (*entity.AIAuditCache, error) {

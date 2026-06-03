@@ -11,6 +11,7 @@ import (
 
 type mockFeedbackStorageRepo struct {
 	journal   []usecase.SignalJournal
+	watch     []usecase.WatchJournal
 	latestRes *entity.LatestResult
 	audits    []usecase.DecisionAudit
 	report    *usecase.EvaluationReport
@@ -49,6 +50,20 @@ func (m *mockFeedbackStorageRepo) SaveSignalJournal(journal []usecase.SignalJour
 
 func (m *mockFeedbackStorageRepo) AppendSignalJournal(entry usecase.SignalJournal) error {
 	m.journal = append(m.journal, entry)
+	return nil
+}
+
+func (m *mockFeedbackStorageRepo) LoadWatchJournal() ([]usecase.WatchJournal, error) {
+	return m.watch, nil
+}
+
+func (m *mockFeedbackStorageRepo) SaveWatchJournal(journal []usecase.WatchJournal) error {
+	m.watch = journal
+	return nil
+}
+
+func (m *mockFeedbackStorageRepo) AppendWatchJournal(entry usecase.WatchJournal) error {
+	m.watch = append(m.watch, entry)
 	return nil
 }
 
@@ -242,6 +257,55 @@ func TestFeedback_AIMediumNoDecisionAudit(t *testing.T) {
 	}
 	if !foundAIMediumWarning {
 		t.Error("Expected warning about missing decision audit file")
+	}
+}
+
+func TestFeedback_WatchJournalOnlyProducesVirtualMetrics(t *testing.T) {
+	repo := &mockFeedbackStorageRepo{
+		watch: []usecase.WatchJournal{
+			{
+				ID:            "watch_1",
+				Playbook:      usecase.LIQUIDITY_SWEEP_REVERSAL,
+				Direction:     usecase.LONG,
+				Status:        usecase.VIRTUAL_TP2_HIT,
+				MarketRegime:  "CHOP_RANGE",
+				MFE:           2.1,
+				MAE:           0.4,
+				PnlPercentage: 1.8,
+			},
+			{
+				ID:            "watch_2",
+				Playbook:      usecase.TREND_PULLBACK,
+				Direction:     usecase.SHORT,
+				Status:        usecase.VIRTUAL_SL_HIT,
+				MarketRegime:  "RISK_OFF",
+				MFE:           0.6,
+				MAE:           1.2,
+				PnlPercentage: -0.9,
+			},
+		},
+	}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if repo.report == nil {
+		t.Fatal("expected report to be saved")
+	}
+	if repo.report.Metrics["watch_total"] != 2 {
+		t.Fatalf("expected watch_total=2, got %v", repo.report.Metrics["watch_total"])
+	}
+	if repo.report.Metrics["watch_finalized"] != 2 {
+		t.Fatalf("expected watch_finalized=2, got %v", repo.report.Metrics["watch_finalized"])
+	}
+	if repo.report.Metrics["watch_virtual_tp2_rate"] != 50 {
+		t.Fatalf("expected watch_virtual_tp2_rate=50, got %v", repo.report.Metrics["watch_virtual_tp2_rate"])
+	}
+	if !repo.report.DataCompleteness.CanEvaluateWatchMissedOpportunity {
+		t.Fatal("expected CanEvaluateWatchMissedOpportunity=true")
 	}
 }
 

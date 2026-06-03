@@ -85,7 +85,7 @@ func main() {
 				log.Fatalf("failed to initialize pocketbase storage: %v", err)
 			}
 			storageRepo = pbStorage
-			slog.Info("PocketBase storage enabled for signal_journals + evaluation_runs")
+			slog.Info("PocketBase storage enabled for signal_journals + watch_journals + evaluation_runs")
 		}
 	}
 

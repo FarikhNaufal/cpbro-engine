@@ -110,14 +110,44 @@ func (s *JSONStorageService) SaveSignalJournal(journal []usecase.SignalJournal) 
 	return s.writeJSON("signal_journal.json", journal)
 }
 
+func (s *JSONStorageService) LoadWatchJournal() ([]usecase.WatchJournal, error) {
+	var journal []usecase.WatchJournal
+	if err := s.readJSON("watch_journal.json", &journal); err != nil {
+		return nil, err
+	}
+	if journal == nil {
+		journal = []usecase.WatchJournal{}
+	}
+	return journal, nil
+}
+
+func (s *JSONStorageService) SaveWatchJournal(journal []usecase.WatchJournal) error {
+	return s.writeJSON("watch_journal.json", journal)
+}
+
 func (s *JSONStorageService) UpdateSignalJournal(update func([]usecase.SignalJournal) ([]usecase.SignalJournal, error)) error {
+	return updateJSONSliceFile(s, "signal_journal.json", update)
+}
+
+func (s *JSONStorageService) AppendSignalJournal(entry usecase.SignalJournal) error {
+	return appendJSONSliceFile(s, "signal_journal.json", entry)
+}
+
+func (s *JSONStorageService) UpdateWatchJournal(update func([]usecase.WatchJournal) ([]usecase.WatchJournal, error)) error {
+	return updateJSONSliceFile(s, "watch_journal.json", update)
+}
+
+func (s *JSONStorageService) AppendWatchJournal(entry usecase.WatchJournal) error {
+	return appendJSONSliceFile(s, "watch_journal.json", entry)
+}
+
+func updateJSONSliceFile[T any](s *JSONStorageService, filename string, update func([]T) ([]T, error)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	filename := "signal_journal.json"
 	path := filepath.Join(s.storageDir, filename)
 
-	var journal []usecase.SignalJournal
+	var journal []T
 	data, err := os.ReadFile(path)
 	if err == nil && len(data) > 0 {
 		if err := json.Unmarshal(data, &journal); err != nil {
@@ -127,7 +157,7 @@ func (s *JSONStorageService) UpdateSignalJournal(update func([]usecase.SignalJou
 		return err
 	}
 	if journal == nil {
-		journal = []usecase.SignalJournal{}
+		journal = []T{}
 	}
 
 	updated, err := update(journal)
@@ -135,7 +165,7 @@ func (s *JSONStorageService) UpdateSignalJournal(update func([]usecase.SignalJou
 		return err
 	}
 	if updated == nil {
-		updated = []usecase.SignalJournal{}
+		updated = []T{}
 	}
 
 	tmpPath := path + ".tmp"
@@ -153,14 +183,13 @@ func (s *JSONStorageService) UpdateSignalJournal(update func([]usecase.SignalJou
 	return nil
 }
 
-func (s *JSONStorageService) AppendSignalJournal(entry usecase.SignalJournal) error {
+func appendJSONSliceFile[T any](s *JSONStorageService, filename string, entry T) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	filename := "signal_journal.json"
 	path := filepath.Join(s.storageDir, filename)
 
-	var journal []usecase.SignalJournal
+	var journal []T
 	data, err := os.ReadFile(path)
 	if err == nil && len(data) > 0 {
 		if err := json.Unmarshal(data, &journal); err != nil {

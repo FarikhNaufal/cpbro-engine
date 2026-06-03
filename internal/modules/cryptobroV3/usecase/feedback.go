@@ -63,6 +63,16 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		completeness.CanEvaluateExecutedOutcome = true
 	}
 
+	watchJournal, err := uc.storageUsecase.LoadWatchJournal()
+	if err != nil {
+		return fmt.Errorf("failed to load watch journal: %w", err)
+	}
+	hasWatchJournal := err == nil && len(watchJournal) > 0
+	if hasWatchJournal {
+		sourceFiles = append(sourceFiles, "watch_journal.json")
+		completeness.CanEvaluateWatchMissedOpportunity = true
+	}
+
 	latestRes, err := uc.storageUsecase.LoadLatestResult()
 	if err != nil {
 		return fmt.Errorf("failed to load latest result: %w", err)
@@ -88,7 +98,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	}
 
 	// Early check: if we have absolutely no data, still save a report indicating zero signals
-	if len(journal) == 0 && len(audits) == 0 {
+	if len(journal) == 0 && len(audits) == 0 && len(watchJournal) == 0 {
 		emptyReport := EvaluationReport{
 			GeneratedAt:      time.Now(),
 			ConfigVersion:    GetGlobalConfigRegistry().GetVersion(),
@@ -109,7 +119,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 					SampleSize:       0,
 					EvidenceSummary:  "No historical trading signals found in storage files.",
 					ConfidenceLevel:  "LOW",
-					Reason:           "No signals recorded in signal_journal.json or decision_audit.json.",
+					Reason:           "No signals recorded in signal_journal.json, watch_journal.json, or decision_audit.json.",
 					SuggestedAction:  "Wait for scanner to compile data.",
 					DoNotAutoApply:   true,
 					RequiresMoreData: true,
@@ -333,6 +343,43 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	avgTimeToTP2 := safeDiv(sumTimeToTP2, float64(countTimeToTP2))
 	avgTimeToSL := safeDiv(sumTimeToSL, float64(countTimeToSL))
 	avgHoldingTime := safeDiv(sumHoldingTime, float64(countHoldingTime))
+
+	// 2b. Evaluate virtual FINAL_WATCH outcomes separately from executable signals.
+	var watchFinalized []WatchJournal
+	var watchTP1Hits, watchTP2Hits, watchSLHits, watchExpiredHits int
+	var watchSumMFE, watchSumMAE, watchTotalPnl float64
+
+	for _, item := range watchJournal {
+		if item.Status == WATCH_MONITORING {
+			continue
+		}
+		watchFinalized = append(watchFinalized, item)
+
+		if item.TimeToTP1 != "" || item.Status == VIRTUAL_TP1_HIT || item.Status == VIRTUAL_TP2_HIT {
+			watchTP1Hits++
+		}
+		if item.Status == VIRTUAL_TP2_HIT {
+			watchTP2Hits++
+		}
+		if item.Status == VIRTUAL_SL_HIT {
+			watchSLHits++
+		}
+		if item.Status == VIRTUAL_EXPIRED {
+			watchExpiredHits++
+		}
+		watchSumMFE += item.MFE
+		watchSumMAE += item.MAE
+		watchTotalPnl += item.PnlPercentage
+	}
+
+	watchFinalizedCount := len(watchFinalized)
+	watchVirtualWinRate := safeRate(watchTP1Hits, watchFinalizedCount)
+	watchVirtualTP1Rate := safeRate(watchTP1Hits, watchFinalizedCount)
+	watchVirtualTP2Rate := safeRate(watchTP2Hits, watchFinalizedCount)
+	watchVirtualSLRate := safeRate(watchSLHits, watchFinalizedCount)
+	watchVirtualExpiredRate := safeRate(watchExpiredHits, watchFinalizedCount)
+	watchAverageMFE := safeDiv(watchSumMFE, float64(watchFinalizedCount))
+	watchAverageMAE := safeDiv(watchSumMAE, float64(watchFinalizedCount))
 
 	// Map raw stats to report models
 	playbookStats := make(map[string]PlaybookStats)
@@ -1225,19 +1272,29 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		DataCompleteness: completeness,
 		TotalSignals:     totalCount,
 		Metrics: map[string]float64{
-			"win_rate":             winRate,
-			"tp1_rate":             tp1Rate,
-			"tp2_rate":             tp2Rate,
-			"sl_rate":              slRate,
-			"expired_rate":         expiredRate,
-			"average_mfe":          avgMFE,
-			"average_mae":          avgMAE,
-			"average_rr":           avgRR,
-			"average_time_to_tp1":  avgTimeToTP1,
-			"average_time_to_tp2":  avgTimeToTP2,
-			"average_time_to_sl":   avgTimeToSL,
-			"average_holding_time": avgHoldingTime,
-			"total_pnl_percentage": totalPnl,
+			"win_rate":                   winRate,
+			"tp1_rate":                   tp1Rate,
+			"tp2_rate":                   tp2Rate,
+			"sl_rate":                    slRate,
+			"expired_rate":               expiredRate,
+			"average_mfe":                avgMFE,
+			"average_mae":                avgMAE,
+			"average_rr":                 avgRR,
+			"average_time_to_tp1":        avgTimeToTP1,
+			"average_time_to_tp2":        avgTimeToTP2,
+			"average_time_to_sl":         avgTimeToSL,
+			"average_holding_time":       avgHoldingTime,
+			"total_pnl_percentage":       totalPnl,
+			"watch_total":                float64(len(watchJournal)),
+			"watch_finalized":            float64(watchFinalizedCount),
+			"watch_virtual_win_rate":     watchVirtualWinRate,
+			"watch_virtual_tp1_rate":     watchVirtualTP1Rate,
+			"watch_virtual_tp2_rate":     watchVirtualTP2Rate,
+			"watch_virtual_sl_rate":      watchVirtualSLRate,
+			"watch_virtual_expired_rate": watchVirtualExpiredRate,
+			"watch_average_mfe":          watchAverageMFE,
+			"watch_average_mae":          watchAverageMAE,
+			"watch_total_pnl_percentage": watchTotalPnl,
 		},
 		PlaybookStats:             playbookStats,
 		RegimeStats:               regimeStats,

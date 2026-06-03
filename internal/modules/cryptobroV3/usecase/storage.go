@@ -19,6 +19,10 @@ type signalJournalAtomicUpdater interface {
 	UpdateSignalJournal(update func([]SignalJournal) ([]SignalJournal, error)) error
 }
 
+type watchJournalAtomicUpdater interface {
+	UpdateWatchJournal(update func([]WatchJournal) ([]WatchJournal, error)) error
+}
+
 type aiAuditCacheAtomicUpdater interface {
 	UpdateAIAuditCache(update func(*entity.AIAuditCache) error) error
 }
@@ -90,6 +94,46 @@ func (uc *StorageUsecase) UpdateSignalJournal(update func([]SignalJournal) ([]Si
 
 func (uc *StorageUsecase) SaveSignalToJournal(sig SignalJournal) error {
 	err := uc.repo.AppendSignalJournal(sig)
+	if err != nil {
+		GetGlobalMetrics().IncrementStorageWriteFail()
+	}
+	return err
+}
+
+func (uc *StorageUsecase) LoadWatchJournal() ([]WatchJournal, error) {
+	return uc.repo.LoadWatchJournal()
+}
+
+func (uc *StorageUsecase) SaveWatchJournal(journal []WatchJournal) error {
+	err := uc.repo.SaveWatchJournal(journal)
+	if err != nil {
+		GetGlobalMetrics().IncrementStorageWriteFail()
+	}
+	return err
+}
+
+func (uc *StorageUsecase) UpdateWatchJournal(update func([]WatchJournal) ([]WatchJournal, error)) error {
+	if updater, ok := uc.repo.(watchJournalAtomicUpdater); ok {
+		err := updater.UpdateWatchJournal(update)
+		if err != nil {
+			GetGlobalMetrics().IncrementStorageWriteFail()
+		}
+		return err
+	}
+
+	journal, err := uc.repo.LoadWatchJournal()
+	if err != nil {
+		return err
+	}
+	updated, err := update(journal)
+	if err != nil {
+		return err
+	}
+	return uc.SaveWatchJournal(updated)
+}
+
+func (uc *StorageUsecase) SaveWatchToJournal(sig WatchJournal) error {
+	err := uc.repo.AppendWatchJournal(sig)
 	if err != nil {
 		GetGlobalMetrics().IncrementStorageWriteFail()
 	}

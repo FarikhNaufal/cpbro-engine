@@ -106,11 +106,16 @@ const (
 	FINAL_REJECT      Status = "FINAL_REJECT"
 	AI_ERROR_REVIEW   Status = "AI_ERROR_REVIEW"
 	MONITORING        Status = "MONITORING"
+	WATCH_MONITORING  Status = "WATCH_MONITORING"
 	TP1_HIT           Status = "TP1_HIT"
 	TP2_HIT           Status = "TP2_HIT"
 	SL_HIT            Status = "SL_HIT"
 	EXPIRED           Status = "EXPIRED"
 	BREAKEVEN         Status = "BREAKEVEN"
+	VIRTUAL_TP1_HIT   Status = "VIRTUAL_TP1_HIT"
+	VIRTUAL_TP2_HIT   Status = "VIRTUAL_TP2_HIT"
+	VIRTUAL_SL_HIT    Status = "VIRTUAL_SL_HIT"
+	VIRTUAL_EXPIRED   Status = "VIRTUAL_EXPIRED"
 )
 
 // Struct Definitions
@@ -415,6 +420,10 @@ type SignalJournal struct {
 	NotificationError  string    `json:"notification_error,omitempty"`
 }
 
+// WatchJournal intentionally reuses the same persistence shape as SignalJournal,
+// but is stored and evaluated separately so FINAL_WATCH remains non-actionable.
+type WatchJournal = SignalJournal
+
 type DecisionAudit struct {
 	SchemaVersion             string    `json:"schema_version,omitempty"`
 	ConfigVersion             string    `json:"config_version,omitempty"`
@@ -644,6 +653,10 @@ type StorageRepository interface {
 	LoadSignalJournal() ([]SignalJournal, error)
 	SaveSignalJournal(journal []SignalJournal) error
 	AppendSignalJournal(entry SignalJournal) error
+
+	LoadWatchJournal() ([]WatchJournal, error)
+	SaveWatchJournal(journal []WatchJournal) error
+	AppendWatchJournal(entry WatchJournal) error
 
 	LoadAIAuditCache() (*entity.AIAuditCache, error)
 	SaveAIAuditCache(cache *entity.AIAuditCache) error

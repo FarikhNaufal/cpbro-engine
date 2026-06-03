@@ -44,6 +44,7 @@ func SetupRouter(cfg *config.Config, h *Handler) *gin.Engine {
 		v3.GET("/latest", h.GetLatest)
 		v3.POST("/run", h.PostRun)
 		v3.GET("/journal", h.GetJournal)
+		v3.GET("/watch-journal", h.GetWatchJournal)
 		v3.GET("/evaluation", h.GetEvaluation)
 
 		// Optional Safe Endpoints

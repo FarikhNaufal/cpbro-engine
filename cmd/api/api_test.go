@@ -24,6 +24,7 @@ type mockAPIStorageRepo struct {
 	latestResult *entity.LatestResult
 	history      *entity.SignalHistory
 	journal      []usecase.SignalJournal
+	watchJournal []usecase.WatchJournal
 	evalReport   *usecase.EvaluationReport
 	audits       []usecase.DecisionAudit
 }
@@ -54,6 +55,17 @@ func (m *mockAPIStorageRepo) SaveSignalJournal(journal []usecase.SignalJournal) 
 }
 func (m *mockAPIStorageRepo) AppendSignalJournal(entry usecase.SignalJournal) error {
 	m.journal = append(m.journal, entry)
+	return nil
+}
+func (m *mockAPIStorageRepo) LoadWatchJournal() ([]usecase.WatchJournal, error) {
+	return m.watchJournal, nil
+}
+func (m *mockAPIStorageRepo) SaveWatchJournal(journal []usecase.WatchJournal) error {
+	m.watchJournal = journal
+	return nil
+}
+func (m *mockAPIStorageRepo) AppendWatchJournal(entry usecase.WatchJournal) error {
+	m.watchJournal = append(m.watchJournal, entry)
 	return nil
 }
 func (m *mockAPIStorageRepo) LoadAIAuditCache() (*entity.AIAuditCache, error) {

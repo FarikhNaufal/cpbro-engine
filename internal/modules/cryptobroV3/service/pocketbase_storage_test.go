@@ -115,6 +115,102 @@ func TestPocketBaseStorageService_SignalJournalAppendAndLoad(t *testing.T) {
 	}
 }
 
+func TestPocketBaseStorageService_WatchJournalAppendAndLoad(t *testing.T) {
+	var mu sync.Mutex
+	var createdWatch map[string]any
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/collections/_superusers/auth-with-password":
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": "testtoken"})
+			return
+		case r.Method == http.MethodPost && r.URL.Path == "/api/collections/watch_journals/records":
+			if got := r.Header.Get("Authorization"); got != "Bearer testtoken" {
+				http.Error(w, "missing bearer", http.StatusUnauthorized)
+				return
+			}
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &createdWatch)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "watchrec1"})
+			return
+		case r.Method == http.MethodGet && r.URL.Path == "/api/collections/watch_journals/records":
+			mu.Lock()
+			defer mu.Unlock()
+			items := []map[string]any{}
+			if createdWatch != nil {
+				createdWatch["id"] = "watchrec1"
+				createdWatch["created_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+				items = append(items, createdWatch)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"page":       1,
+				"perPage":    200,
+				"totalItems": len(items),
+				"totalPages": 1,
+				"items":      items,
+			})
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	})
+
+	httpClient := &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, r)
+			return rr.Result(), nil
+		}),
+	}
+
+	tmpDir := t.TempDir()
+	fallback, err := NewJSONStorageService(filepath.Join(tmpDir, "storage"))
+	if err != nil {
+		t.Fatalf("NewJSONStorageService: %v", err)
+	}
+
+	client, err := NewPocketBaseClientWithHTTPClient("http://pocketbase.local", httpClient, 2*time.Second, PocketBaseAuthModeSuperuser, "", "admin@example.com", "pass", 1)
+	if err != nil {
+		t.Fatalf("NewPocketBaseClient: %v", err)
+	}
+
+	st, err := NewPocketBaseStorageService(fallback, client)
+	if err != nil {
+		t.Fatalf("NewPocketBaseStorageService: %v", err)
+	}
+
+	entry := usecase.WatchJournal{
+		ID:         "watch_1",
+		Symbol:     "XLMUSDT",
+		Direction:  usecase.LONG,
+		Playbook:   usecase.LIQUIDITY_SWEEP_REVERSAL,
+		EntryPrice: 0.229,
+		StopLoss:   0.226,
+		TP1:        0.233,
+		TP2:        0.236,
+		RR:         1.7,
+		Status:     usecase.WATCH_MONITORING,
+		CreatedAt:  time.Now().UTC(),
+		ExpiresAt:  time.Now().UTC().Add(2 * time.Hour),
+	}
+
+	if err := st.AppendWatchJournal(entry); err != nil {
+		t.Fatalf("AppendWatchJournal: %v", err)
+	}
+
+	journal, err := st.LoadWatchJournal()
+	if err != nil {
+		t.Fatalf("LoadWatchJournal: %v", err)
+	}
+	if len(journal) != 1 {
+		t.Fatalf("expected 1 watch journal row, got %d", len(journal))
+	}
+	if journal[0].ID != "watch_1" || journal[0].Symbol != "XLMUSDT" {
+		t.Fatalf("unexpected watch journal row: %+v", journal[0])
+	}
+}
+
 func TestPocketBaseStorageService_SaveAndLoadEvaluationReport(t *testing.T) {
 	var savedEval map[string]any
 

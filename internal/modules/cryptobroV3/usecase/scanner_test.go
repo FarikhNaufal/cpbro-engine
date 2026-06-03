@@ -104,6 +104,7 @@ type mockStorageRepo struct {
 	latestResult *entity.LatestResult
 	history      *entity.SignalHistory
 	journal      []SignalJournal
+	watchJournal []WatchJournal
 	auditCache   *entity.AIAuditCache
 	evalReport   *EvaluationReport
 	audits       []DecisionAudit
@@ -158,6 +159,26 @@ func (m *mockStorageRepo) AppendSignalJournal(entry SignalJournal) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.journal = append(m.journal, entry)
+	return nil
+}
+
+func (m *mockStorageRepo) LoadWatchJournal() ([]WatchJournal, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.watchJournal, nil
+}
+
+func (m *mockStorageRepo) SaveWatchJournal(journal []WatchJournal) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.watchJournal = journal
+	return nil
+}
+
+func (m *mockStorageRepo) AppendWatchJournal(entry WatchJournal) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.watchJournal = append(m.watchJournal, entry)
 	return nil
 }
 

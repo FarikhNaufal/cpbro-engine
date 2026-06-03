@@ -12,6 +12,7 @@ import (
 
 type mockStorageRepo struct {
 	journal []usecase.SignalJournal
+	watch   []usecase.WatchJournal
 	saved   bool
 }
 
@@ -43,6 +44,22 @@ func (m *mockStorageRepo) SaveSignalJournal(journal []usecase.SignalJournal) err
 
 func (m *mockStorageRepo) AppendSignalJournal(entry usecase.SignalJournal) error {
 	m.journal = append(m.journal, entry)
+	m.saved = true
+	return nil
+}
+
+func (m *mockStorageRepo) LoadWatchJournal() ([]usecase.WatchJournal, error) {
+	return m.watch, nil
+}
+
+func (m *mockStorageRepo) SaveWatchJournal(journal []usecase.WatchJournal) error {
+	m.watch = journal
+	m.saved = true
+	return nil
+}
+
+func (m *mockStorageRepo) AppendWatchJournal(entry usecase.WatchJournal) error {
+	m.watch = append(m.watch, entry)
 	m.saved = true
 	return nil
 }
@@ -245,5 +262,58 @@ func TestMonitoring_MonitorVirtualPositions_Expired(t *testing.T) {
 	item := updatedJournal[0]
 	if item.Status != usecase.EXPIRED {
 		t.Errorf("expected EXPIRED status, got %s", item.Status)
+	}
+}
+
+func TestMonitoring_MonitorVirtualWatchPositions_TP1Hit(t *testing.T) {
+	createdAt := time.Now().Add(-20 * time.Minute)
+	expiresAt := createdAt.Add(120 * time.Minute)
+
+	repo := &mockStorageRepo{
+		watch: []usecase.WatchJournal{
+			{
+				ID:         "watch_signal_tp1",
+				Symbol:     "XRPUSDT",
+				Direction:  usecase.LONG,
+				EntryPrice: 100.0,
+				StopLoss:   95.0,
+				TP1:        104.0,
+				TP2:        108.0,
+				CreatedAt:  createdAt,
+				ExpiresAt:  expiresAt,
+				Status:     usecase.WATCH_MONITORING,
+			},
+		},
+	}
+	storage := usecase.NewStorageUsecase(repo)
+	provider := &mockMarketDataProvider{
+		candles: []dto.Candle{
+			{
+				Time:  createdAt.Add(15 * time.Minute),
+				Open:  100.0,
+				High:  104.5,
+				Low:   99.5,
+				Close: 103.5,
+			},
+		},
+		price: 103.5,
+	}
+
+	monitor := usecase.NewMonitoringUsecase(provider, storage)
+	if err := monitor.MonitorVirtualPositions(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	watchJournal, _ := storage.LoadWatchJournal()
+	if len(watchJournal) != 1 {
+		t.Fatalf("expected 1 watch journal entry, got %d", len(watchJournal))
+	}
+	if watchJournal[0].Status != usecase.VIRTUAL_TP1_HIT {
+		t.Fatalf("expected VIRTUAL_TP1_HIT, got %s", watchJournal[0].Status)
+	}
+
+	signalJournal, _ := storage.LoadSignalJournal()
+	if len(signalJournal) != 0 {
+		t.Fatalf("expected signal journal to remain untouched, got %d rows", len(signalJournal))
 	}
 }

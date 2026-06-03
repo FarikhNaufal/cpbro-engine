@@ -390,6 +390,7 @@ func TestTelegramOpsHTMLCompliance(t *testing.T) {
 
 type mockNotificationStorageRepo struct {
 	journal []usecase.SignalJournal
+	watch   []usecase.WatchJournal
 }
 
 func (m *mockNotificationStorageRepo) LoadLatestResult() (*entity.LatestResult, error) {
@@ -413,6 +414,17 @@ func (m *mockNotificationStorageRepo) SaveSignalJournal(journal []usecase.Signal
 }
 func (m *mockNotificationStorageRepo) AppendSignalJournal(entry usecase.SignalJournal) error {
 	m.journal = append(m.journal, entry)
+	return nil
+}
+func (m *mockNotificationStorageRepo) LoadWatchJournal() ([]usecase.WatchJournal, error) {
+	return m.watch, nil
+}
+func (m *mockNotificationStorageRepo) SaveWatchJournal(journal []usecase.WatchJournal) error {
+	m.watch = journal
+	return nil
+}
+func (m *mockNotificationStorageRepo) AppendWatchJournal(entry usecase.WatchJournal) error {
+	m.watch = append(m.watch, entry)
 	return nil
 }
 func (m *mockNotificationStorageRepo) LoadAIAuditCache() (*entity.AIAuditCache, error) {

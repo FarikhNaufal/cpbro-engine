@@ -722,6 +722,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		// Count final statuses
 		if finalDecision.Status == FINAL_EXECUTE {
 			totalFinalExecute++
+			now := time.Now()
 			sigRes := dto.SignalResponse{
 				Symbol:         pair,
 				Direction:      string(finalDecision.Direction),
@@ -733,7 +734,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				Strategy:       string(finalDecision.Playbook),
 				AISentiment:    candCtx.auditResponse.Sentiment,
 				IsFinalExecute: true,
-				ReconciledTime: time.Now(),
+				ReconciledTime: now,
 				Status:         string(FINAL_EXECUTE),
 			}
 			executeSignals = append(executeSignals, sigRes)
@@ -741,7 +742,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 			// Save to virtual journal
 			_ = uc.storageUsecase.SaveSignalToJournal(SignalJournal{
-				ID:                      time.Now().Format("20060102150405") + "_" + pair,
+				ID:                      now.Format("20060102150405") + "_" + pair,
 				ConfigVersion:           GetGlobalConfigRegistry().GetVersion(),
 				Symbol:                  pair,
 				Direction:               finalDecision.Direction,
@@ -760,8 +761,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				RetestTouches:           candCtx.quantResult.TechnicalSnapshot.IndicatorValues[IndicatorRetestTouches],
 				RetestHold:              candCtx.quantResult.TechnicalSnapshot.IndicatorValues[IndicatorRetestHold] == 1.0,
 				HasDerivativesEvidence:  candCtx.quantResult.TechnicalSnapshot.IndicatorValues[IndicatorHasCrowdingEvidence] == 1.0,
-				CreatedAt:               time.Now(),
-				ExpiresAt:               time.Now().Add(120 * time.Minute),
+				CreatedAt:               now,
+				ExpiresAt:               now.Add(120 * time.Minute),
 				Status:                  MONITORING,
 				MFE:                     0.0,
 				MAE:                     0.0,
@@ -776,10 +777,11 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				TakeProfit:              tp2,
 				AISentiment:             candCtx.auditResponse.Sentiment,
 				AIReasoning:             candCtx.auditResponse.Reasoning,
-				UpdatedAt:               time.Now(),
+				UpdatedAt:               now,
 			})
 		} else if finalDecision.Status == FINAL_WATCH {
 			totalFinalWatch++
+			now := time.Now()
 			watchlistSignals = append(watchlistSignals, dto.SignalResponse{
 				Symbol:         pair,
 				Direction:      string(finalDecision.Direction),
@@ -791,8 +793,47 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				Strategy:       string(finalDecision.Playbook),
 				AISentiment:    candCtx.auditResponse.Sentiment,
 				IsFinalExecute: false,
-				ReconciledTime: time.Now(),
+				ReconciledTime: now,
 				Status:         string(FINAL_WATCH),
+			})
+			_ = uc.storageUsecase.SaveWatchToJournal(WatchJournal{
+				ID:                      "watch_" + now.Format("20060102150405") + "_" + pair,
+				ConfigVersion:           GetGlobalConfigRegistry().GetVersion(),
+				Symbol:                  pair,
+				Direction:               finalDecision.Direction,
+				Playbook:                finalDecision.Playbook,
+				EntryPrice:              finalDecision.EntryPrice,
+				StopLoss:                finalDecision.StopLoss,
+				TP1:                     tp1,
+				TP2:                     tp2,
+				RR:                      finalDecision.RR,
+				QuantScore:              finalDecision.Score,
+				AIConfidence:            finalDecision.AIConfidence,
+				MarketRegime:            string(policy.Regime),
+				PolicyMode:              activeMode,
+				ThresholdProfileSummary: finalDecision.ThresholdProfileSummary,
+				BreakoutLevel:           candCtx.quantResult.TechnicalSnapshot.IndicatorValues[IndicatorBreakoutLevel],
+				RetestTouches:           candCtx.quantResult.TechnicalSnapshot.IndicatorValues[IndicatorRetestTouches],
+				RetestHold:              candCtx.quantResult.TechnicalSnapshot.IndicatorValues[IndicatorRetestHold] == 1.0,
+				HasDerivativesEvidence:  candCtx.quantResult.TechnicalSnapshot.IndicatorValues[IndicatorHasCrowdingEvidence] == 1.0,
+				CreatedAt:               now,
+				ExpiresAt:               now.Add(120 * time.Minute),
+				Status:                  WATCH_MONITORING,
+				MFE:                     0.0,
+				MAE:                     0.0,
+				TimeToTP1:               "",
+				TimeToTP2:               "",
+				TimeToSL:                "",
+				OutcomeReason:           "",
+				EntryTiming:             candCtx.auditResponse.EntryTiming,
+				Tier:                    candCtx.quantResult.Tier,
+				Timeframe:               "M15",
+				LatestPrice:             finalDecision.EntryPrice,
+				TakeProfit:              tp2,
+				AISentiment:             candCtx.auditResponse.Sentiment,
+				AIReasoning:             candCtx.auditResponse.Reasoning,
+				UpdatedAt:               now,
+				Reason:                  finalDecision.Reason,
 			})
 		} else {
 			totalFinalReject++

@@ -56,6 +56,18 @@ func (m *mockStorageRepository) AppendSignalJournal(entry SignalJournal) error {
 	return nil
 }
 
+func (m *mockStorageRepository) LoadWatchJournal() ([]WatchJournal, error) {
+	return nil, nil
+}
+
+func (m *mockStorageRepository) SaveWatchJournal(journal []WatchJournal) error {
+	return nil
+}
+
+func (m *mockStorageRepository) AppendWatchJournal(entry WatchJournal) error {
+	return nil
+}
+
 func (m *mockStorageRepository) LoadAIAuditCache() (*entity.AIAuditCache, error) {
 	if m.cache == nil {
 		return &entity.AIAuditCache{CacheMap: make(map[string]entity.CachedAudit)}, nil
