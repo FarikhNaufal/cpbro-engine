@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -294,15 +293,10 @@ func (s *BinanceRealtimePriceStream) handleTickerPricePayload(payload []byte) er
 		return err
 	}
 
-	updatedAt := time.Now()
-	if msg.EventTime > 0 {
-		updatedAt = time.UnixMilli(msg.EventTime)
-	}
-
 	s.mu.Lock()
 	s.prices[strings.ToUpper(msg.Symbol)] = priceTick{
 		Price:     price,
-		UpdatedAt: updatedAt,
+		UpdatedAt: time.Now(),
 	}
 	s.mu.Unlock()
 	return nil
@@ -310,11 +304,8 @@ func (s *BinanceRealtimePriceStream) handleTickerPricePayload(payload []byte) er
 
 func (s *BinanceRealtimePriceStream) buildURL(symbols []string) string {
 	streams := streamNamesForSymbols(symbols)
-
 	base := strings.TrimRight(s.cfg.BaseURL, "/")
-	query := url.Values{}
-	query.Set("streams", strings.Join(streams, "/"))
-	return base + "/market/stream?" + query.Encode()
+	return base + "/market/stream?streams=" + strings.Join(streams, "/")
 }
 
 func (s *BinanceRealtimePriceStream) applySubscriptionDelta(previous, desired []string) error {

@@ -85,7 +85,7 @@ func TestBinanceRealtimePriceStream_BuildURLUsesCombinedMiniTickerStreams(t *tes
 	})
 
 	got := stream.buildURL([]string{"BTCUSDT", "ETHUSDT"})
-	want := "wss://fstream.binance.com/market/stream?streams=btcusdt%40miniTicker%2Fethusdt%40miniTicker"
+	want := "wss://fstream.binance.com/market/stream?streams=btcusdt@miniTicker/ethusdt@miniTicker"
 	if got != want {
 		t.Fatalf("unexpected websocket url: %s", got)
 	}
