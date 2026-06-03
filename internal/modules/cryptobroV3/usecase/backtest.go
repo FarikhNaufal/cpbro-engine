@@ -547,9 +547,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 			continue
 		}
 
-		// Populate snapshots
 		fr := fundingRates[req.Symbol]
-		tech, structure := PopulateSnapshots(closedM15, closedH1, closedH4, fr, latestPrice, symbolChangePercent, 0.0, 0.0)
 		prelimData := MarketData{
 			Symbol:          req.Symbol,
 			FundingRate:     fr,
@@ -560,6 +558,13 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 			PriceChange24h:  symbolChangePercent,
 			OpenInterestM15: 0.0,
 		}
+		prepared, ok := uc.playbookQuantEngineUsecase.prepareContext(prelimData)
+		if !ok {
+			currentTick = currentTick.Add(15 * time.Minute)
+			continue
+		}
+		tech := &prepared.technicalSnapshot
+		structure := &prepared.structureSnapshot
 
 		// Playbook Selection
 		selections := uc.strategySelectorUsecase.SelectPlaybooks(policy, cand, prelimData, tech, structure)
@@ -587,7 +592,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 				playbook = CROWDED_POSITIONING_SQUEEZE
 			}
 
-			quantResult := uc.playbookQuantEngineUsecase.RunEngine(playbook, sel.Direction, prelimData, policy)
+			quantResult := uc.playbookQuantEngineUsecase.RunEngineWithPreparedContext(playbook, sel.Direction, prelimData, policy, prepared)
 			quantResult.Tier = cand.Tier
 			quantResult.RawKlines = closedM15
 

@@ -2,7 +2,10 @@ package usecase
 
 import (
 	"context"
+	"os"
 	"sort"
+	"strconv"
+	"sync"
 	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
@@ -11,6 +14,14 @@ import (
 type MonitoringUsecase struct {
 	marketDataProvider MarketDataProvider
 	storageUsecase     *StorageUsecase
+	latestPriceFeed    LatestPriceFeed
+	candleCacheMu      sync.Mutex
+	candleCache        map[string]monitoringCandleCacheEntry
+}
+
+type monitoringCandleCacheEntry struct {
+	candles    []dto.Candle
+	validUntil time.Time
 }
 
 type monitoringStatusProfile struct {
@@ -69,98 +80,140 @@ func NewMonitoringUsecase(provider MarketDataProvider, storage *StorageUsecase) 
 	return &MonitoringUsecase{
 		marketDataProvider: provider,
 		storageUsecase:     storage,
+		candleCache:        make(map[string]monitoringCandleCacheEntry),
 	}
+}
+
+func (uc *MonitoringUsecase) SetLatestPriceFeed(feed LatestPriceFeed) {
+	if uc == nil {
+		return
+	}
+	uc.latestPriceFeed = feed
 }
 
 // MonitorVirtualPositions updates both actionable FINAL_EXECUTE signals and
 // non-actionable FINAL_WATCH paper setups without ever upgrading watch to execute.
 func (uc *MonitoringUsecase) MonitorVirtualPositions(ctx context.Context) error {
-	if err := uc.monitorSignalJournal(ctx); err != nil {
+	signalJournal, err := uc.storageUsecase.LoadSignalJournal()
+	if err != nil {
+		signalJournal = nil
+	}
+	watchJournal, err := uc.storageUsecase.LoadWatchJournal()
+	if err != nil {
+		watchJournal = nil
+	}
+
+	activeSymbols := collectActiveJournalSymbols(signalJournal, watchJournal)
+	uc.pruneMonitoringCandleCache(activeSymbols)
+	if uc.latestPriceFeed != nil {
+		_ = uc.latestPriceFeed.SyncSymbols(activeSymbols)
+	}
+	uc.preloadMonitoringCandles(ctx, activeSymbols, time.Now())
+
+	if err := uc.monitorSignalJournal(ctx, signalJournal); err != nil {
 		return err
 	}
-	if err := uc.monitorWatchJournal(ctx); err != nil {
+	if err := uc.monitorWatchJournal(ctx, watchJournal); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (uc *MonitoringUsecase) monitorSignalJournal(ctx context.Context) error {
-	journal, err := uc.storageUsecase.LoadSignalJournal()
-	if err != nil || len(journal) == 0 {
+func (uc *MonitoringUsecase) pruneMonitoringCandleCache(activeSymbols []string) {
+	if uc == nil {
+		return
+	}
+	activeSet := make(map[string]struct{}, len(activeSymbols))
+	for _, symbol := range activeSymbols {
+		activeSet[symbol] = struct{}{}
+	}
+
+	uc.candleCacheMu.Lock()
+	defer uc.candleCacheMu.Unlock()
+	for symbol := range uc.candleCache {
+		if _, ok := activeSet[symbol]; !ok {
+			delete(uc.candleCache, symbol)
+		}
+	}
+}
+
+func (uc *MonitoringUsecase) preloadMonitoringCandles(ctx context.Context, activeSymbols []string, now time.Time) {
+	if uc == nil || len(activeSymbols) == 0 {
+		return
+	}
+
+	concurrency := minInt(len(activeSymbols), 4)
+	if val := os.Getenv("MAX_MONITORING_CANDLE_CONCURRENCY"); val != "" {
+		if limit, err := strconv.Atoi(val); err == nil && limit > 0 {
+			concurrency = minInt(len(activeSymbols), limit)
+		}
+	}
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, concurrency)
+	for _, symbol := range activeSymbols {
+		if uc.getMonitoringCandlesFromCache(symbol, now) != nil {
+			continue
+		}
+		wg.Add(1)
+		go func(symbol string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if candles, err := uc.marketDataProvider.FetchClosedCandles(ctx, symbol, "15m", 20); err == nil {
+				sort.Slice(candles, func(a, b int) bool {
+					return candles[a].Time.Before(candles[b].Time)
+				})
+				uc.storeMonitoringCandles(symbol, candles, now)
+			}
+		}(symbol)
+	}
+	wg.Wait()
+}
+
+func (uc *MonitoringUsecase) monitorSignalJournal(ctx context.Context, journal []SignalJournal) error {
+	if len(journal) == 0 {
 		return nil
 	}
 
 	now := time.Now()
-	updatedJournal, changed := monitorJournalEntries(ctx, uc.marketDataProvider, journal, now, executeMonitoringProfile)
-	if !changed {
+	_, changedEntries := monitorJournalEntries(ctx, uc, uc.marketDataProvider, uc.latestPriceFeed, journal, now, executeMonitoringProfile)
+	if len(changedEntries) == 0 {
 		return nil
 	}
 
-	return uc.storageUsecase.UpdateSignalJournal(func(current []SignalJournal) ([]SignalJournal, error) {
-		if len(current) == len(updatedJournal) {
-			return updatedJournal, nil
-		}
-		for i := range current {
-			if current[i].ID == "" {
-				continue
-			}
-			for _, upd := range updatedJournal {
-				if upd.ID == current[i].ID {
-					current[i] = upd
-					break
-				}
-			}
-		}
-		return current, nil
-	})
+	return uc.storageUsecase.UpsertSignalJournalEntries(changedEntries)
 }
 
-func (uc *MonitoringUsecase) monitorWatchJournal(ctx context.Context) error {
-	journal, err := uc.storageUsecase.LoadWatchJournal()
-	if err != nil || len(journal) == 0 {
+func (uc *MonitoringUsecase) monitorWatchJournal(ctx context.Context, journal []WatchJournal) error {
+	if len(journal) == 0 {
 		return nil
 	}
 
 	now := time.Now()
-	updatedJournal, changed := monitorJournalEntries(ctx, uc.marketDataProvider, journal, now, watchMonitoringProfile)
-	if !changed {
+	_, changedEntries := monitorJournalEntries(ctx, uc, uc.marketDataProvider, uc.latestPriceFeed, journal, now, watchMonitoringProfile)
+	if len(changedEntries) == 0 {
 		return nil
 	}
 
-	return uc.storageUsecase.UpdateWatchJournal(func(current []WatchJournal) ([]WatchJournal, error) {
-		if len(current) == len(updatedJournal) {
-			return updatedJournal, nil
-		}
-		for i := range current {
-			if current[i].ID == "" {
-				continue
-			}
-			for _, upd := range updatedJournal {
-				if upd.ID == current[i].ID {
-					current[i] = upd
-					break
-				}
-			}
-		}
-		return current, nil
-	})
+	return uc.storageUsecase.UpsertWatchJournalEntries(changedEntries)
 }
 
-func monitorJournalEntries(ctx context.Context, provider MarketDataProvider, journal []SignalJournal, now time.Time, profile monitoringStatusProfile) ([]SignalJournal, bool) {
-	changed := false
+func monitorJournalEntries(ctx context.Context, uc *MonitoringUsecase, provider MarketDataProvider, feed LatestPriceFeed, journal []SignalJournal, now time.Time, profile monitoringStatusProfile) ([]SignalJournal, []SignalJournal) {
+	changedEntries := make([]SignalJournal, 0)
 
 	for i := range journal {
-		item := journal[i]
+		original := journal[i]
+		item := original
 		if !isActiveMonitoringStatus(item.Status, profile, now, item.ExpiresAt) {
 			continue
 		}
 
-		candles, err := provider.FetchClosedCandles(ctx, item.Symbol, "15m", 20)
+		candles, err := loadMonitoringCandles(ctx, uc, provider, item.Symbol, now)
 		if err == nil && len(candles) > 0 {
-			sort.Slice(candles, func(a, b int) bool {
-				return candles[a].Time.Before(candles[b].Time)
-			})
-
 			for _, c := range candles {
 				if c.Time.Before(item.CreatedAt) || c.Time.Equal(item.CreatedAt) {
 					continue
@@ -194,7 +247,7 @@ func monitorJournalEntries(ctx context.Context, provider MarketDataProvider, jou
 		}
 
 		if item.Status == profile.Monitoring || item.Status == profile.TP1Hit {
-			price, err := provider.FetchLatestPrice(ctx, item.Symbol)
+			price, err := resolveLatestPriceForMonitoring(ctx, provider, feed, item.Symbol)
 			if err == nil {
 				item.LatestPrice = price
 				updateLivePnl(&item, price)
@@ -263,15 +316,105 @@ func monitorJournalEntries(ctx context.Context, provider MarketDataProvider, jou
 			}
 		}
 
+		if !monitoringJournalEntryChanged(original, item) {
+			continue
+		}
+
 		item.UpdatedAt = now
-		if item.Status != profile.Monitoring && item.Status != profile.TP1Hit {
+		if item.Status != profile.Monitoring && item.Status != profile.TP1Hit && item.ClosedAt.IsZero() {
 			item.ClosedAt = now
 		}
 		journal[i] = item
-		changed = true
+		changedEntries = append(changedEntries, item)
 	}
 
-	return journal, changed
+	return journal, changedEntries
+}
+
+func loadMonitoringCandles(ctx context.Context, uc *MonitoringUsecase, provider MarketDataProvider, symbol string, now time.Time) ([]dto.Candle, error) {
+	if uc != nil {
+		if candles := uc.getMonitoringCandlesFromCache(symbol, now); candles != nil {
+			return candles, nil
+		}
+	}
+
+	candles, err := provider.FetchClosedCandles(ctx, symbol, "15m", 20)
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(candles, func(a, b int) bool {
+		return candles[a].Time.Before(candles[b].Time)
+	})
+
+	if uc != nil {
+		uc.storeMonitoringCandles(symbol, candles, now)
+	}
+
+	return candles, nil
+}
+
+func (uc *MonitoringUsecase) getMonitoringCandlesFromCache(symbol string, now time.Time) []dto.Candle {
+	if uc == nil {
+		return nil
+	}
+	uc.candleCacheMu.Lock()
+	defer uc.candleCacheMu.Unlock()
+	entry, ok := uc.candleCache[symbol]
+	if !ok || !now.Before(entry.validUntil) {
+		return nil
+	}
+	return append([]dto.Candle(nil), entry.candles...)
+}
+
+func (uc *MonitoringUsecase) storeMonitoringCandles(symbol string, candles []dto.Candle, now time.Time) {
+	if uc == nil {
+		return
+	}
+	validUntil := now.Add(15 * time.Second)
+	if len(candles) > 0 {
+		lastCloseTime := candles[len(candles)-1].Time.Add(15 * time.Minute)
+		validUntil = lastCloseTime.Add(15 * time.Minute)
+	}
+	uc.candleCacheMu.Lock()
+	uc.candleCache[symbol] = monitoringCandleCacheEntry{
+		candles:    append([]dto.Candle(nil), candles...),
+		validUntil: validUntil,
+	}
+	uc.candleCacheMu.Unlock()
+}
+
+func resolveLatestPriceForMonitoring(ctx context.Context, provider MarketDataProvider, feed LatestPriceFeed, symbol string) (float64, error) {
+	if feed != nil {
+		if price, _, ok := feed.GetLatestPrice(symbol); ok && price > 0 {
+			return price, nil
+		}
+	}
+	return provider.FetchLatestPrice(ctx, symbol)
+}
+
+func monitoringJournalEntryChanged(before, after SignalJournal) bool {
+	if before.Status != after.Status {
+		return true
+	}
+	if before.LatestPrice != after.LatestPrice {
+		return true
+	}
+	if before.PnlPercentage != after.PnlPercentage {
+		return true
+	}
+	if before.MFE != after.MFE || before.MAE != after.MAE {
+		return true
+	}
+	if before.TimeToTP1 != after.TimeToTP1 || before.TimeToTP2 != after.TimeToTP2 || before.TimeToSL != after.TimeToSL {
+		return true
+	}
+	if before.OutcomeReason != after.OutcomeReason {
+		return true
+	}
+	if !before.ExpiresAt.Equal(after.ExpiresAt) {
+		return true
+	}
+	return false
 }
 
 func isActiveMonitoringStatus(status Status, profile monitoringStatusProfile, now time.Time, expiresAt time.Time) bool {

@@ -3,6 +3,7 @@ package usecase
 import (
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 	"cpbro-engine/internal/modules/cryptobroV3/entity"
+	"strings"
 )
 
 type StorageUsecase struct {
@@ -21,6 +22,18 @@ type signalJournalAtomicUpdater interface {
 
 type watchJournalAtomicUpdater interface {
 	UpdateWatchJournal(update func([]WatchJournal) ([]WatchJournal, error)) error
+}
+
+type signalJournalEntryUpserter interface {
+	UpsertSignalJournalEntries(entries []SignalJournal) error
+}
+
+type watchJournalEntryUpserter interface {
+	UpsertWatchJournalEntries(entries []WatchJournal) error
+}
+
+type decisionAuditBatchAppender interface {
+	AppendDecisionAudits(entries []DecisionAudit) error
 }
 
 type aiAuditCacheAtomicUpdater interface {
@@ -100,6 +113,38 @@ func (uc *StorageUsecase) SaveSignalToJournal(sig SignalJournal) error {
 	return err
 }
 
+func (uc *StorageUsecase) UpsertSignalJournalEntries(entries []SignalJournal) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	if upserter, ok := uc.repo.(signalJournalEntryUpserter); ok {
+		err := upserter.UpsertSignalJournalEntries(entries)
+		if err != nil {
+			GetGlobalMetrics().IncrementStorageWriteFail()
+		}
+		return err
+	}
+
+	return uc.UpdateSignalJournal(func(current []SignalJournal) ([]SignalJournal, error) {
+		updated := append([]SignalJournal(nil), current...)
+		for _, entry := range entries {
+			matched := false
+			for i := range updated {
+				if sameJournalIdentity(updated[i], entry) {
+					updated[i] = entry
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				updated = append(updated, entry)
+			}
+		}
+		return updated, nil
+	})
+}
+
 func (uc *StorageUsecase) LoadWatchJournal() ([]WatchJournal, error) {
 	return uc.repo.LoadWatchJournal()
 }
@@ -138,6 +183,38 @@ func (uc *StorageUsecase) SaveWatchToJournal(sig WatchJournal) error {
 		GetGlobalMetrics().IncrementStorageWriteFail()
 	}
 	return err
+}
+
+func (uc *StorageUsecase) UpsertWatchJournalEntries(entries []WatchJournal) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	if upserter, ok := uc.repo.(watchJournalEntryUpserter); ok {
+		err := upserter.UpsertWatchJournalEntries(entries)
+		if err != nil {
+			GetGlobalMetrics().IncrementStorageWriteFail()
+		}
+		return err
+	}
+
+	return uc.UpdateWatchJournal(func(current []WatchJournal) ([]WatchJournal, error) {
+		updated := append([]WatchJournal(nil), current...)
+		for _, entry := range entries {
+			matched := false
+			for i := range updated {
+				if sameJournalIdentity(updated[i], entry) {
+					updated[i] = entry
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				updated = append(updated, entry)
+			}
+		}
+		return updated, nil
+	})
 }
 
 func (uc *StorageUsecase) LoadAIAuditCache() (*entity.AIAuditCache, error) {
@@ -207,4 +284,38 @@ func (uc *StorageUsecase) SaveDecisionAudit(audit DecisionAudit) error {
 		GetGlobalMetrics().IncrementStorageWriteFail()
 	}
 	return err
+}
+
+func (uc *StorageUsecase) SaveDecisionAuditBatch(audits []DecisionAudit) error {
+	if len(audits) == 0 {
+		return nil
+	}
+
+	if appender, ok := uc.repo.(decisionAuditBatchAppender); ok {
+		err := appender.AppendDecisionAudits(audits)
+		if err != nil {
+			GetGlobalMetrics().IncrementStorageWriteFail()
+		}
+		return err
+	}
+
+	existing, err := uc.repo.LoadDecisionAudits()
+	if err != nil {
+		return err
+	}
+	combined := append(existing, audits...)
+	return uc.SaveDecisionAudits(combined)
+}
+
+func sameJournalIdentity(left, right SignalJournal) bool {
+	leftID := strings.TrimSpace(left.ID)
+	rightID := strings.TrimSpace(right.ID)
+	if leftID != "" || rightID != "" {
+		return leftID != "" && leftID == rightID
+	}
+
+	return left.Symbol == right.Symbol &&
+		left.Direction == right.Direction &&
+		left.Playbook == right.Playbook &&
+		left.CreatedAt.Equal(right.CreatedAt)
 }

@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"time"
@@ -9,13 +10,44 @@ import (
 )
 
 type StalenessUsecase struct {
-	maxStaleness time.Duration
+	maxStaleness     time.Duration
+	latestPriceFeed  LatestPriceFeed
+	fallbackProvider MarketDataProvider
 }
 
 func NewStalenessUsecase(maxStaleness time.Duration) *StalenessUsecase {
 	return &StalenessUsecase{
 		maxStaleness: maxStaleness,
 	}
+}
+
+func (uc *StalenessUsecase) SetLatestPriceFeed(feed LatestPriceFeed) {
+	if uc == nil {
+		return
+	}
+	uc.latestPriceFeed = feed
+}
+
+func (uc *StalenessUsecase) SetFallbackProvider(provider MarketDataProvider) {
+	if uc == nil {
+		return
+	}
+	uc.fallbackProvider = provider
+}
+
+func (uc *StalenessUsecase) SyncSymbols(symbols []string) error {
+	if uc == nil || uc.latestPriceFeed == nil {
+		return nil
+	}
+	return uc.latestPriceFeed.SyncSymbols(symbols)
+}
+
+func (uc *StalenessUsecase) ResolveLatestPrice(ctx context.Context, symbol string) (float64, bool) {
+	resolver := latestPriceResolver{
+		realtime: uc.latestPriceFeed,
+		fallback: uc.fallbackProvider,
+	}
+	return resolver.Resolve(ctx, symbol)
 }
 
 // IsFresh checks if the latest closed candle timestamp is within maxStaleness.

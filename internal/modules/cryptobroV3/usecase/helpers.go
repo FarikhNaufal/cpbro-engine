@@ -434,6 +434,11 @@ func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundi
 		h4Closed = h4
 	}
 
+	tech, structure, _, _ := populateSnapshotsFromClosedCandles(m15Closed, h1Closed, h4Closed, fundingRate, latestPrice, priceChange24h, openInterest, oiChangePct)
+	return tech, structure
+}
+
+func populateSnapshotsFromClosedCandles(m15Closed []dto.Candle, h1Closed []dto.Candle, h4Closed []dto.Candle, fundingRate float64, latestPrice float64, priceChange24h float64, openInterest float64, oiChangePct float64) (*TechnicalSnapshot, *StructureSnapshot, string, string) {
 	h4Trend := CalculateH4Trend(h4Closed, 200)
 	h1Trend := CalculateH4Trend(h1Closed, 50)
 	rsiVal := CalculateRSI(m15Closed, 14)
@@ -672,7 +677,7 @@ func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundi
 		LiquidityLower:  liquidityLower,
 	}
 
-	return tech, structure
+	return tech, structure, h4Trend, h1Trend
 }
 
 func CalculateBollingerBands(candles []dto.Candle, period int, multiplier float64) (basis, upper, lower []float64) {

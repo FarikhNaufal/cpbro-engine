@@ -1,21 +1,25 @@
 package dto
 
 type HealthResponse struct {
-	AppName            string         `json:"app_name"`
-	AppVersion         string         `json:"app_version"`
-	AppEnv             string         `json:"app_env"`
-	Mode               string         `json:"mode"`
-	AlertOnly          bool           `json:"alert_only"`
-	BinanceReadOnly    bool           `json:"binance_read_only"`
-	ScannerRunning     bool           `json:"scanner_running"`
-	LastScanTime       string         `json:"last_scan_time"`
-	LastEvaluationTime string         `json:"last_evaluation_time"`
-	StorageAvailable   bool           `json:"storage_available"`
-	SwaggerEnabled     bool           `json:"swagger_enabled,omitempty"`
-	UptimeSeconds      float64        `json:"uptime_seconds,omitempty"`
-	Status             string         `json:"status"`
-	Warnings           []string       `json:"warnings,omitempty"`
-	SafeConfig         map[string]any `json:"safe_config,omitempty"`
+	AppName                  string         `json:"app_name"`
+	AppVersion               string         `json:"app_version"`
+	AppEnv                   string         `json:"app_env"`
+	Mode                     string         `json:"mode"`
+	AlertOnly                bool           `json:"alert_only"`
+	BinanceReadOnly          bool           `json:"binance_read_only"`
+	ScannerRunning           bool           `json:"scanner_running"`
+	LastScanTime             string         `json:"last_scan_time"`
+	LastEvaluationTime       string         `json:"last_evaluation_time"`
+	StorageAvailable         bool           `json:"storage_available"`
+	SwaggerEnabled           bool           `json:"swagger_enabled,omitempty"`
+	UptimeSeconds            float64        `json:"uptime_seconds,omitempty"`
+	Status                   string         `json:"status"`
+	Warnings                 []string       `json:"warnings,omitempty"`
+	WebsocketEnabled         bool           `json:"websocket_enabled,omitempty"`
+	WebsocketConnected       bool           `json:"websocket_connected,omitempty"`
+	WebsocketActiveSymbols   int            `json:"websocket_active_symbols,omitempty"`
+	WebsocketLastMessageTime string         `json:"websocket_last_message_time,omitempty"`
+	SafeConfig               map[string]any `json:"safe_config,omitempty"`
 }
 
 type Signal struct {

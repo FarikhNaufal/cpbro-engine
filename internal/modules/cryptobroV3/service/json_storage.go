@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"cpbro-engine/internal/modules/cryptobroV3/entity"
@@ -129,12 +130,20 @@ func (s *JSONStorageService) UpdateSignalJournal(update func([]usecase.SignalJou
 	return updateJSONSliceFile(s, "signal_journal.json", update)
 }
 
+func (s *JSONStorageService) UpsertSignalJournalEntries(entries []usecase.SignalJournal) error {
+	return upsertSignalJournalFile(s, "signal_journal.json", entries)
+}
+
 func (s *JSONStorageService) AppendSignalJournal(entry usecase.SignalJournal) error {
 	return appendJSONSliceFile(s, "signal_journal.json", entry)
 }
 
 func (s *JSONStorageService) UpdateWatchJournal(update func([]usecase.WatchJournal) ([]usecase.WatchJournal, error)) error {
 	return updateJSONSliceFile(s, "watch_journal.json", update)
+}
+
+func (s *JSONStorageService) UpsertWatchJournalEntries(entries []usecase.WatchJournal) error {
+	return upsertWatchJournalFile(s, "watch_journal.json", entries)
 }
 
 func (s *JSONStorageService) AppendWatchJournal(entry usecase.WatchJournal) error {
@@ -213,6 +222,79 @@ func appendJSONSliceFile[T any](s *JSONStorageService, filename string, entry T)
 		return err
 	}
 	return nil
+}
+
+func upsertSignalJournalFile(s *JSONStorageService, filename string, entries []usecase.SignalJournal) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	path := filepath.Join(s.storageDir, filename)
+
+	var journal []usecase.SignalJournal
+	data, err := os.ReadFile(path)
+	if err == nil && len(data) > 0 {
+		if err := json.Unmarshal(data, &journal); err != nil {
+			return err
+		}
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if journal == nil {
+		journal = []usecase.SignalJournal{}
+	}
+
+	for _, entry := range entries {
+		replaced := false
+		for i := range journal {
+			if journalEntriesMatch(journal[i], entry) {
+				journal[i] = entry
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			journal = append(journal, entry)
+		}
+	}
+
+	tmpPath := path + ".tmp"
+	bytes, err := json.MarshalIndent(journal, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(tmpPath, bytes, 0644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
+
+func upsertWatchJournalFile(s *JSONStorageService, filename string, entries []usecase.WatchJournal) error {
+	signalEntries := make([]usecase.SignalJournal, len(entries))
+	for i, entry := range entries {
+		signalEntries[i] = usecase.SignalJournal(entry)
+	}
+	return upsertSignalJournalFile(s, filename, signalEntries)
+}
+
+func journalEntriesMatch(left, right usecase.SignalJournal) bool {
+	leftID := strings.TrimSpace(left.ID)
+	rightID := strings.TrimSpace(right.ID)
+	if leftID != "" || rightID != "" {
+		return leftID != "" && leftID == rightID
+	}
+
+	return left.Symbol == right.Symbol &&
+		left.Direction == right.Direction &&
+		left.Playbook == right.Playbook &&
+		left.CreatedAt.Equal(right.CreatedAt)
 }
 
 func (s *JSONStorageService) LoadAIAuditCache() (*entity.AIAuditCache, error) {
@@ -294,6 +376,44 @@ func (s *JSONStorageService) LoadDecisionAudits() ([]usecase.DecisionAudit, erro
 
 func (s *JSONStorageService) SaveDecisionAudits(audits []usecase.DecisionAudit) error {
 	return s.writeJSON("decision_audit.json", audits)
+}
+
+func (s *JSONStorageService) AppendDecisionAudits(entries []usecase.DecisionAudit) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	filename := "decision_audit.json"
+	path := filepath.Join(s.storageDir, filename)
+
+	var audits []usecase.DecisionAudit
+	data, err := os.ReadFile(path)
+	if err == nil && len(data) > 0 {
+		if err := json.Unmarshal(data, &audits); err != nil {
+			return err
+		}
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	audits = append(audits, entries...)
+
+	tmpPath := path + ".tmp"
+	bytes, err := json.MarshalIndent(audits, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(tmpPath, bytes, 0644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	return nil
 }
 
 func (s *JSONStorageService) AppendDecisionAudit(entry usecase.DecisionAudit) error {

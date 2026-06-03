@@ -356,9 +356,9 @@ func (uc *CandidateArbiterUsecase) getPlaybookPriorityIndex(playbook Playbook, d
 
 	if isChop {
 		switch playbook {
-		case LIQUIDITY_SWEEP_REVERSAL:
-			return 0
 		case RANGE_EDGE_REVERSAL:
+			return 0
+		case LIQUIDITY_SWEEP_REVERSAL:
 			return 1
 		case CROWDED_POSITIONING_SQUEEZE:
 			return 2

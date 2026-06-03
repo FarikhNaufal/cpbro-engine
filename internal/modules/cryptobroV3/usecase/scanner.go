@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"math"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
@@ -103,23 +105,34 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		historySignals = hist.Signals
 	}
 
-	// Run monitoring on existing virtual positions first
-	if err := uc.monitoringUsecase.MonitorVirtualPositions(ctx); err != nil {
-		slog.Warn("Monitoring virtual positions failed", "error", err)
-	}
-
 	// Fetch tickers & funding rates to feed the macro Policy Engine
-	tickers, err := uc.marketDataUsecase.FetchAllFuturesTickers24h(ctx)
-	if err != nil {
-		slog.Error("Failed to fetch futures tickers", "error", err)
+	var (
+		tickers      []dto.Ticker24h
+		fundingRates map[string]float64
+		tickersErr   error
+		fundingErr   error
+		macroWG      sync.WaitGroup
+	)
+	macroWG.Add(2)
+	go func() {
+		defer macroWG.Done()
+		tickers, tickersErr = uc.marketDataUsecase.FetchAllFuturesTickers24h(ctx)
+	}()
+	go func() {
+		defer macroWG.Done()
+		fundingRates, fundingErr = uc.marketDataUsecase.FetchPremiumFundingRates(ctx)
+	}()
+	macroWG.Wait()
+
+	if tickersErr != nil {
+		slog.Error("Failed to fetch futures tickers", "error", tickersErr)
 		GetGlobalMetrics().IncrementScanFail()
 		GetGlobalMetrics().SetLastScanTime(scanStart)
 		GetGlobalMetrics().IncrementMarketDataError()
-		return dto.ScanResult{}, fmt.Errorf("binance ticker total fail: %w", err)
+		return dto.ScanResult{}, fmt.Errorf("binance ticker total fail: %w", tickersErr)
 	}
-	fundingRates, err := uc.marketDataUsecase.FetchPremiumFundingRates(ctx)
-	if err != nil {
-		slog.Warn("Failed to fetch funding rates; using fallback values", "error", err)
+	if fundingErr != nil {
+		slog.Warn("Failed to fetch funding rates; using fallback values", "error", fundingErr)
 		GetGlobalMetrics().IncrementMarketDataError()
 		fundingRates = make(map[string]float64)
 	}
@@ -189,11 +202,14 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 	// Filter dynamic universe candidates
 	candidates, rejectedCandidatesList := uc.universeUsecase.FilterUniverse(tickers, fundingRates, policy)
+	universePassCount := len(candidates)
 
 	rejectedSummary := []string{}
 	for _, rej := range rejectedCandidatesList {
 		rejectedSummary = append(rejectedSummary, fmt.Sprintf("%s: %s", rej.Symbol, rej.Reason))
 	}
+
+	metrics := GetGlobalMetrics()
 
 	// Concurrency limited candle fetching
 	concurrencyLimit := 5
@@ -207,20 +223,30 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		data MarketData
 		err  error
 	}
+	prefetchCandidates := candidates
+	prefetchDeferredSummary := []string{}
+	prefetchLimit := resolveMarketDataPrefetchLimit(policy, len(candidates))
+	if prefetchLimit > 0 && prefetchLimit < len(candidates) {
+		for _, deferred := range candidates[prefetchLimit:] {
+			prefetchDeferredSummary = append(prefetchDeferredSummary, fmt.Sprintf("%s: deferred by market data prefetch limit", deferred.Symbol))
+		}
+		prefetchCandidates = candidates[:prefetchLimit]
+	}
+
 	candlesMap := make(map[string]candlesCache)
 	var mapMu sync.Mutex
 
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, concurrencyLimit)
 
-	for _, cand := range candidates {
+	for _, cand := range prefetchCandidates {
 		wg.Add(1)
 		go func(pair string) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			md, fetchErr := uc.marketDataUsecase.FetchMarketData(ctx, pair, fundingRates)
+			md, fetchErr := uc.marketDataUsecase.FetchInitialMarketData(ctx, pair, fundingRates)
 			if fetchErr != nil {
 				GetGlobalMetrics().IncrementMarketDataError()
 			}
@@ -233,17 +259,27 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		}(cand.Symbol)
 	}
 	wg.Wait()
+	marketDataDuration := time.Since(scanStart)
+	metrics.SetLastMarketDataDuration(marketDataDuration)
 
 	var allCandidates []QuantResult
-	policyRejectedSummary := []string{}
+	policyRejectedSummary := append([]string{}, prefetchDeferredSummary...)
 	totalStrategySelected := 0
 	totalPlaybookEligible := 0
+	var enrichedSymbolCount uint64
 
 	type eligibilityFailure struct {
 		Symbol       string
 		StrategyName string
 		Direction    string
 		Reason       string
+	}
+	type candidatePipelineResult struct {
+		policyRejectReason  string
+		strategySelected    int
+		playbookEligible    int
+		eligibilityFailures []eligibilityFailure
+		quantResults        []QuantResult
 	}
 	var eligibilityFailures []eligibilityFailure
 
@@ -252,97 +288,133 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		tickerLastPrice[t.Symbol] = t.LastPrice
 	}
 
-	for _, candidate := range candidates {
-		pair := candidate.Symbol
-		cache, exists := candlesMap[pair]
-		if !exists || cache.err != nil {
-			policyRejectedSummary = append(policyRejectedSummary, fmt.Sprintf("%s: failed to fetch market data", pair))
-			continue
+	pipelineConcurrency := minInt(len(prefetchCandidates), maxInt(2, minInt(runtime.NumCPU(), 8)))
+	if val := os.Getenv("MAX_CANDIDATE_PIPELINE_CONCURRENCY"); val != "" {
+		if limit, err := strconv.Atoi(val); err == nil && limit > 0 {
+			pipelineConcurrency = minInt(len(prefetchCandidates), limit)
 		}
+	}
+	if pipelineConcurrency <= 0 {
+		pipelineConcurrency = 1
+	}
 
-		if len(cache.data.M15Candles) == 0 {
-			policyRejectedSummary = append(policyRejectedSummary, fmt.Sprintf("%s: m15 candles empty", pair))
-			continue
-		}
+	pipelineResults := make([]candidatePipelineResult, len(prefetchCandidates))
+	var pipelineWG sync.WaitGroup
+	pipelineSem := make(chan struct{}, pipelineConcurrency)
+	pipelineStart := time.Now()
 
-		// Validate staleness of raw candles
-		GetGlobalMetrics().AddStalenessChecked(1)
-		if !uc.stalenessUsecase.IsFresh(cache.data.M15Candles) {
-			GetGlobalMetrics().AddStalenessCount(1)
-			policyRejectedSummary = append(policyRejectedSummary, fmt.Sprintf("%s: raw candles are stale", pair))
-			continue
-		}
+	for idx, candidate := range prefetchCandidates {
+		pipelineWG.Add(1)
+		go func(index int, candidate UniverseCandidate) {
+			defer pipelineWG.Done()
+			pipelineSem <- struct{}{}
+			defer func() { <-pipelineSem }()
 
-		// Choose strategy playbooks
-		latestPrice := tickerLastPrice[pair]
-		if latestPrice == 0 && len(cache.data.M15Candles) > 0 {
-			latestPrice = cache.data.M15Candles[len(cache.data.M15Candles)-1].Close
-		}
-
-		fr := cache.data.FundingRate
-		priceChange24h := 0.0
-		if t, ok := tickerMap[pair]; ok {
-			priceChange24h = t.PriceChangePercent
-		}
-		tech, structure := PopulateSnapshots(
-			cache.data.M15Candles,
-			cache.data.H1Candles,
-			cache.data.H4Candles,
-			fr,
-			latestPrice,
-			priceChange24h,
-			cache.data.OpenInterestM15,
-			cache.data.OIChangePct,
-		)
-		prelimData := MarketData{
-			Symbol:          pair,
-			FundingRate:     fr,
-			M15Candles:      cache.data.M15Candles,
-			H1Candles:       cache.data.H1Candles,
-			H4Candles:       cache.data.H4Candles,
-			LatestPrice:     latestPrice,
-			PriceChange24h:  priceChange24h,
-			OpenInterestM15: cache.data.OpenInterestM15,
-			OIChangePct:     cache.data.OIChangePct,
-		}
-
-		selections := uc.strategySelectorUsecase.SelectPlaybooks(policy, candidate, prelimData, tech, structure)
-		totalStrategySelected += len(selections)
-
-		for _, sel := range selections {
-			eligibilityRes := uc.playbookEligibilityUsecase.CheckEligibility(sel, policy, prelimData, tech, structure)
-			if !eligibilityRes.Eligible {
-				eligibilityFailures = append(eligibilityFailures, eligibilityFailure{
-					Symbol:       pair,
-					StrategyName: sel.StrategyName,
-					Direction:    string(sel.Direction),
-					Reason:       eligibilityRes.Reason,
-				})
-				continue
+			pair := candidate.Symbol
+			cache, exists := candlesMap[pair]
+			if !exists || cache.err != nil {
+				pipelineResults[index].policyRejectReason = fmt.Sprintf("%s: failed to fetch market data", pair)
+				return
 			}
-			totalPlaybookEligible++
-
-			playbook := TREND_PULLBACK
-			switch sel.StrategyName {
-			case string(COMPRESSION_BREAKOUT_RETEST):
-				playbook = COMPRESSION_BREAKOUT_RETEST
-			case string(LIQUIDITY_SWEEP_REVERSAL):
-				playbook = LIQUIDITY_SWEEP_REVERSAL
-			case string(RANGE_EDGE_REVERSAL):
-				playbook = RANGE_EDGE_REVERSAL
-			case string(CROWDED_POSITIONING_SQUEEZE):
-				playbook = CROWDED_POSITIONING_SQUEEZE
+			if len(cache.data.M15Candles) == 0 {
+				pipelineResults[index].policyRejectReason = fmt.Sprintf("%s: m15 candles empty", pair)
+				return
 			}
 
-			quantResult := uc.playbookQuantEngineUsecase.RunEngine(playbook, sel.Direction, prelimData, policy)
-			quantResult.Tier = candidate.Tier
-			quantResult.RawKlines = cache.data.M15Candles
+			metrics.AddStalenessChecked(1)
+			if !uc.stalenessUsecase.IsFresh(cache.data.M15Candles) {
+				metrics.AddStalenessCount(1)
+				pipelineResults[index].policyRejectReason = fmt.Sprintf("%s: raw candles are stale", pair)
+				return
+			}
 
-			reconciliationDir := uc.conflictResolverUsecase.Resolve(quantResult.Direction, "NEUTRAL")
-			_ = uc.scoringUsecase.Calculate(&quantResult, reconciliationDir, policy)
+			fullData, enrichErr := uc.marketDataUsecase.EnrichMarketData(ctx, cache.data)
+			if enrichErr != nil {
+				GetGlobalMetrics().IncrementMarketDataError()
+				pipelineResults[index].policyRejectReason = fmt.Sprintf("%s: failed to enrich market data", pair)
+				return
+			}
+			atomic.AddUint64(&enrichedSymbolCount, 1)
 
-			allCandidates = append(allCandidates, quantResult)
+			latestPrice := tickerLastPrice[pair]
+			if latestPrice == 0 && len(fullData.M15Candles) > 0 {
+				latestPrice = fullData.M15Candles[len(fullData.M15Candles)-1].Close
+			}
+
+			fr := fullData.FundingRate
+			priceChange24h := 0.0
+			if t, ok := tickerMap[pair]; ok {
+				priceChange24h = t.PriceChangePercent
+			}
+			prelimData := fullData
+			prelimData.LatestPrice = latestPrice
+			prelimData.PriceChange24h = priceChange24h
+			prelimData.FundingRate = fr
+			prepared, ok := uc.playbookQuantEngineUsecase.prepareContext(prelimData)
+			if !ok {
+				pipelineResults[index].policyRejectReason = fmt.Sprintf("%s: insufficient closed m15 candles for quant context", pair)
+				return
+			}
+			tech := &prepared.technicalSnapshot
+			structure := &prepared.structureSnapshot
+
+			selections := uc.strategySelectorUsecase.SelectPlaybooks(policy, candidate, prelimData, tech, structure)
+			result := &pipelineResults[index]
+			result.strategySelected = len(selections)
+
+			for _, sel := range selections {
+				eligibilityRes := uc.playbookEligibilityUsecase.CheckEligibility(sel, policy, prelimData, tech, structure)
+				if !eligibilityRes.Eligible {
+					result.eligibilityFailures = append(result.eligibilityFailures, eligibilityFailure{
+						Symbol:       pair,
+						StrategyName: sel.StrategyName,
+						Direction:    string(sel.Direction),
+						Reason:       eligibilityRes.Reason,
+					})
+					continue
+				}
+				result.playbookEligible++
+
+				playbook := TREND_PULLBACK
+				switch sel.StrategyName {
+				case string(COMPRESSION_BREAKOUT_RETEST):
+					playbook = COMPRESSION_BREAKOUT_RETEST
+				case string(LIQUIDITY_SWEEP_REVERSAL):
+					playbook = LIQUIDITY_SWEEP_REVERSAL
+				case string(RANGE_EDGE_REVERSAL):
+					playbook = RANGE_EDGE_REVERSAL
+				case string(CROWDED_POSITIONING_SQUEEZE):
+					playbook = CROWDED_POSITIONING_SQUEEZE
+				}
+
+				quantResult := uc.playbookQuantEngineUsecase.RunEngineWithPreparedContext(playbook, sel.Direction, prelimData, policy, prepared)
+				quantResult.Tier = candidate.Tier
+				quantResult.RawKlines = fullData.M15Candles
+
+				reconciliationDir := uc.conflictResolverUsecase.Resolve(quantResult.Direction, "NEUTRAL")
+				_ = uc.scoringUsecase.Calculate(&quantResult, reconciliationDir, policy)
+
+				result.quantResults = append(result.quantResults, quantResult)
+			}
+		}(idx, candidate)
+	}
+	pipelineWG.Wait()
+	candidatePipelineDuration := time.Since(pipelineStart)
+	metrics.SetLastCandidatePipelineDuration(candidatePipelineDuration)
+	estimatedRequestWeight := estimateScanRequestWeight(len(prefetchCandidates), int(atomic.LoadUint64(&enrichedSymbolCount)))
+	metrics.SetLastScanRequestWeight(uint64(estimatedRequestWeight))
+	metrics.SetLastPrefetchCandidateCount(uint64(len(prefetchCandidates)))
+	metrics.SetLastEnrichedCandidateCount(atomic.LoadUint64(&enrichedSymbolCount))
+
+	for _, result := range pipelineResults {
+		if result.policyRejectReason != "" {
+			policyRejectedSummary = append(policyRejectedSummary, result.policyRejectReason)
+			continue
 		}
+		totalStrategySelected += result.strategySelected
+		totalPlaybookEligible += result.playbookEligible
+		eligibilityFailures = append(eligibilityFailures, result.eligibilityFailures...)
+		allCandidates = append(allCandidates, result.quantResults...)
 	}
 
 	type rejectKey struct {
@@ -386,6 +458,14 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 	// Run Candidate Arbiter
 	selectedCandidates, arbiterRejected := uc.candidateArbiterUsecase.Arbitrate(allCandidates, policy)
+	activeWatchSignals, _ := uc.storageUsecase.LoadWatchJournal()
+	selectedSymbols := make([]string, 0, len(selectedCandidates))
+	for _, candidate := range selectedCandidates {
+		selectedSymbols = append(selectedSymbols, candidate.Symbol)
+	}
+	activeSymbols := collectActiveJournalSymbols(activeSignals, activeWatchSignals)
+	_ = uc.stalenessUsecase.SyncSymbols(unionActiveSymbols(activeSymbols, selectedSymbols))
+
 	seenArbiterRejections := make(map[string]bool)
 	for _, rej := range arbiterRejected {
 		reason := rej.Reason
@@ -442,6 +522,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 	GetGlobalMetrics().AddAICandidateCount(uint64(len(aiCandidates)))
 
+	aiBatchStart := time.Now()
 	for _, qResult := range aiCandidates {
 		aiWg.Add(1)
 		go func(qr QuantResult) {
@@ -503,6 +584,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		}(qResult)
 	}
 	aiWg.Wait()
+	aiBatchDuration := time.Since(aiBatchStart)
+	metrics.SetLastAIBatchDuration(aiBatchDuration)
 
 	// Build context and run Staleness Check and Final Execution Gates for all candidates
 	var decisions []FinalDecision
@@ -517,6 +600,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	}
 	ctxMap := make(map[string]candContext)
 
+	finalGateStart := time.Now()
 	for _, qResult := range selectedCandidates {
 		pair := qResult.Symbol
 		cache := candlesMap[pair]
@@ -558,12 +642,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 		planReview := uc.planReconciliationUsecase.Reconcile(qResult, auditResponse)
 
-		latestPrice := 0.0
-		if t, exists := tickerMap[pair]; exists {
-			latestPrice = t.LastPrice
-		}
-		if latestPrice == 0 && len(cache.data.M15Candles) > 0 {
-			latestPrice = cache.data.M15Candles[len(cache.data.M15Candles)-1].Close
+		latestPrice, latestPriceOK := uc.stalenessUsecase.ResolveLatestPrice(ctx, pair)
+		if !latestPriceOK {
+			latestPrice = 0
 		}
 
 		stalenessRes := uc.stalenessUsecase.Evaluate(qResult, planReview, policy, latestPrice)
@@ -597,6 +678,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 		decisions = append(decisions, finalDecision)
 	}
+	finalGateDuration := time.Since(finalGateStart)
+	metrics.SetLastFinalGateDuration(finalGateDuration)
 
 	// Resolve conflicts and cooldown
 	resolvedDecisions, updatedHistory := uc.conflictResolverUsecase.ResolveConflicts(decisions, historySignals, activeSignals, policy)
@@ -622,6 +705,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 	executeSignals := []dto.SignalResponse{}
 	watchlistSignals := []dto.SignalResponse{}
+	decisionAudits := make([]DecisionAudit, 0, len(resolvedDecisions))
 
 	for _, finalDecision := range resolvedDecisions {
 		pair := finalDecision.Symbol
@@ -714,9 +798,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		}
 
 		if os.Getenv("DECISION_AUDIT_ENABLED") != "false" {
-			if err := uc.storageUsecase.SaveDecisionAudit(audit); err != nil {
-				slog.Warn("Failed to save decision audit trail", "symbol", pair, "error", err)
-			}
+			decisionAudits = append(decisionAudits, audit)
 		}
 
 		// Count final statuses
@@ -840,6 +922,12 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		}
 	}
 
+	if os.Getenv("DECISION_AUDIT_ENABLED") != "false" && len(decisionAudits) > 0 {
+		if err := uc.storageUsecase.SaveDecisionAuditBatch(decisionAudits); err != nil {
+			slog.Warn("Failed to save decision audit batch", "count", len(decisionAudits), "error", err)
+		}
+	}
+
 	thresholdProfileSummary := make(map[string]string)
 	for _, fd := range resolvedDecisions {
 		thresholdProfileSummary[string(fd.Playbook)] = fd.ThresholdProfileSummary
@@ -847,15 +935,15 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 	// Dispatch V3 Notifications
 	summary := ScannerSummaryV3{
-		TotalScanned:                    len(candidates),
+		TotalScanned:                    len(prefetchCandidates),
 		CandidatesFound:                 len(decisions),
 		StartTime:                       scanStart,
 		Duration:                        time.Since(scanStart).String(),
 		ActiveRegime:                    string(policy.Regime),
 		BtcTrend:                        btcTrend,
 		TotalTickers:                    totalTickers,
-		TotalUniversePass:               len(candidates),
-		TotalUniverseRejected:           totalTickers - len(candidates),
+		TotalUniversePass:               universePassCount,
+		TotalUniverseRejected:           totalTickers - universePassCount,
 		TotalStrategySelected:           totalStrategySelected,
 		TotalPlaybookEligible:           totalPlaybookEligible,
 		TotalQuantCandidates:            len(allCandidates),
@@ -939,8 +1027,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		MarketPolicy:                    policy.Reason,
 		MarketRegime:                    string(policy.Regime),
 		TotalTickers:                    totalTickers,
-		TotalUniversePass:               len(candidates),
-		TotalUniverseRejected:           totalTickers - len(candidates),
+		TotalUniversePass:               universePassCount,
+		TotalUniverseRejected:           totalTickers - universePassCount,
 		TotalStrategySelected:           totalStrategySelected,
 		TotalPlaybookEligible:           totalPlaybookEligible,
 		TotalQuantCandidates:            len(allCandidates),
@@ -971,19 +1059,38 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	}
 
 	duration := time.Since(scanStart)
-	GetGlobalMetrics().SetLastScanDuration(duration)
-	GetGlobalMetrics().SetLastScanTime(scanStart)
-	GetGlobalMetrics().IncrementScanSuccess()
-	GetGlobalMetrics().SetLastSuccessScan(scanStart)
-	GetGlobalMetrics().AddTotalTickers(uint64(totalTickers))
-	GetGlobalMetrics().AddUniversePass(uint64(len(candidates)))
-	GetGlobalMetrics().AddUniverseReject(uint64(totalTickers - len(candidates)))
+	metrics.SetLastScanDuration(duration)
+	metrics.SetLastScanTime(scanStart)
+	metrics.IncrementScanSuccess()
+	metrics.SetLastSuccessScan(scanStart)
+	metrics.AddTotalTickers(uint64(totalTickers))
+	metrics.AddUniversePass(uint64(universePassCount))
+	metrics.AddUniverseReject(uint64(totalTickers - universePassCount))
 
-	GetGlobalMetrics().AddFinalExecuteCount(uint64(totalFinalExecute))
-	GetGlobalMetrics().AddFinalWatchCount(uint64(totalFinalWatch))
-	GetGlobalMetrics().AddFinalRejectCount(uint64(totalFinalReject))
+	metrics.AddFinalExecuteCount(uint64(totalFinalExecute))
+	metrics.AddFinalWatchCount(uint64(totalFinalWatch))
+	metrics.AddFinalRejectCount(uint64(totalFinalReject))
 
-	slog.Info("AnalyzeMarketV3 Scan Completed", "scan_id", scanID, "found_signals", len(finalSignals))
+	slog.Info("AnalyzeMarketV3 Scan Completed",
+		"scan_id", scanID,
+		"found_signals", len(finalSignals),
+		"prefetch_candidates", len(prefetchCandidates),
+		"enriched_candidates", atomic.LoadUint64(&enrichedSymbolCount),
+		"estimated_request_weight", estimatedRequestWeight,
+		"market_data_ms", marketDataDuration.Milliseconds(),
+		"candidate_pipeline_ms", candidatePipelineDuration.Milliseconds(),
+		"ai_batch_ms", aiBatchDuration.Milliseconds(),
+		"final_gate_ms", finalGateDuration.Milliseconds(),
+		"total_ms", duration.Milliseconds(),
+	)
+	if estimatedRequestWeight >= 1600 {
+		slog.Warn("AnalyzeMarketV3 estimated request weight is elevated",
+			"scan_id", scanID,
+			"estimated_request_weight", estimatedRequestWeight,
+			"prefetch_candidates", len(prefetchCandidates),
+			"enriched_candidates", atomic.LoadUint64(&enrichedSymbolCount),
+		)
+	}
 
 	return dto.ScanResult{
 		Timestamp: scanStart,
@@ -991,4 +1098,86 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		Found:     len(finalSignals),
 		Signals:   finalSignals,
 	}, nil
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func resolveMarketDataPrefetchLimit(policy MarketPolicy, totalCandidates int) int {
+	if totalCandidates <= 0 {
+		return 0
+	}
+
+	if val := strings.TrimSpace(os.Getenv("MAX_MARKETDATA_PREFETCH_SYMBOLS")); val != "" {
+		if limit, err := strconv.Atoi(val); err == nil && limit > 0 {
+			return minInt(totalCandidates, limit)
+		}
+	}
+
+	regime := policy.EffectiveRegime()
+	base := maxInt(policy.MaxAICandidates*6, policy.MaxFinalExecute*3)
+	floor := 14
+	ceiling := 20
+
+	switch regime {
+	case BTC_CHAOS:
+		floor = 8
+		ceiling = 10
+	case LOW_VOL:
+		floor = 10
+		ceiling = 14
+	case HIGH_VOL:
+		floor = 10
+		ceiling = 16
+	case CHOP_RANGE:
+		floor = 12
+		ceiling = 16
+	case BTC_DOMINANCE:
+		floor = 12
+		ceiling = 18
+	case RISK_OFF:
+		floor = 14
+		ceiling = 20
+	case COMPRESSION:
+		floor = 12
+		ceiling = 18
+	case ALT_SUPPORTIVE:
+		floor = 16
+		ceiling = 24
+	}
+
+	recommended := maxInt(base, floor)
+	if recommended > ceiling {
+		recommended = ceiling
+	}
+	if policy.MaxSymbols > 0 && recommended > policy.MaxSymbols {
+		recommended = policy.MaxSymbols
+	}
+	if recommended < 1 {
+		recommended = 1
+	}
+
+	return minInt(totalCandidates, recommended)
+}
+
+func estimateScanRequestWeight(prefetchCandidates int, enrichedCandidates int) int {
+	if prefetchCandidates < 0 {
+		prefetchCandidates = 0
+	}
+	if enrichedCandidates < 0 {
+		enrichedCandidates = 0
+	}
+
+	const (
+		allTicker24hWeight   = 40
+		premiumIndexWeight   = 10
+		initialM15Weight     = 1
+		enrichSnapshotWeight = 4 // 1h kline=1, 4h kline(210)=2, open interest=1
+	)
+
+	return allTicker24hWeight + premiumIndexWeight + (prefetchCandidates * initialM15Weight) + (enrichedCandidates * enrichSnapshotWeight)
 }

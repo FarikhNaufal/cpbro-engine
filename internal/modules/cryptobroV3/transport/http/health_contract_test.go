@@ -57,3 +57,33 @@ func TestHealthEndpoint_ResponseShape(t *testing.T) {
 		t.Fatalf("expected data object")
 	}
 }
+
+func TestHealthResponse_IncludesWebsocketStatus(t *testing.T) {
+	h := &Handler{
+		startTime: time.Now().Add(-5 * time.Second),
+	}
+
+	resp := h.mapHealthResponse(usecase.HealthStatus{
+		Status:              "UP",
+		Mode:                "alert-only",
+		BinanceConnectivity: "OK",
+		GeminiAvailability:  "OK",
+		StorageWritable:     "OK",
+		RealtimePrice: usecase.RealtimePriceStatus{
+			Enabled:         true,
+			Connected:       true,
+			ActiveSymbols:   3,
+			LastMessageTime: time.Date(2026, 6, 3, 14, 40, 0, 0, time.UTC),
+		},
+	})
+
+	if !resp.WebsocketEnabled || !resp.WebsocketConnected {
+		t.Fatalf("expected websocket flags to be true: %+v", resp)
+	}
+	if resp.WebsocketActiveSymbols != 3 {
+		t.Fatalf("expected active symbols=3, got %d", resp.WebsocketActiveSymbols)
+	}
+	if resp.WebsocketLastMessageTime == "" {
+		t.Fatalf("expected websocket last message time to be populated")
+	}
+}

@@ -137,6 +137,7 @@ func (m *mockAPINotification) SendOpsMessage(ctx context.Context, msg string) er
 }
 
 func TestAPIRoutes(t *testing.T) {
+	tempDir := t.TempDir()
 	// Initialize Mock Repo
 	mockRepo := &mockAPIStorageRepo{
 		latestResult: &entity.LatestResult{
@@ -218,13 +219,13 @@ func TestAPIRoutes(t *testing.T) {
 		finalGateUC,
 		conflictResolverUC,
 		storageUC,
-		".",
+		tempDir,
 	)
 
-	observabilityUC := usecase.NewObservabilityUsecase(&mockAPIMarketDataProvider{}, &mockAPITestAIAuditor{}, &mockAPINotification{}, ".")
+	observabilityUC := usecase.NewObservabilityUsecase(&mockAPIMarketDataProvider{}, &mockAPITestAIAuditor{}, &mockAPINotification{}, tempDir)
 	cfg, _ := config.LoadConfigFromEnv()
 	var testScannerRunning atomic.Bool
-	handler := transhttp.NewHandler(scannerUC, feedbackUC, storageUC, backtestUC, observabilityUC, ".", &testScannerRunning)
+	handler := transhttp.NewHandler(scannerUC, feedbackUC, storageUC, backtestUC, observabilityUC, tempDir, &testScannerRunning)
 	router := transhttp.SetupRouter(cfg, handler)
 
 	t.Run("GET /health", func(t *testing.T) {
@@ -337,6 +338,7 @@ func TestAPIRoutes(t *testing.T) {
 }
 
 func TestSwaggerRouteEnabled(t *testing.T) {
+	tempDir := t.TempDir()
 	// Swagger should be mounted when SwaggerEnabled=true
 	t.Setenv("SWAGGER_ENABLED", "true")
 	t.Setenv("SWAGGER_HOST", "localhost:9999")
@@ -348,7 +350,7 @@ func TestSwaggerRouteEnabled(t *testing.T) {
 	mockRepo := &mockAPIStorageRepo{}
 	storageUC := usecase.NewStorageUsecase(mockRepo)
 	feedbackUC := usecase.NewFeedbackUsecase(storageUC)
-	observabilityUC := usecase.NewObservabilityUsecase(&mockAPIMarketDataProvider{}, &mockAPITestAIAuditor{}, &mockAPINotification{}, ".")
+	observabilityUC := usecase.NewObservabilityUsecase(&mockAPIMarketDataProvider{}, &mockAPITestAIAuditor{}, &mockAPINotification{}, tempDir)
 
 	backtestUC := usecase.NewBacktestEngineUsecase(
 		&mockAPIMarketDataProvider{},
@@ -367,7 +369,7 @@ func TestSwaggerRouteEnabled(t *testing.T) {
 		usecase.NewFinalGateUsecase(),
 		usecase.NewConflictResolverUsecase(),
 		storageUC,
-		".",
+		tempDir,
 	)
 
 	scannerUC := usecase.NewScannerUsecase(
@@ -394,7 +396,7 @@ func TestSwaggerRouteEnabled(t *testing.T) {
 	)
 
 	var testRunning atomic.Bool
-	handler := transhttp.NewHandler(scannerUC, feedbackUC, storageUC, backtestUC, observabilityUC, ".", &testRunning)
+	handler := transhttp.NewHandler(scannerUC, feedbackUC, storageUC, backtestUC, observabilityUC, tempDir, &testRunning)
 	router := transhttp.SetupRouter(cfg, handler)
 
 	w := httptest.NewRecorder()
@@ -409,6 +411,7 @@ func TestSwaggerRouteEnabled(t *testing.T) {
 }
 
 func TestSwaggerRouteDisabled(t *testing.T) {
+	tempDir := t.TempDir()
 	// Swagger should NOT be mounted when SwaggerEnabled=false
 	t.Setenv("SWAGGER_ENABLED", "false")
 
@@ -418,7 +421,7 @@ func TestSwaggerRouteDisabled(t *testing.T) {
 	mockRepo := &mockAPIStorageRepo{}
 	storageUC := usecase.NewStorageUsecase(mockRepo)
 	feedbackUC := usecase.NewFeedbackUsecase(storageUC)
-	observabilityUC := usecase.NewObservabilityUsecase(&mockAPIMarketDataProvider{}, &mockAPITestAIAuditor{}, &mockAPINotification{}, ".")
+	observabilityUC := usecase.NewObservabilityUsecase(&mockAPIMarketDataProvider{}, &mockAPITestAIAuditor{}, &mockAPINotification{}, tempDir)
 
 	backtestUC := usecase.NewBacktestEngineUsecase(
 		&mockAPIMarketDataProvider{},
@@ -437,7 +440,7 @@ func TestSwaggerRouteDisabled(t *testing.T) {
 		usecase.NewFinalGateUsecase(),
 		usecase.NewConflictResolverUsecase(),
 		storageUC,
-		".",
+		tempDir,
 	)
 
 	scannerUC := usecase.NewScannerUsecase(
@@ -464,7 +467,7 @@ func TestSwaggerRouteDisabled(t *testing.T) {
 	)
 
 	var testRunning atomic.Bool
-	handler := transhttp.NewHandler(scannerUC, feedbackUC, storageUC, backtestUC, observabilityUC, ".", &testRunning)
+	handler := transhttp.NewHandler(scannerUC, feedbackUC, storageUC, backtestUC, observabilityUC, tempDir, &testRunning)
 	router := transhttp.SetupRouter(cfg, handler)
 
 	w := httptest.NewRecorder()

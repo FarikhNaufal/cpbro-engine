@@ -211,6 +211,152 @@ func TestPocketBaseStorageService_WatchJournalAppendAndLoad(t *testing.T) {
 	}
 }
 
+func TestPocketBaseStorageService_UpsertSignalJournalEntries_UsesTargetedLookup(t *testing.T) {
+	var patchedPayload map[string]any
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/collections/_superusers/auth-with-password":
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": "testtoken"})
+			return
+		case r.Method == http.MethodGet && r.URL.Path == "/api/collections/signal_journals/records":
+			if got := r.Header.Get("Authorization"); got != "Bearer testtoken" {
+				http.Error(w, "missing bearer", http.StatusUnauthorized)
+				return
+			}
+			if r.URL.Query().Get("filter") == "" {
+				http.Error(w, "unexpected full collection scan", http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"page":       1,
+				"perPage":    1,
+				"totalItems": 1,
+				"totalPages": 1,
+				"items": []map[string]any{
+					{"id": "rec-sig-1", "signal_id": "sig_1"},
+				},
+			})
+			return
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/collections/signal_journals/records/rec-sig-1":
+			if got := r.Header.Get("Authorization"); got != "Bearer testtoken" {
+				http.Error(w, "missing bearer", http.StatusUnauthorized)
+				return
+			}
+			body, _ := io.ReadAll(r.Body)
+			_ = json.Unmarshal(body, &patchedPayload)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "rec-sig-1"})
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	})
+
+	httpClient := &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, r)
+			return rr.Result(), nil
+		}),
+	}
+
+	tmpDir := t.TempDir()
+	fallback, err := NewJSONStorageService(filepath.Join(tmpDir, "storage"))
+	if err != nil {
+		t.Fatalf("NewJSONStorageService: %v", err)
+	}
+
+	client, err := NewPocketBaseClientWithHTTPClient("http://pocketbase.local", httpClient, 2*time.Second, PocketBaseAuthModeSuperuser, "", "admin@example.com", "pass", 1)
+	if err != nil {
+		t.Fatalf("NewPocketBaseClient: %v", err)
+	}
+
+	st, err := NewPocketBaseStorageService(fallback, client)
+	if err != nil {
+		t.Fatalf("NewPocketBaseStorageService: %v", err)
+	}
+
+	err = st.UpsertSignalJournalEntries([]usecase.SignalJournal{
+		{
+			ID:          "sig_1",
+			Symbol:      "BTCUSDT",
+			Direction:   usecase.LONG,
+			Playbook:    usecase.TREND_PULLBACK,
+			EntryPrice:  100,
+			StopLoss:    98,
+			TP1:         105,
+			TP2:         110,
+			RR:          2.5,
+			Status:      usecase.TP1_HIT,
+			CreatedAt:   time.Now().UTC(),
+			ExpiresAt:   time.Now().UTC().Add(2 * time.Hour),
+			LatestPrice: 105,
+		},
+	})
+	if err != nil {
+		t.Fatalf("UpsertSignalJournalEntries: %v", err)
+	}
+
+	if patchedPayload == nil {
+		t.Fatal("expected PATCH payload to be sent")
+	}
+	if got, _ := patchedPayload["signal_id"].(string); got != "sig_1" {
+		t.Fatalf("unexpected patched signal_id: %v", patchedPayload["signal_id"])
+	}
+}
+
+func TestPocketBaseStorageService_LoadSignalJournal_PrefersLocalMirror(t *testing.T) {
+	httpClient := &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			t.Fatalf("unexpected PocketBase request during local mirror load: %s %s", r.Method, r.URL.Path)
+			return nil, nil
+		}),
+	}
+
+	tmpDir := t.TempDir()
+	fallback, err := NewJSONStorageService(filepath.Join(tmpDir, "storage"))
+	if err != nil {
+		t.Fatalf("NewJSONStorageService: %v", err)
+	}
+
+	localEntry := usecase.SignalJournal{
+		ID:         "sig_local",
+		Symbol:     "BTCUSDT",
+		Direction:  usecase.LONG,
+		Playbook:   usecase.TREND_PULLBACK,
+		EntryPrice: 100,
+		StopLoss:   98,
+		TP1:        105,
+		TP2:        110,
+		RR:         2.5,
+		Status:     usecase.MONITORING,
+		CreatedAt:  time.Now().UTC(),
+		ExpiresAt:  time.Now().UTC().Add(2 * time.Hour),
+	}
+	if err := fallback.SaveSignalJournal([]usecase.SignalJournal{localEntry}); err != nil {
+		t.Fatalf("SaveSignalJournal local mirror: %v", err)
+	}
+
+	client, err := NewPocketBaseClientWithHTTPClient("http://pocketbase.local", httpClient, 2*time.Second, PocketBaseAuthModeSuperuser, "", "admin@example.com", "pass", 1)
+	if err != nil {
+		t.Fatalf("NewPocketBaseClient: %v", err)
+	}
+
+	st, err := NewPocketBaseStorageService(fallback, client)
+	if err != nil {
+		t.Fatalf("NewPocketBaseStorageService: %v", err)
+	}
+
+	journal, err := st.LoadSignalJournal()
+	if err != nil {
+		t.Fatalf("LoadSignalJournal: %v", err)
+	}
+	if len(journal) != 1 || journal[0].ID != "sig_local" {
+		t.Fatalf("unexpected local mirror journal result: %+v", journal)
+	}
+}
+
 func TestPocketBaseStorageService_SaveAndLoadEvaluationReport(t *testing.T) {
 	var savedEval map[string]any
 

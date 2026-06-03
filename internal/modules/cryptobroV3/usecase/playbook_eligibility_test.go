@@ -387,4 +387,28 @@ func TestPlaybookEligibility_CompressionBreakoutRetest(t *testing.T) {
 	if resFirstBreakout.Eligible {
 		t.Errorf("Expected entry on first breakout candle to be rejected, but it passed")
 	}
+
+	// Test 4: Existing OI alone must not count as expansion.
+	dataNoExpansion := data
+	dataNoExpansion.OpenInterestM15 = 12345.0
+	dataNoExpansion.OIChangePct = 0.0
+	dataNoExpansion.M15Candles = make([]dto.Candle, 25)
+	for i := 0; i < 25; i++ {
+		dataNoExpansion.M15Candles[i] = dto.Candle{Close: 100.0, Vol: 10.0}
+	}
+	dataNoExpansion.M15Candles[20].Close = 105.0
+	dataNoExpansion.M15Candles[24].Close = 101.0
+	dataNoExpansion.M15Candles[24].Vol = 10.0 // no volume expansion
+
+	techNoExpansion := &TechnicalSnapshot{
+		RSI: 50.0,
+		IndicatorValues: map[string]float64{
+			IndicatorContraction: 1.0,
+			IndicatorExtremeOI:   0.0,
+		},
+	}
+	resNoExpansion := uc.CheckEligibility(sel, policy, dataNoExpansion, techNoExpansion, structure)
+	if resNoExpansion.Eligible {
+		t.Errorf("Expected Compression Breakout Retest without volume/OI expansion to be rejected, but it passed")
+	}
 }

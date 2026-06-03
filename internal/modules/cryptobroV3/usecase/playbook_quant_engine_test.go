@@ -136,6 +136,59 @@ func TestQuantEngine_CompressionBreakoutRetest_SetsSetupTypeToRetest(t *testing.
 	}
 }
 
+func TestQuantEngine_RunEngineWithPreparedContext_DoesNotMutateBaseSnapshot(t *testing.T) {
+	engine := NewPlaybookQuantEngineUsecase()
+
+	m15Candles := make([]dto.Candle, 30)
+	for i := 0; i < 30; i++ {
+		m15Candles[i] = dto.Candle{
+			Time:  time.Now().Add(-time.Duration(30-i) * 15 * time.Minute),
+			Open:  100.0,
+			High:  110.0,
+			Low:   99.0,
+			Close: 100.0,
+			Vol:   10.0,
+		}
+	}
+	m15Candles[29].Low = 109.5
+	m15Candles[29].Close = 110.5
+
+	h1Candles := make([]dto.Candle, 60)
+	h4Candles := make([]dto.Candle, 60)
+	for i := range h1Candles {
+		h1Candles[i] = dto.Candle{Time: time.Now().Add(-time.Duration(60-i) * time.Hour), Close: 100.0}
+		h4Candles[i] = dto.Candle{Time: time.Now().Add(-time.Duration(60-i) * 4 * time.Hour), Close: 100.0}
+	}
+
+	data := MarketData{
+		Symbol:      "TESTUSDT",
+		M15Candles:  m15Candles,
+		H1Candles:   h1Candles,
+		H4Candles:   h4Candles,
+		LatestPrice: m15Candles[29].Close,
+	}
+	policy := MarketPolicy{
+		AllowLong:  true,
+		AllowShort: true,
+	}
+
+	prepared, ok := engine.prepareContext(data)
+	if !ok {
+		t.Fatalf("expected prepared context to succeed")
+	}
+	if _, exists := prepared.technicalSnapshot.IndicatorValues[IndicatorRetestHold]; exists {
+		t.Fatalf("expected base prepared snapshot to not contain retest hold before quant run")
+	}
+
+	res := engine.RunEngineWithPreparedContext(COMPRESSION_BREAKOUT_RETEST, LONG, data, policy, prepared)
+	if res.TechnicalSnapshot.IndicatorValues[IndicatorRetestHold] != 1.0 {
+		t.Fatalf("expected quant result to contain retest hold signal")
+	}
+	if _, exists := prepared.technicalSnapshot.IndicatorValues[IndicatorRetestHold]; exists {
+		t.Fatalf("expected prepared snapshot to remain immutable after quant run")
+	}
+}
+
 func TestQuantEngine_DebugSaveRawKlines_DefaultDisabled(t *testing.T) {
 	t.Setenv("DEBUG_SAVE_RAW_KLINES", "false")
 	debugDir := t.TempDir()

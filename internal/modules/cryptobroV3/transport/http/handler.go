@@ -59,11 +59,15 @@ func NewHandler(
 
 func (h *Handler) mapHealthResponse(status usecase.HealthStatus) dto.HealthResponse {
 	var lastScanStr, lastEvalStr string
+	var websocketLastMessageStr string
 	if !status.LastScanTime.IsZero() {
 		lastScanStr = status.LastScanTime.Format(time.RFC3339)
 	}
 	if !status.LastEvaluationTime.IsZero() {
 		lastEvalStr = status.LastEvaluationTime.Format(time.RFC3339)
+	}
+	if !status.RealtimePrice.LastMessageTime.IsZero() {
+		websocketLastMessageStr = status.RealtimePrice.LastMessageTime.Format(time.RFC3339)
 	}
 
 	appName := os.Getenv("APP_NAME")
@@ -97,6 +101,9 @@ func (h *Handler) mapHealthResponse(status usecase.HealthStatus) dto.HealthRespo
 	if !storageAvailable {
 		warnings = append(warnings, "storage_writable="+sanitizeErr(status.StorageWritable))
 	}
+	if status.RealtimePrice.Enabled && status.RealtimePrice.ActiveSymbols > 0 && !status.RealtimePrice.Connected {
+		warnings = append(warnings, "binance_websocket=disconnected")
+	}
 
 	healthStatus := "healthy"
 	if len(warnings) > 0 {
@@ -118,21 +125,25 @@ func (h *Handler) mapHealthResponse(status usecase.HealthStatus) dto.HealthRespo
 	}
 
 	return dto.HealthResponse{
-		AppName:            appName,
-		AppVersion:         appVersion,
-		AppEnv:             appEnv,
-		Mode:               status.Mode,
-		AlertOnly:          status.Mode == "alert-only",
-		BinanceReadOnly:    os.Getenv("BINANCE_READ_ONLY") != "false",
-		ScannerRunning:     scannerRunning,
-		LastScanTime:       lastScanStr,
-		LastEvaluationTime: lastEvalStr,
-		StorageAvailable:   storageAvailable,
-		SwaggerEnabled:     swaggerEnabled,
-		UptimeSeconds:      uptime,
-		Status:             healthStatus,
-		Warnings:           warnings,
-		SafeConfig:         safeCfg,
+		AppName:                  appName,
+		AppVersion:               appVersion,
+		AppEnv:                   appEnv,
+		Mode:                     status.Mode,
+		AlertOnly:                status.Mode == "alert-only",
+		BinanceReadOnly:          os.Getenv("BINANCE_READ_ONLY") != "false",
+		ScannerRunning:           scannerRunning,
+		LastScanTime:             lastScanStr,
+		LastEvaluationTime:       lastEvalStr,
+		StorageAvailable:         storageAvailable,
+		SwaggerEnabled:           swaggerEnabled,
+		UptimeSeconds:            uptime,
+		Status:                   healthStatus,
+		Warnings:                 warnings,
+		WebsocketEnabled:         status.RealtimePrice.Enabled,
+		WebsocketConnected:       status.RealtimePrice.Connected,
+		WebsocketActiveSymbols:   status.RealtimePrice.ActiveSymbols,
+		WebsocketLastMessageTime: websocketLastMessageStr,
+		SafeConfig:               safeCfg,
 	}
 }
 

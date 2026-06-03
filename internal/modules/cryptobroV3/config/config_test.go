@@ -42,6 +42,9 @@ func TestConfig_LoadDefaultsEmptyEnv(t *testing.T) {
 	if !cfg.Safety.HealthStorageCheck {
 		t.Errorf("Expected HealthStorageCheck=true")
 	}
+	if cfg.Binance.WebsocketEnabled {
+		t.Errorf("Expected Binance.WebsocketEnabled=false")
+	}
 }
 
 func TestConfig_ValidationSafetyAlertOnly(t *testing.T) {
@@ -238,5 +241,26 @@ func TestConfig_ProductionDisallowsAIDisabledWhenAIHighRequired(t *testing.T) {
 	cfg.Safety.RequireAIHighForExecute = true
 	if err := ValidateConfig(cfg); err == nil {
 		t.Fatalf("expected validation error in production when AI audit disabled but AI HIGH required")
+	}
+}
+
+func TestConfig_BinanceWebsocketEnvParsingAndValidation(t *testing.T) {
+	t.Setenv("TELEGRAM_ENABLED", "false")
+	t.Setenv("BINANCE_WS_ENABLED", "true")
+	t.Setenv("BINANCE_WS_BASE_URL", "wss://fstream.binance.com")
+	t.Setenv("BINANCE_WS_MAX_ACTIVE_SYMBOLS", "25")
+	t.Setenv("BINANCE_WS_RECONNECT_SECONDS", "4")
+	t.Setenv("BINANCE_WS_STALE_PRICE_SECONDS", "12")
+	t.Setenv("BINANCE_WS_FORCE_RESTART_HOURS", "22")
+
+	cfg, err := LoadConfigFromEnv()
+	if err != nil {
+		t.Fatalf("LoadConfigFromEnv failed: %v", err)
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Fatalf("ValidateConfig failed: %v", err)
+	}
+	if !cfg.Binance.WebsocketEnabled || cfg.Binance.WSMaxActiveSymbols != 25 {
+		t.Fatalf("unexpected websocket config: %+v", cfg.Binance)
 	}
 }

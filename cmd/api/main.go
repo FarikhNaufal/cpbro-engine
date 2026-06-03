@@ -128,6 +128,18 @@ func main() {
 		RequestTimeoutSeconds:         cfg.Telegram.RequestTimeoutSeconds,
 	})
 
+	var realtimePriceFeed *service.BinanceRealtimePriceStream
+	if cfg.Binance.WebsocketEnabled {
+		realtimePriceFeed = service.NewBinanceRealtimePriceStream(service.BinanceRealtimePriceConfig{
+			Enabled:          cfg.Binance.WebsocketEnabled,
+			BaseURL:          cfg.Binance.WebsocketBaseURL,
+			MaxActiveSymbols: cfg.Binance.WSMaxActiveSymbols,
+			ReconnectDelay:   time.Duration(cfg.Binance.WSReconnectSeconds) * time.Second,
+			StaleAfter:       time.Duration(cfg.Binance.WSStalePriceSeconds) * time.Second,
+			ForceRestart:     time.Duration(cfg.Binance.WSForceRestartHours) * time.Hour,
+		})
+	}
+
 	// 4. Initialize Usecases
 	storageUC := usecase.NewStorageUsecase(storageRepo)
 	marketDataUC := usecase.NewMarketDataUsecase(binanceService)
@@ -151,12 +163,15 @@ func main() {
 	aiAuditorUC := usecase.NewAIAuditorUsecase(aiService, storageUC)
 	planReconciliationUC := usecase.NewPlanReconciliationUsecase()
 	stalenessUC := usecase.NewStalenessUsecase(30 * time.Minute)
+	stalenessUC.SetLatestPriceFeed(realtimePriceFeed)
+	stalenessUC.SetFallbackProvider(binanceService)
 	finalGateUC := usecase.NewFinalGateUsecase()
 	conflictResolverUC := usecase.NewConflictResolverUsecase()
 	signalNotificationUC := usecase.NewSignalNotificationUsecase(telegramService, storageUC)
 	opsNotificationUC := usecase.NewOpsNotificationUsecase(telegramService)
 	opsNotificationUC.SetAdminEnabled(cfg.Telegram.OpsAdminEnabled)
 	monitoringUC := usecase.NewMonitoringUsecase(binanceService, storageUC)
+	monitoringUC.SetLatestPriceFeed(realtimePriceFeed)
 	feedbackUC := usecase.NewFeedbackUsecase(storageUC)
 
 	{
@@ -234,6 +249,10 @@ func main() {
 	// 6. Context for graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if realtimePriceFeed != nil {
+		realtimePriceFeed.Start(ctx)
+		slog.Info("Binance realtime price websocket enabled", "base_url", cfg.Binance.WebsocketBaseURL, "max_active_symbols", cfg.Binance.WSMaxActiveSymbols)
+	}
 
 	// Start Background Scan, Monitoring & Evaluation Workers
 	go startStartupScan(ctx, cfg, scannerUC, storageUC, opsNotificationUC)
@@ -243,6 +262,7 @@ func main() {
 
 	// 7. Setup HTTP transport Handler and Router
 	observabilityUC := usecase.NewObservabilityUsecase(binanceService, aiService, telegramService, cfg.Storage.StoragePath)
+	observabilityUC.SetRealtimeStatusProvider(realtimePriceFeed)
 	handler := transhttp.NewHandler(scannerUC, feedbackUC, storageUC, backtestUC, observabilityUC, cfg.Storage.StoragePath, &scannerRunning)
 	router := transhttp.SetupRouter(cfg, handler)
 
@@ -413,6 +433,7 @@ func startMonitoringWorker(ctx context.Context, cfg *config.Config, monitoringUC
 	defer usecase.MonitoringWorkerRunning.Store(false)
 	ticker := time.NewTicker(time.Duration(cfg.Monitoring.IntervalSeconds) * time.Second)
 	defer ticker.Stop()
+	var monitoringTickRunning atomic.Bool
 
 	for {
 		select {
@@ -420,7 +441,12 @@ func startMonitoringWorker(ctx context.Context, cfg *config.Config, monitoringUC
 			slog.Info("Monitoring worker stopped.")
 			return
 		case <-ticker.C:
+			if !monitoringTickRunning.CompareAndSwap(false, true) {
+				slog.Warn("Monitoring worker skipped: previous tick still running")
+				continue
+			}
 			go func() {
+				defer monitoringTickRunning.Store(false)
 				defer func() {
 					if r := recover(); r != nil {
 						slog.Error("PANIC RECOVERY in monitoring worker", "panic", r)

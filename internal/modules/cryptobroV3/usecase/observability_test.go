@@ -64,6 +64,10 @@ type mockObsNotifier struct {
 	failPing bool
 }
 
+type mockObsRealtimeStatus struct {
+	status RealtimePriceStatus
+}
+
 func (m *mockObsNotifier) SendFinalExecuteAlert(ctx context.Context, signal dto.SignalResponse) error {
 	return nil
 }
@@ -77,6 +81,10 @@ func (m *mockObsNotifier) Ping(ctx context.Context) error {
 		return errors.New("telegram status 401")
 	}
 	return nil
+}
+
+func (m *mockObsRealtimeStatus) RealtimeStatus() RealtimePriceStatus {
+	return m.status
 }
 
 func TestObservability_MetricsRegistry(t *testing.T) {
@@ -143,6 +151,14 @@ func TestObservability_PerformHealthAudit(t *testing.T) {
 	notifier := &mockObsNotifier{failPing: false}
 
 	uc := NewObservabilityUsecase(provider, aiService, notifier, tmpDir)
+	uc.SetRealtimeStatusProvider(&mockObsRealtimeStatus{
+		status: RealtimePriceStatus{
+			Enabled:         true,
+			Connected:       true,
+			ActiveSymbols:   2,
+			LastMessageTime: time.Now(),
+		},
+	})
 
 	// Set running statuses
 	ScanWorkerRunning.Store(true)
@@ -171,6 +187,9 @@ func TestObservability_PerformHealthAudit(t *testing.T) {
 	}
 	if !status.ScanWorkerRunning {
 		t.Error("Expected ScanWorkerRunning=true")
+	}
+	if !status.RealtimePrice.Enabled || !status.RealtimePrice.Connected || status.RealtimePrice.ActiveSymbols != 2 {
+		t.Errorf("unexpected realtime status: %+v", status.RealtimePrice)
 	}
 
 	// Verify health snapshot file creation

@@ -537,7 +537,8 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 				sumVol += m15Closed[i].Vol
 			}
 			avgVol := sumVol / 5.0
-			if lastVol > avgVol || data.OpenInterestM15 > 0 {
+			hasOIExpansion := GetIndicator(tech.IndicatorValues, IndicatorExtremeOI) == 1.0
+			if lastVol > avgVol || hasOIExpansion {
 				volExpand = true
 			}
 		}

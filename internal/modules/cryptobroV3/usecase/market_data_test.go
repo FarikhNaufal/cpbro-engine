@@ -11,8 +11,9 @@ import (
 )
 
 type recordingMarketDataProvider struct {
-	mu    sync.Mutex
-	calls []fetchClosedCall
+	mu              sync.Mutex
+	calls           []fetchClosedCall
+	openInterestHit int
 }
 
 type fetchClosedCall struct {
@@ -63,6 +64,9 @@ func (p *recordingMarketDataProvider) FetchPremiumFundingRates(ctx context.Conte
 }
 
 func (p *recordingMarketDataProvider) FetchOpenInterest(ctx context.Context, symbol string) (float64, error) {
+	p.mu.Lock()
+	p.openInterestHit++
+	p.mu.Unlock()
 	return 1000000, nil
 }
 
@@ -88,4 +92,53 @@ func TestMarketDataUsecase_FetchMarketData_H4LimitSupportsEMA200(t *testing.T) {
 		}
 	}
 	require.GreaterOrEqual(t, h4Limit, 200, "H4 candle limit must support EMA(200) trend checks for TREND_PULLBACK")
+}
+
+func TestMarketDataUsecase_FetchCandles_ReusesClosedCandleCacheWithinWindow(t *testing.T) {
+	provider := &recordingMarketDataProvider{}
+	uc := NewMarketDataUsecase(provider)
+
+	_, _, _, err := uc.FetchCandles(context.Background(), "BTCUSDT")
+	require.NoError(t, err)
+	_, _, _, err = uc.FetchCandles(context.Background(), "BTCUSDT")
+	require.NoError(t, err)
+
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	require.Len(t, provider.calls, 3, "expected cached second fetch to avoid refetching the same closed candles")
+}
+
+func TestMarketDataUsecase_FetchInitialMarketData_OnlyFetchesM15(t *testing.T) {
+	provider := &recordingMarketDataProvider{}
+	uc := NewMarketDataUsecase(provider)
+
+	md, err := uc.FetchInitialMarketData(context.Background(), "BTCUSDT", map[string]float64{"BTCUSDT": 0.001})
+	require.NoError(t, err)
+	require.NotEmpty(t, md.M15Candles)
+	require.Empty(t, md.H1Candles)
+	require.Empty(t, md.H4Candles)
+	require.Equal(t, 0.001, md.FundingRate)
+
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	require.Len(t, provider.calls, 1)
+	require.Equal(t, "15m", provider.calls[0].interval)
+	require.Equal(t, 0, provider.openInterestHit)
+}
+
+func TestMarketDataUsecase_EnrichMarketData_ReusesOpenInterestCache(t *testing.T) {
+	provider := &recordingMarketDataProvider{}
+	uc := NewMarketDataUsecase(provider)
+
+	initial, err := uc.FetchInitialMarketData(context.Background(), "BTCUSDT", map[string]float64{})
+	require.NoError(t, err)
+
+	_, err = uc.EnrichMarketData(context.Background(), initial)
+	require.NoError(t, err)
+	_, err = uc.EnrichMarketData(context.Background(), initial)
+	require.NoError(t, err)
+
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	require.Equal(t, 1, provider.openInterestHit, "expected open interest to be cached across enrich calls")
 }

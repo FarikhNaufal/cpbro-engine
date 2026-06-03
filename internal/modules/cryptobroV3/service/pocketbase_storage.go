@@ -83,9 +83,28 @@ func (s *PocketBaseStorageService) AppendDecisionAudit(e usecase.DecisionAudit) 
 	return s.fallback.AppendDecisionAudit(e)
 }
 
+func (s *PocketBaseStorageService) AppendDecisionAudits(entries []usecase.DecisionAudit) error {
+	if appender, ok := s.fallback.(interface {
+		AppendDecisionAudits([]usecase.DecisionAudit) error
+	}); ok {
+		return appender.AppendDecisionAudits(entries)
+	}
+	for _, entry := range entries {
+		if err := s.fallback.AppendDecisionAudit(entry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // --- Signal Journal ---
 
 func (s *PocketBaseStorageService) LoadSignalJournal() ([]usecase.SignalJournal, error) {
+	localJournal, localErr := s.fallback.LoadSignalJournal()
+	if localErr == nil && len(localJournal) > 0 {
+		return localJournal, nil
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -110,6 +129,11 @@ func (s *PocketBaseStorageService) LoadSignalJournal() ([]usecase.SignalJournal,
 
 	// Ensure deterministic ordering (newest first) if created_at missing.
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	if len(out) > 0 {
+		if err := s.fallback.SaveSignalJournal(out); err != nil {
+			slog.Warn("JSON fallback signal_journals sync failed after PocketBase load", "error", err)
+		}
+	}
 	return out, nil
 }
 
@@ -279,9 +303,32 @@ func (s *PocketBaseStorageService) UpdateSignalJournal(update func([]usecase.Sig
 	return nil
 }
 
+func (s *PocketBaseStorageService) UpsertSignalJournalEntries(entries []usecase.SignalJournal) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.upsertJournalEntriesUnlocked("signal_journals", entries); err != nil {
+		slog.Warn("PocketBase signal_journals partial upsert failed; writing JSON fallback", "error", err)
+		return s.upsertFallbackSignalJournalEntries(entries)
+	}
+	if err := s.upsertFallbackSignalJournalEntries(entries); err != nil {
+		slog.Warn("JSON fallback signal_journals partial mirror failed after PocketBase upsert", "error", err)
+	}
+	return nil
+}
+
 // --- Watch Journal ---
 
 func (s *PocketBaseStorageService) LoadWatchJournal() ([]usecase.WatchJournal, error) {
+	localJournal, localErr := s.fallback.LoadWatchJournal()
+	if localErr == nil && len(localJournal) > 0 {
+		return localJournal, nil
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -304,6 +351,11 @@ func (s *PocketBaseStorageService) LoadWatchJournal() ([]usecase.WatchJournal, e
 	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	if len(out) > 0 {
+		if err := s.fallback.SaveWatchJournal(out); err != nil {
+			slog.Warn("JSON fallback watch_journals sync failed after PocketBase load", "error", err)
+		}
+	}
 	return out, nil
 }
 
@@ -378,6 +430,29 @@ func (s *PocketBaseStorageService) UpdateWatchJournal(update func([]usecase.Watc
 	}
 	if err := s.fallback.SaveWatchJournal(updated); err != nil {
 		slog.Warn("JSON fallback watch_journals mirror failed after PocketBase update", "error", err)
+	}
+	return nil
+}
+
+func (s *PocketBaseStorageService) UpsertWatchJournalEntries(entries []usecase.WatchJournal) error {
+	if len(entries) == 0 {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	signalEntries := make([]usecase.SignalJournal, len(entries))
+	for i, entry := range entries {
+		signalEntries[i] = usecase.SignalJournal(entry)
+	}
+
+	if err := s.upsertJournalEntriesUnlocked("watch_journals", signalEntries); err != nil {
+		slog.Warn("PocketBase watch_journals partial upsert failed; writing JSON fallback", "error", err)
+		return s.upsertFallbackWatchJournalEntries(entries)
+	}
+	if err := s.upsertFallbackWatchJournalEntries(entries); err != nil {
+		slog.Warn("JSON fallback watch_journals partial mirror failed after PocketBase upsert", "error", err)
 	}
 	return nil
 }
@@ -501,6 +576,33 @@ func (s *PocketBaseStorageService) upsertFallbackSignalJournal(entry usecase.Sig
 	})
 }
 
+func (s *PocketBaseStorageService) upsertFallbackSignalJournalEntries(entries []usecase.SignalJournal) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	if upserter, ok := s.fallback.(interface {
+		UpsertSignalJournalEntries([]usecase.SignalJournal) error
+	}); ok {
+		return upserter.UpsertSignalJournalEntries(entries)
+	}
+	return s.updateFallbackSignalJournal(func(current []usecase.SignalJournal) ([]usecase.SignalJournal, error) {
+		for _, entry := range entries {
+			replaced := false
+			for i := range current {
+				if strings.TrimSpace(current[i].ID) == strings.TrimSpace(entry.ID) && strings.TrimSpace(entry.ID) != "" {
+					current[i] = entry
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				current = append(current, entry)
+			}
+		}
+		return current, nil
+	})
+}
+
 func (s *PocketBaseStorageService) upsertFallbackWatchJournal(entry usecase.WatchJournal) error {
 	return s.updateFallbackWatchJournal(func(current []usecase.WatchJournal) ([]usecase.WatchJournal, error) {
 		for i := range current {
@@ -510,6 +612,33 @@ func (s *PocketBaseStorageService) upsertFallbackWatchJournal(entry usecase.Watc
 			}
 		}
 		return append(current, entry), nil
+	})
+}
+
+func (s *PocketBaseStorageService) upsertFallbackWatchJournalEntries(entries []usecase.WatchJournal) error {
+	if len(entries) == 0 {
+		return nil
+	}
+	if upserter, ok := s.fallback.(interface {
+		UpsertWatchJournalEntries([]usecase.WatchJournal) error
+	}); ok {
+		return upserter.UpsertWatchJournalEntries(entries)
+	}
+	return s.updateFallbackWatchJournal(func(current []usecase.WatchJournal) ([]usecase.WatchJournal, error) {
+		for _, entry := range entries {
+			replaced := false
+			for i := range current {
+				if strings.TrimSpace(current[i].ID) == strings.TrimSpace(entry.ID) && strings.TrimSpace(entry.ID) != "" {
+					current[i] = entry
+					replaced = true
+					break
+				}
+			}
+			if !replaced {
+				current = append(current, entry)
+			}
+		}
+		return current, nil
 	})
 }
 
@@ -603,6 +732,41 @@ func (s *PocketBaseStorageService) saveJournalUnlocked(collection string, journa
 				}
 				existing[entry.ID]["id"] = id
 			}
+		}
+	}
+
+	return nil
+}
+
+func (s *PocketBaseStorageService) upsertJournalEntriesUnlocked(collection string, entries []usecase.SignalJournal) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	for _, entry := range entries {
+		if strings.TrimSpace(entry.ID) == "" {
+			continue
+		}
+		payload := encodeSignalJournal(entry)
+		recID, err := s.findJournalRecordIDBySignalID(ctx, collection, entry.ID)
+		if err != nil {
+			return err
+		}
+		if recID != "" {
+			if err := s.client.doJSON(ctx, "PATCH", "/api/collections/"+collection+"/records/"+recID, nil, payload, nil); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if err := s.client.doJSON(ctx, "POST", "/api/collections/"+collection+"/records", nil, payload, nil); err != nil {
+			recID, lookupErr := s.findJournalRecordIDBySignalID(ctx, collection, entry.ID)
+			if lookupErr == nil && recID != "" {
+				if patchErr := s.client.doJSON(ctx, "PATCH", "/api/collections/"+collection+"/records/"+recID, nil, payload, nil); patchErr != nil {
+					return patchErr
+				}
+				continue
+			}
+			return err
 		}
 	}
 

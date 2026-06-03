@@ -14,12 +14,29 @@ type MarketDataUsecase struct {
 
 	oiMu             sync.Mutex
 	lastOpenInterest map[string]float64
+	oiCacheMu        sync.RWMutex
+	oiCache          map[string]cachedFloat64
+
+	candleCacheMu sync.RWMutex
+	candleCache   map[string]cachedClosedCandles
+}
+
+type cachedClosedCandles struct {
+	candles    []dto.Candle
+	validUntil time.Time
+}
+
+type cachedFloat64 struct {
+	value      float64
+	validUntil time.Time
 }
 
 func NewMarketDataUsecase(provider MarketDataProvider) *MarketDataUsecase {
 	return &MarketDataUsecase{
 		provider:         provider,
 		lastOpenInterest: make(map[string]float64),
+		oiCache:          make(map[string]cachedFloat64),
+		candleCache:      make(map[string]cachedClosedCandles),
 	}
 }
 
@@ -41,11 +58,45 @@ func (uc *MarketDataUsecase) FetchPremiumFundingRates(ctx context.Context) (map[
 
 // FetchMarketData retrieves klines, open interest, funding rate, and latest price concurrently.
 func (uc *MarketDataUsecase) FetchMarketData(ctx context.Context, symbol string, fundingRates map[string]float64) (MarketData, error) {
-	rootCtx, cancelRoot := context.WithTimeout(ctx, 15*time.Second)
+	initial, err := uc.FetchInitialMarketData(ctx, symbol, fundingRates)
+	if err != nil {
+		return MarketData{}, err
+	}
+	return uc.EnrichMarketData(ctx, initial)
+}
+
+// FetchInitialMarketData retrieves the cheapest closed-candle input first so callers can fast-reject stale symbols
+// before paying the full H1/H4/OI snapshot cost.
+func (uc *MarketDataUsecase) FetchInitialMarketData(ctx context.Context, symbol string, fundingRates map[string]float64) (MarketData, error) {
+	rootCtx, cancelRoot := context.WithTimeout(ctx, 10*time.Second)
 	defer cancelRoot()
 
+	m15, err := uc.fetchClosedCandlesCached(rootCtx, symbol, "15m", 50)
+	if err != nil {
+		return MarketData{}, fmt.Errorf("failed to fetch initial market data for %s: %w", symbol, err)
+	}
+
+	fundingRate := 0.0
+	if val, ok := fundingRates[symbol]; ok {
+		fundingRate = val
+	}
+
+	return MarketData{
+		Symbol:      symbol,
+		M15Candles:  m15,
+		FundingRate: fundingRate,
+		LastUpdated: time.Now(),
+	}, nil
+}
+
+// EnrichMarketData fills the higher-timeframe and derivatives context for a symbol that has already passed cheap
+// initial checks (for example M15 freshness).
+func (uc *MarketDataUsecase) EnrichMarketData(ctx context.Context, base MarketData) (MarketData, error) {
+	rootCtx, cancelRoot := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelRoot()
+	symbol := base.Symbol
+
 	var (
-		m15          []dto.Candle
 		h1           []dto.Candle
 		h4           []dto.Candle
 		openInterest float64
@@ -75,20 +126,9 @@ func (uc *MarketDataUsecase) FetchMarketData(ctx context.Context, symbol string,
 		fn   func(ctx context.Context) error
 	}{
 		{
-			name: "M15Candles",
-			fn: func(ctx context.Context) error {
-				res, err := uc.provider.FetchClosedCandles(ctx, symbol, "15m", 50)
-				if err != nil {
-					return err
-				}
-				m15 = res
-				return nil
-			},
-		},
-		{
 			name: "H1Candles",
 			fn: func(ctx context.Context) error {
-				res, err := uc.provider.FetchClosedCandles(ctx, symbol, "1h", 50)
+				res, err := uc.fetchClosedCandlesCached(ctx, symbol, "1h", 50)
 				if err != nil {
 					return err
 				}
@@ -99,7 +139,7 @@ func (uc *MarketDataUsecase) FetchMarketData(ctx context.Context, symbol string,
 		{
 			name: "H4Candles",
 			fn: func(ctx context.Context) error {
-				res, err := uc.provider.FetchClosedCandles(ctx, symbol, "4h", h4TrendCandleLimit)
+				res, err := uc.fetchClosedCandlesCached(ctx, symbol, "4h", h4TrendCandleLimit)
 				if err != nil {
 					return err
 				}
@@ -110,7 +150,7 @@ func (uc *MarketDataUsecase) FetchMarketData(ctx context.Context, symbol string,
 		{
 			name: "OpenInterest",
 			fn: func(ctx context.Context) error {
-				res, err := uc.provider.FetchOpenInterest(ctx, symbol)
+				res, err := uc.fetchOpenInterestCached(ctx, symbol)
 				if err != nil {
 					return err
 				}
@@ -150,11 +190,6 @@ func (uc *MarketDataUsecase) FetchMarketData(ctx context.Context, symbol string,
 		return MarketData{}, fmt.Errorf("failed to fetch market data snapshot for %s: %w", symbol, firstErr)
 	}
 
-	fundingRate := 0.0
-	if val, ok := fundingRates[symbol]; ok {
-		fundingRate = val
-	}
-
 	oiChangePct := 0.0
 	if openInterest > 0 {
 		uc.oiMu.Lock()
@@ -169,34 +204,125 @@ func (uc *MarketDataUsecase) FetchMarketData(ctx context.Context, symbol string,
 
 	return MarketData{
 		Symbol:          symbol,
-		M15Candles:      m15,
+		M15Candles:      append([]dto.Candle(nil), base.M15Candles...),
 		H1Candles:       h1,
 		H4Candles:       h4,
 		OpenInterestM15: openInterest,
 		OIChangePct:     oiChangePct,
-		FundingRate:     fundingRate,
+		FundingRate:     base.FundingRate,
+		LatestPrice:     base.LatestPrice,
+		PriceChange24h:  base.PriceChange24h,
 		LastUpdated:     time.Now(),
 	}, nil
 }
 
 // FetchCandles fetches finalized candles for M15, H1, and H4 timeframes.
 func (uc *MarketDataUsecase) FetchCandles(ctx context.Context, symbol string) (m15, h1, h4 []dto.Candle, err error) {
-	m15, err = uc.provider.FetchClosedCandles(ctx, symbol, "15m", 50)
+	m15, err = uc.fetchClosedCandlesCached(ctx, symbol, "15m", 50)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to fetch M15 candles: %w", err)
 	}
 
-	h1, err = uc.provider.FetchClosedCandles(ctx, symbol, "1h", 50)
+	h1, err = uc.fetchClosedCandlesCached(ctx, symbol, "1h", 50)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to fetch H1 candles: %w", err)
 	}
 
 	// Keep consistent with FetchMarketData() to avoid systemic playbook ineligibility.
 	const h4TrendCandleLimit = 210
-	h4, err = uc.provider.FetchClosedCandles(ctx, symbol, "4h", h4TrendCandleLimit)
+	h4, err = uc.fetchClosedCandlesCached(ctx, symbol, "4h", h4TrendCandleLimit)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("failed to fetch H4 candles: %w", err)
 	}
 
 	return m15, h1, h4, nil
+}
+
+func (uc *MarketDataUsecase) fetchClosedCandlesCached(ctx context.Context, symbol string, interval string, limit int) ([]dto.Candle, error) {
+	cacheKey := fmt.Sprintf("%s|%s|%d", symbol, interval, limit)
+	now := time.Now()
+
+	uc.candleCacheMu.RLock()
+	if cached, ok := uc.candleCache[cacheKey]; ok && now.Before(cached.validUntil) && len(cached.candles) > 0 {
+		out := append([]dto.Candle(nil), cached.candles...)
+		uc.candleCacheMu.RUnlock()
+		return out, nil
+	}
+	uc.candleCacheMu.RUnlock()
+
+	candles, err := uc.provider.FetchClosedCandles(ctx, symbol, interval, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	validUntil := now.Add(15 * time.Second)
+	if next := nextClosedCandleAvailability(candles, interval); !next.IsZero() && next.After(now) {
+		validUntil = next
+	}
+
+	cloned := append([]dto.Candle(nil), candles...)
+	uc.candleCacheMu.Lock()
+	uc.candleCache[cacheKey] = cachedClosedCandles{
+		candles:    cloned,
+		validUntil: validUntil,
+	}
+	uc.candleCacheMu.Unlock()
+
+	return append([]dto.Candle(nil), cloned...), nil
+}
+
+func (uc *MarketDataUsecase) fetchOpenInterestCached(ctx context.Context, symbol string) (float64, error) {
+	now := time.Now()
+
+	uc.oiCacheMu.RLock()
+	if cached, ok := uc.oiCache[symbol]; ok && now.Before(cached.validUntil) {
+		uc.oiCacheMu.RUnlock()
+		return cached.value, nil
+	}
+	uc.oiCacheMu.RUnlock()
+
+	value, err := uc.provider.FetchOpenInterest(ctx, symbol)
+	if err != nil {
+		return 0, err
+	}
+
+	uc.oiCacheMu.Lock()
+	uc.oiCache[symbol] = cachedFloat64{
+		value:      value,
+		validUntil: now.Add(30 * time.Second),
+	}
+	uc.oiCacheMu.Unlock()
+
+	return value, nil
+}
+
+func nextClosedCandleAvailability(candles []dto.Candle, interval string) time.Time {
+	if len(candles) == 0 {
+		return time.Time{}
+	}
+
+	tf, ok := intervalToDuration(interval)
+	if !ok || tf <= 0 {
+		return time.Time{}
+	}
+
+	lastOpen := candles[len(candles)-1].Time
+	if lastOpen.IsZero() {
+		return time.Time{}
+	}
+
+	return lastOpen.Add(tf * 2)
+}
+
+func intervalToDuration(interval string) (time.Duration, bool) {
+	switch interval {
+	case "15m":
+		return 15 * time.Minute, true
+	case "1h":
+		return time.Hour, true
+	case "4h":
+		return 4 * time.Hour, true
+	default:
+		return 0, false
+	}
 }

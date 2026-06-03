@@ -14,6 +14,16 @@ import (
 
 type PlaybookQuantEngineUsecase struct{}
 
+type preparedQuantContext struct {
+	m15Closed         []dto.Candle
+	h1Closed          []dto.Candle
+	h4Closed          []dto.Candle
+	technicalSnapshot TechnicalSnapshot
+	structureSnapshot StructureSnapshot
+	h4Trend           string
+	h1Trend           string
+}
+
 func NewPlaybookQuantEngineUsecase() *PlaybookQuantEngineUsecase {
 	return &PlaybookQuantEngineUsecase{}
 }
@@ -40,12 +50,8 @@ func (uc *PlaybookQuantEngineUsecase) RunEngine(
 	data MarketData,
 	policy MarketPolicy,
 ) QuantResult {
-	// Filter to strictly closed candles for indicators (excluding open candle at index len-1)
-	m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
-	h1Closed := GetClosedCandlesOnly(data.H1Candles, time.Hour)
-	h4Closed := GetClosedCandlesOnly(data.H4Candles, 4*time.Hour)
-
-	if len(m15Closed) < 14 {
+	prepared, ok := uc.prepareContext(data)
+	if !ok {
 		return QuantResult{
 			Symbol:       data.Symbol,
 			Direction:    WAIT,
@@ -55,19 +61,28 @@ func (uc *PlaybookQuantEngineUsecase) RunEngine(
 		}
 	}
 
+	return uc.RunEngineWithPreparedContext(playbook, direction, data, policy, prepared)
+}
+
+func (uc *PlaybookQuantEngineUsecase) RunEngineWithPreparedContext(
+	playbook Playbook,
+	direction Direction,
+	data MarketData,
+	policy MarketPolicy,
+	prepared preparedQuantContext,
+) QuantResult {
+	m15Closed := prepared.m15Closed
+	techSnap := cloneTechnicalSnapshot(prepared.technicalSnapshot)
+	structSnap := cloneStructureSnapshot(prepared.structureSnapshot)
+
 	// Save M15 raw klines (last 30 closed candles)
 	uc.saveM15RawKlines(data.Symbol, m15Closed)
 
 	lastM15 := m15Closed[len(m15Closed)-1]
 	triggerPrice := lastM15.Close
 
-	// Build snapshots using PopulateSnapshots helper
-	techSnapPtr, structSnapPtr := PopulateSnapshots(data.M15Candles, data.H1Candles, data.H4Candles, data.FundingRate, data.LatestPrice, data.PriceChange24h, data.OpenInterestM15, data.OIChangePct)
-	techSnap := *techSnapPtr
-	structSnap := *structSnapPtr
-
-	h4Trend := CalculateH4Trend(h4Closed, 200)
-	h1Trend := CalculateH4Trend(h1Closed, 50)
+	h4Trend := prepared.h4Trend
+	h1Trend := prepared.h1Trend
 
 	// Build default result values
 	res := QuantResult{
@@ -217,6 +232,7 @@ func (uc *PlaybookQuantEngineUsecase) RunEngine(
 			techSnap.IndicatorValues[IndicatorBreakoutLevel] = level
 			techSnap.IndicatorValues[IndicatorRetestTouches] = retestTouches
 			techSnap.IndicatorValues[IndicatorRetestHold] = retestHold
+			res.TechnicalSnapshot = techSnap
 		}
 
 	case RANGE_EDGE_REVERSAL:
@@ -340,6 +356,59 @@ func (uc *PlaybookQuantEngineUsecase) RunEngine(
 	res.TradePlan = tp
 
 	return res
+}
+
+func (uc *PlaybookQuantEngineUsecase) prepareContext(data MarketData) (preparedQuantContext, bool) {
+	m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
+	h1Closed := GetClosedCandlesOnly(data.H1Candles, time.Hour)
+	h4Closed := GetClosedCandlesOnly(data.H4Candles, 4*time.Hour)
+
+	if len(m15Closed) < 14 {
+		return preparedQuantContext{}, false
+	}
+
+	techSnapPtr, structSnapPtr, h4Trend, h1Trend := populateSnapshotsFromClosedCandles(
+		m15Closed,
+		h1Closed,
+		h4Closed,
+		data.FundingRate,
+		data.LatestPrice,
+		data.PriceChange24h,
+		data.OpenInterestM15,
+		data.OIChangePct,
+	)
+
+	return preparedQuantContext{
+		m15Closed:         m15Closed,
+		h1Closed:          h1Closed,
+		h4Closed:          h4Closed,
+		technicalSnapshot: *techSnapPtr,
+		structureSnapshot: *structSnapPtr,
+		h4Trend:           h4Trend,
+		h1Trend:           h1Trend,
+	}, true
+}
+
+func cloneTechnicalSnapshot(snapshot TechnicalSnapshot) TechnicalSnapshot {
+	cloned := snapshot
+	if snapshot.IndicatorValues != nil {
+		cloned.IndicatorValues = make(map[string]float64, len(snapshot.IndicatorValues))
+		for key, value := range snapshot.IndicatorValues {
+			cloned.IndicatorValues[key] = value
+		}
+	}
+	return cloned
+}
+
+func cloneStructureSnapshot(snapshot StructureSnapshot) StructureSnapshot {
+	cloned := snapshot
+	if snapshot.Highs != nil {
+		cloned.Highs = append([]float64(nil), snapshot.Highs...)
+	}
+	if snapshot.Lows != nil {
+		cloned.Lows = append([]float64(nil), snapshot.Lows...)
+	}
+	return cloned
 }
 
 func (uc *PlaybookQuantEngineUsecase) saveM15RawKlines(symbol string, candles []dto.Candle) {

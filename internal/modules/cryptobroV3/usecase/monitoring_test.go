@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,9 +12,10 @@ import (
 )
 
 type mockStorageRepo struct {
-	journal []usecase.SignalJournal
-	watch   []usecase.WatchJournal
-	saved   bool
+	journal   []usecase.SignalJournal
+	watch     []usecase.WatchJournal
+	saved     bool
+	saveCount int
 }
 
 func (m *mockStorageRepo) LoadLatestResult() (*entity.LatestResult, error) { return nil, nil }
@@ -39,12 +41,14 @@ func (m *mockStorageRepo) LoadSignalJournal() ([]usecase.SignalJournal, error) {
 func (m *mockStorageRepo) SaveSignalJournal(journal []usecase.SignalJournal) error {
 	m.journal = journal
 	m.saved = true
+	m.saveCount++
 	return nil
 }
 
 func (m *mockStorageRepo) AppendSignalJournal(entry usecase.SignalJournal) error {
 	m.journal = append(m.journal, entry)
 	m.saved = true
+	m.saveCount++
 	return nil
 }
 
@@ -55,22 +59,65 @@ func (m *mockStorageRepo) LoadWatchJournal() ([]usecase.WatchJournal, error) {
 func (m *mockStorageRepo) SaveWatchJournal(journal []usecase.WatchJournal) error {
 	m.watch = journal
 	m.saved = true
+	m.saveCount++
 	return nil
 }
 
 func (m *mockStorageRepo) AppendWatchJournal(entry usecase.WatchJournal) error {
 	m.watch = append(m.watch, entry)
 	m.saved = true
+	m.saveCount++
+	return nil
+}
+
+func (m *mockStorageRepo) UpsertSignalJournalEntries(entries []usecase.SignalJournal) error {
+	indexByID := make(map[string]int, len(m.journal))
+	for i, entry := range m.journal {
+		indexByID[entry.ID] = i
+	}
+	for _, entry := range entries {
+		if idx, ok := indexByID[entry.ID]; ok {
+			m.journal[idx] = entry
+			continue
+		}
+		indexByID[entry.ID] = len(m.journal)
+		m.journal = append(m.journal, entry)
+	}
+	m.saved = true
+	m.saveCount++
+	return nil
+}
+
+func (m *mockStorageRepo) UpsertWatchJournalEntries(entries []usecase.WatchJournal) error {
+	indexByID := make(map[string]int, len(m.watch))
+	for i, entry := range m.watch {
+		indexByID[entry.ID] = i
+	}
+	for _, entry := range entries {
+		if idx, ok := indexByID[entry.ID]; ok {
+			m.watch[idx] = entry
+			continue
+		}
+		indexByID[entry.ID] = len(m.watch)
+		m.watch = append(m.watch, entry)
+	}
+	m.saved = true
+	m.saveCount++
 	return nil
 }
 
 type mockMarketDataProvider struct {
-	candles []dto.Candle
-	price   float64
+	mu               sync.Mutex
+	candles          []dto.Candle
+	price            float64
+	fetchClosedCalls int
 }
 
 func (m *mockMarketDataProvider) FetchClosedCandles(ctx context.Context, symbol string, interval string, limit int) ([]dto.Candle, error) {
-	return m.candles, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.fetchClosedCalls++
+	return append([]dto.Candle(nil), m.candles...), nil
 }
 
 func (m *mockMarketDataProvider) FetchLatestPrice(ctx context.Context, symbol string) (float64, error) {
@@ -91,6 +138,31 @@ func (m *mockMarketDataProvider) FetchOpenInterest(ctx context.Context, symbol s
 
 func (m *mockMarketDataProvider) FetchHistoricalCandles(ctx context.Context, symbol string, interval string, startTime time.Time, endTime time.Time) ([]dto.Candle, error) {
 	return m.candles, nil
+}
+
+type mockMonitoringLatestPriceFeed struct {
+	synced []string
+	prices map[string]struct {
+		price float64
+		at    time.Time
+		ok    bool
+	}
+}
+
+func (m *mockMonitoringLatestPriceFeed) SyncSymbols(symbols []string) error {
+	m.synced = append([]string(nil), symbols...)
+	return nil
+}
+
+func (m *mockMonitoringLatestPriceFeed) GetLatestPrice(symbol string) (float64, time.Time, bool) {
+	if m == nil || m.prices == nil {
+		return 0, time.Time{}, false
+	}
+	entry, ok := m.prices[symbol]
+	if !ok {
+		return 0, time.Time{}, false
+	}
+	return entry.price, entry.at, entry.ok
 }
 
 func TestMonitoring_MonitorVirtualPositions_SLHit(t *testing.T) {
@@ -315,5 +387,189 @@ func TestMonitoring_MonitorVirtualWatchPositions_TP1Hit(t *testing.T) {
 	signalJournal, _ := storage.LoadSignalJournal()
 	if len(signalJournal) != 0 {
 		t.Fatalf("expected signal journal to remain untouched, got %d rows", len(signalJournal))
+	}
+}
+
+func TestMonitoring_MonitorVirtualPositions_SyncsActiveSymbolsAndUsesRealtimeFeed(t *testing.T) {
+	now := time.Now()
+	repo := &mockStorageRepo{
+		journal: []usecase.SignalJournal{
+			{
+				ID:         "active_execute",
+				Symbol:     "BTCUSDT",
+				Direction:  usecase.LONG,
+				EntryPrice: 100.0,
+				StopLoss:   95.0,
+				TP1:        105.0,
+				TP2:        110.0,
+				CreatedAt:  now.Add(-10 * time.Minute),
+				ExpiresAt:  now.Add(110 * time.Minute),
+				Status:     usecase.MONITORING,
+			},
+			{
+				ID:         "inactive_execute",
+				Symbol:     "SOLUSDT",
+				Direction:  usecase.LONG,
+				EntryPrice: 50.0,
+				StopLoss:   45.0,
+				TP1:        55.0,
+				TP2:        60.0,
+				CreatedAt:  now.Add(-2 * time.Hour),
+				ExpiresAt:  now.Add(-time.Minute),
+				Status:     usecase.EXPIRED,
+			},
+		},
+		watch: []usecase.WatchJournal{
+			{
+				ID:         "active_watch",
+				Symbol:     "ETHUSDT",
+				Direction:  usecase.SHORT,
+				EntryPrice: 200.0,
+				StopLoss:   210.0,
+				TP1:        190.0,
+				TP2:        185.0,
+				CreatedAt:  now.Add(-5 * time.Minute),
+				ExpiresAt:  now.Add(115 * time.Minute),
+				Status:     usecase.WATCH_MONITORING,
+			},
+		},
+	}
+	storage := usecase.NewStorageUsecase(repo)
+	provider := &mockMarketDataProvider{price: 88.0}
+	feed := &mockMonitoringLatestPriceFeed{
+		prices: map[string]struct {
+			price float64
+			at    time.Time
+			ok    bool
+		}{
+			"BTCUSDT": {price: 101.5, at: now, ok: true},
+			"ETHUSDT": {price: 198.25, at: now, ok: true},
+		},
+	}
+
+	monitor := usecase.NewMonitoringUsecase(provider, storage)
+	monitor.SetLatestPriceFeed(feed)
+
+	if err := monitor.MonitorVirtualPositions(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(feed.synced) != 2 || feed.synced[0] != "BTCUSDT" || feed.synced[1] != "ETHUSDT" {
+		t.Fatalf("unexpected synced symbols: %#v", feed.synced)
+	}
+
+	signalJournal, _ := storage.LoadSignalJournal()
+	if signalJournal[0].LatestPrice != 101.5 {
+		t.Fatalf("expected realtime latest price for execute journal, got %v", signalJournal[0].LatestPrice)
+	}
+
+	watchJournal, _ := storage.LoadWatchJournal()
+	if watchJournal[0].LatestPrice != 198.25 {
+		t.Fatalf("expected realtime latest price for watch journal, got %v", watchJournal[0].LatestPrice)
+	}
+}
+
+func TestMonitoring_MonitorVirtualPositions_ReusesClosedCandleCacheWithinSameM15Window(t *testing.T) {
+	now := time.Now().UTC()
+	lastClosedOpen := now.Truncate(15 * time.Minute).Add(-15 * time.Minute)
+
+	repo := &mockStorageRepo{
+		journal: []usecase.SignalJournal{
+			{
+				ID:         "cached_execute",
+				Symbol:     "BTCUSDT",
+				Direction:  usecase.LONG,
+				EntryPrice: 100.0,
+				StopLoss:   95.0,
+				TP1:        105.0,
+				TP2:        110.0,
+				CreatedAt:  now.Add(-10 * time.Minute),
+				ExpiresAt:  now.Add(110 * time.Minute),
+				Status:     usecase.MONITORING,
+			},
+		},
+	}
+	storage := usecase.NewStorageUsecase(repo)
+	provider := &mockMarketDataProvider{
+		price: 100.5,
+		candles: []dto.Candle{
+			{
+				Time:  lastClosedOpen,
+				Open:  100.0,
+				High:  101.0,
+				Low:   99.0,
+				Close: 100.5,
+			},
+		},
+	}
+
+	monitor := usecase.NewMonitoringUsecase(provider, storage)
+	if err := monitor.MonitorVirtualPositions(context.Background()); err != nil {
+		t.Fatalf("unexpected error on first run: %v", err)
+	}
+	if err := monitor.MonitorVirtualPositions(context.Background()); err != nil {
+		t.Fatalf("unexpected error on second run: %v", err)
+	}
+
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	if provider.fetchClosedCalls != 1 {
+		t.Fatalf("expected closed candles fetched once within same M15 window, got %d", provider.fetchClosedCalls)
+	}
+}
+
+func TestMonitoring_MonitorVirtualPositions_DoesNotPersistWhenNothingChanged(t *testing.T) {
+	now := time.Now().UTC()
+	lastClosedOpen := now.Truncate(15 * time.Minute).Add(-15 * time.Minute)
+
+	repo := &mockStorageRepo{
+		journal: []usecase.SignalJournal{
+			{
+				ID:          "stable_execute",
+				Symbol:      "BTCUSDT",
+				Direction:   usecase.LONG,
+				EntryPrice:  100.0,
+				StopLoss:    95.0,
+				TP1:         105.0,
+				TP2:         110.0,
+				CreatedAt:   now.Add(-10 * time.Minute),
+				ExpiresAt:   now.Add(110 * time.Minute),
+				Status:      usecase.MONITORING,
+				LatestPrice: 100.0,
+			},
+		},
+	}
+	storage := usecase.NewStorageUsecase(repo)
+	provider := &mockMarketDataProvider{
+		price: 100.0,
+		candles: []dto.Candle{
+			{
+				Time:  lastClosedOpen,
+				Open:  100.0,
+				High:  100.0,
+				Low:   100.0,
+				Close: 100.0,
+			},
+		},
+	}
+	feed := &mockMonitoringLatestPriceFeed{
+		prices: map[string]struct {
+			price float64
+			at    time.Time
+			ok    bool
+		}{
+			"BTCUSDT": {price: 100.0, at: now, ok: true},
+		},
+	}
+
+	monitor := usecase.NewMonitoringUsecase(provider, storage)
+	monitor.SetLatestPriceFeed(feed)
+
+	if err := monitor.MonitorVirtualPositions(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if repo.saveCount != 0 {
+		t.Fatalf("expected no persistence write for unchanged monitoring state, got %d writes", repo.saveCount)
 	}
 }

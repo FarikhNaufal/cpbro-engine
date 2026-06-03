@@ -57,6 +57,12 @@ type BinanceConfig struct {
 	RequestTimeoutSeconds int    `json:"request_timeout_seconds"`
 	MaxRetry              int    `json:"max_retry"`
 	RetryBackoffMs        int    `json:"retry_backoff_ms"`
+	WebsocketEnabled      bool   `json:"websocket_enabled"`
+	WebsocketBaseURL      string `json:"websocket_base_url"`
+	WSMaxActiveSymbols    int    `json:"ws_max_active_symbols"`
+	WSReconnectSeconds    int    `json:"ws_reconnect_seconds"`
+	WSStalePriceSeconds   int    `json:"ws_stale_price_seconds"`
+	WSForceRestartHours   int    `json:"ws_force_restart_hours"`
 }
 
 // GeminiConfig API settings for Gemini AI Candles auditor
@@ -224,6 +230,12 @@ func LoadConfigFromEnv() (*Config, error) {
 			RequestTimeoutSeconds: getEnvInt("BINANCE_REQUEST_TIMEOUT_SECONDS", 15),
 			MaxRetry:              getEnvInt("BINANCE_MAX_RETRY", 2),
 			RetryBackoffMs:        getEnvInt("BINANCE_RETRY_BACKOFF_MS", 300),
+			WebsocketEnabled:      getEnvBool("BINANCE_WS_ENABLED", false),
+			WebsocketBaseURL:      getEnv("BINANCE_WS_BASE_URL", "wss://fstream.binance.com"),
+			WSMaxActiveSymbols:    getEnvInt("BINANCE_WS_MAX_ACTIVE_SYMBOLS", 50),
+			WSReconnectSeconds:    getEnvInt("BINANCE_WS_RECONNECT_SECONDS", 5),
+			WSStalePriceSeconds:   getEnvInt("BINANCE_WS_STALE_PRICE_SECONDS", 15),
+			WSForceRestartHours:   getEnvInt("BINANCE_WS_FORCE_RESTART_HOURS", 23),
 		},
 		Gemini: GeminiConfig{
 			APIKey:                getEnv("GEMINI_API_KEY", ""),
@@ -352,6 +364,23 @@ func ValidateConfig(cfg *Config) error {
 	if cfg.Binance.RequestTimeoutSeconds <= 0 {
 		return fmt.Errorf("BINANCE_REQUEST_TIMEOUT_SECONDS must be greater than zero")
 	}
+	if cfg.Binance.WebsocketEnabled {
+		if strings.TrimSpace(cfg.Binance.WebsocketBaseURL) == "" {
+			return fmt.Errorf("BINANCE_WS_BASE_URL cannot be empty when BINANCE_WS_ENABLED=true")
+		}
+		if cfg.Binance.WSMaxActiveSymbols < 1 {
+			return fmt.Errorf("BINANCE_WS_MAX_ACTIVE_SYMBOLS must be at least 1")
+		}
+		if cfg.Binance.WSReconnectSeconds < 1 {
+			return fmt.Errorf("BINANCE_WS_RECONNECT_SECONDS must be at least 1")
+		}
+		if cfg.Binance.WSStalePriceSeconds < 1 {
+			return fmt.Errorf("BINANCE_WS_STALE_PRICE_SECONDS must be at least 1")
+		}
+		if cfg.Binance.WSForceRestartHours < 1 {
+			return fmt.Errorf("BINANCE_WS_FORCE_RESTART_HOURS must be at least 1")
+		}
+	}
 	if cfg.Gemini.RequestTimeoutSeconds <= 0 {
 		return fmt.Errorf("GEMINI_REQUEST_TIMEOUT_SECONDS must be greater than zero")
 	}
@@ -460,6 +489,12 @@ func SafeConfigView(cfg *Config) map[string]any {
 			"max_retry":               cfg.Binance.MaxRetry,
 			"retry_backoff_ms":        cfg.Binance.RetryBackoffMs,
 			"api_key_set":             cfg.Binance.APIKey != "",
+			"websocket_enabled":       cfg.Binance.WebsocketEnabled,
+			"websocket_base_url":      cfg.Binance.WebsocketBaseURL,
+			"ws_max_active_symbols":   cfg.Binance.WSMaxActiveSymbols,
+			"ws_reconnect_seconds":    cfg.Binance.WSReconnectSeconds,
+			"ws_stale_price_seconds":  cfg.Binance.WSStalePriceSeconds,
+			"ws_force_restart_hours":  cfg.Binance.WSForceRestartHours,
 		},
 		"gemini": map[string]any{
 			"model":                   cfg.Gemini.Model,

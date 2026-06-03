@@ -171,6 +171,50 @@ func TestCandidateArbiter_RiskOff_AllowsRangeEdgeReversalLongWhenPolicyAllows(t 
 	}
 }
 
+func TestCandidateArbiter_ChopPrefersRangeEdgeOverSweepOnNearTie(t *testing.T) {
+	arbiter := NewCandidateArbiterUsecase()
+
+	policy := MarketPolicy{
+		Regime:       CHOP_RANGE,
+		AllowLong:    true,
+		AllowShort:   true,
+		AllowedTiers: []Tier{TierA, TierB, TierC},
+		AllowedPlaybooks: []Playbook{
+			LIQUIDITY_SWEEP_REVERSAL,
+			RANGE_EDGE_REVERSAL,
+		},
+		Reason: "CHOP_RANGE active - mean reversion only",
+	}
+
+	candidates := []QuantResult{
+		{
+			Symbol:    "ARBUSDT",
+			Direction: LONG,
+			Playbook:  LIQUIDITY_SWEEP_REVERSAL,
+			Score:     7.55,
+			Tier:      TierA,
+		},
+		{
+			Symbol:    "ARBUSDT",
+			Direction: LONG,
+			Playbook:  RANGE_EDGE_REVERSAL,
+			Score:     7.5,
+			Tier:      TierA,
+		},
+	}
+
+	selected, rejected := arbiter.Arbitrate(candidates, policy)
+	if len(selected) != 1 {
+		t.Fatalf("Expected 1 selected candidate, got %d", len(selected))
+	}
+	if selected[0].Playbook != RANGE_EDGE_REVERSAL {
+		t.Fatalf("Expected RANGE_EDGE_REVERSAL to win the CHOP near-tie, got %s", selected[0].Playbook)
+	}
+	if len(rejected) != 1 {
+		t.Fatalf("Expected 1 rejected candidate, got %d", len(rejected))
+	}
+}
+
 func TestCandidateArbiter_NaNSafetyGuard(t *testing.T) {
 	arbiter := NewCandidateArbiterUsecase()
 

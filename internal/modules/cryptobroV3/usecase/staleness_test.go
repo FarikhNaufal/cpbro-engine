@@ -1,11 +1,60 @@
 package usecase
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 )
+
+type mockLatestPriceFeed struct {
+	symbols []string
+	prices  map[string]struct {
+		price float64
+		at    time.Time
+		ok    bool
+	}
+}
+
+func (m *mockLatestPriceFeed) SyncSymbols(symbols []string) error {
+	m.symbols = symbols
+	return nil
+}
+
+func (m *mockLatestPriceFeed) GetLatestPrice(symbol string) (float64, time.Time, bool) {
+	if m == nil || m.prices == nil {
+		return 0, time.Time{}, false
+	}
+	entry, ok := m.prices[symbol]
+	if !ok {
+		return 0, time.Time{}, false
+	}
+	return entry.price, entry.at, entry.ok
+}
+
+type mockLatestPriceFallbackProvider struct {
+	price float64
+}
+
+func (m *mockLatestPriceFallbackProvider) FetchClosedCandles(ctx context.Context, symbol string, interval string, limit int) ([]dto.Candle, error) {
+	return nil, nil
+}
+func (m *mockLatestPriceFallbackProvider) FetchLatestPrice(ctx context.Context, symbol string) (float64, error) {
+	return m.price, nil
+}
+func (m *mockLatestPriceFallbackProvider) FetchAllFuturesTickers24h(ctx context.Context) ([]dto.Ticker24h, error) {
+	return nil, nil
+}
+func (m *mockLatestPriceFallbackProvider) FetchPremiumFundingRates(ctx context.Context) (map[string]float64, error) {
+	return nil, nil
+}
+func (m *mockLatestPriceFallbackProvider) FetchOpenInterest(ctx context.Context, symbol string) (float64, error) {
+	return 0, nil
+}
+func (m *mockLatestPriceFallbackProvider) FetchHistoricalCandles(ctx context.Context, symbol string, interval string, startTime time.Time, endTime time.Time) ([]dto.Candle, error) {
+	return nil, nil
+}
 
 func TestStalenessCheck_Evaluate(t *testing.T) {
 	uc := NewStalenessUsecase(15 * time.Minute)
@@ -181,5 +230,39 @@ func TestStalenessCheck_IsFreshAtSupportsHistoricalBacktestClock(t *testing.T) {
 	staleNow := now.Add(45 * time.Minute)
 	if uc.IsFreshAt(candles, staleNow, 15*time.Minute) {
 		t.Fatalf("expected historical candle gap to be stale")
+	}
+}
+
+func TestStalenessCheck_ResolveLatestPricePrefersFeedThenFallbackProvider(t *testing.T) {
+	uc := NewStalenessUsecase(30 * time.Minute)
+	feed := &mockLatestPriceFeed{
+		prices: map[string]struct {
+			price float64
+			at    time.Time
+			ok    bool
+		}{
+			"BTCUSDT": {price: 101.25, at: time.Now(), ok: true},
+		},
+	}
+	uc.SetLatestPriceFeed(feed)
+	uc.SetFallbackProvider(&mockLatestPriceFallbackProvider{price: 99.75})
+
+	got, ok := uc.ResolveLatestPrice(context.Background(), "BTCUSDT")
+	if !ok || got != 101.25 {
+		t.Fatalf("expected realtime feed price, got %v ok=%v", got, ok)
+	}
+
+	got, ok = uc.ResolveLatestPrice(context.Background(), "ETHUSDT")
+	if !ok || got != 99.75 {
+		t.Fatalf("expected fallback provider price, got %v ok=%v", got, ok)
+	}
+}
+
+func TestStalenessCheck_ResolveLatestPriceRejectsStaleFallbacks(t *testing.T) {
+	uc := NewStalenessUsecase(30 * time.Minute)
+
+	got, ok := uc.ResolveLatestPrice(context.Background(), "BTCUSDT")
+	if ok || got != 0 {
+		t.Fatalf("expected unavailable latest price, got %v ok=%v", got, ok)
 	}
 }

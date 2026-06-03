@@ -19,6 +19,17 @@ type TelegramPingable interface {
 	Ping(ctx context.Context) error
 }
 
+type RealtimePriceStatus struct {
+	Enabled         bool      `json:"enabled"`
+	Connected       bool      `json:"connected"`
+	ActiveSymbols   int       `json:"active_symbols"`
+	LastMessageTime time.Time `json:"last_message_time"`
+}
+
+type RealtimeStatusProvider interface {
+	RealtimeStatus() RealtimePriceStatus
+}
+
 // Global atomic variables for worker running statuses
 var (
 	ScanWorkerRunning       atomic.Bool
@@ -27,26 +38,34 @@ var (
 )
 
 type HealthStatus struct {
-	Status                   string      `json:"status"`
-	Mode                     string      `json:"mode"`
-	BinanceConnectivity      string      `json:"binance_connectivity"`
-	GeminiAvailability       string      `json:"gemini_availability"`
-	TelegramAvailability     string      `json:"telegram_availability,omitempty"`
-	StorageWritable          string      `json:"storage_writable"`
-	LastScanTime             time.Time   `json:"last_scan_time"`
-	LastScanAgeSec           float64     `json:"last_scan_age_seconds"`
-	LastSuccessfulScan       time.Time   `json:"last_successful_scan"`
-	LastSuccessfulScanAgeSec float64     `json:"last_successful_scan_age_seconds"`
-	LastEvaluationTime       time.Time   `json:"last_evaluation_time"`
-	LastEvaluationAgeSec     float64     `json:"last_evaluation_age_seconds"`
-	ScanWorkerRunning        bool        `json:"scan_worker_running"`
-	MonitoringWorkerRunning  bool        `json:"monitoring_worker_running"`
-	EvaluationWorkerRunning  bool        `json:"evaluation_worker_running"`
-	Metrics                  *SREMetrics `json:"metrics"`
+	Status                   string              `json:"status"`
+	Mode                     string              `json:"mode"`
+	BinanceConnectivity      string              `json:"binance_connectivity"`
+	GeminiAvailability       string              `json:"gemini_availability"`
+	TelegramAvailability     string              `json:"telegram_availability,omitempty"`
+	StorageWritable          string              `json:"storage_writable"`
+	LastScanTime             time.Time           `json:"last_scan_time"`
+	LastScanAgeSec           float64             `json:"last_scan_age_seconds"`
+	LastSuccessfulScan       time.Time           `json:"last_successful_scan"`
+	LastSuccessfulScanAgeSec float64             `json:"last_successful_scan_age_seconds"`
+	LastEvaluationTime       time.Time           `json:"last_evaluation_time"`
+	LastEvaluationAgeSec     float64             `json:"last_evaluation_age_seconds"`
+	ScanWorkerRunning        bool                `json:"scan_worker_running"`
+	MonitoringWorkerRunning  bool                `json:"monitoring_worker_running"`
+	EvaluationWorkerRunning  bool                `json:"evaluation_worker_running"`
+	Metrics                  *SREMetrics         `json:"metrics"`
+	RealtimePrice            RealtimePriceStatus `json:"realtime_price"`
 }
 
 type SREMetrics struct {
 	ScanDurationMs         uint64  `json:"scan_duration_ms"`
+	MarketDataDurationMs   uint64  `json:"market_data_duration_ms"`
+	CandidatePipelineMs    uint64  `json:"candidate_pipeline_duration_ms"`
+	AIBatchDurationMs      uint64  `json:"ai_batch_duration_ms"`
+	FinalGateDurationMs    uint64  `json:"final_gate_duration_ms"`
+	EstimatedRequestWeight uint64  `json:"estimated_request_weight"`
+	PrefetchCandidateCount uint64  `json:"prefetch_candidate_count"`
+	EnrichedCandidateCount uint64  `json:"enriched_candidate_count"`
 	ScanSuccessCount       uint64  `json:"scan_success_count"`
 	ScanFailCount          uint64  `json:"scan_fail_count"`
 	TotalTickers           uint64  `json:"total_tickers"`
@@ -71,10 +90,11 @@ type SREMetrics struct {
 }
 
 type ObservabilityUsecase struct {
-	provider   MarketDataProvider
-	aiService  AIAuditorService
-	notifier   any
-	storageDir string
+	provider          MarketDataProvider
+	aiService         AIAuditorService
+	notifier          any
+	storageDir        string
+	realtimeStatusSrc RealtimeStatusProvider
 }
 
 func NewObservabilityUsecase(
@@ -89,6 +109,13 @@ func NewObservabilityUsecase(
 		notifier:   notifier,
 		storageDir: storageDir,
 	}
+}
+
+func (uc *ObservabilityUsecase) SetRealtimeStatusProvider(provider RealtimeStatusProvider) {
+	if uc == nil {
+		return
+	}
+	uc.realtimeStatusSrc = provider
 }
 
 // PerformHealthAudit executes end-to-end connectivity and SRE checks, returns health snapshot and saves it atomically.
@@ -174,6 +201,13 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 
 	metrics := &SREMetrics{
 		ScanDurationMs:         atomic.LoadUint64(&reg.LastScanDurationMs),
+		MarketDataDurationMs:   atomic.LoadUint64(&reg.LastMarketDataMs),
+		CandidatePipelineMs:    atomic.LoadUint64(&reg.LastCandidateMs),
+		AIBatchDurationMs:      atomic.LoadUint64(&reg.LastAIBatchMs),
+		FinalGateDurationMs:    atomic.LoadUint64(&reg.LastFinalGateMs),
+		EstimatedRequestWeight: atomic.LoadUint64(&reg.LastRequestWeight),
+		PrefetchCandidateCount: atomic.LoadUint64(&reg.LastPrefetchCount),
+		EnrichedCandidateCount: atomic.LoadUint64(&reg.LastEnrichedCount),
 		ScanSuccessCount:       atomic.LoadUint64(&reg.ScanSuccessCount),
 		ScanFailCount:          atomic.LoadUint64(&reg.ScanFailCount),
 		TotalTickers:           atomic.LoadUint64(&reg.TotalTickers),
@@ -214,6 +248,9 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 		MonitoringWorkerRunning:  MonitoringWorkerRunning.Load(),
 		EvaluationWorkerRunning:  EvaluationWorkerRunning.Load(),
 		Metrics:                  metrics,
+	}
+	if uc.realtimeStatusSrc != nil {
+		status.RealtimePrice = uc.realtimeStatusSrc.RealtimeStatus()
 	}
 
 	// 7. Save Snapshot to File Atomically

@@ -399,6 +399,7 @@ func TestScannerUsecase_Run(t *testing.T) {
 	aiAuditorUC := NewAIAuditorUsecase(mockAI, storageUC)
 	planReconciliationUC := NewPlanReconciliationUsecase()
 	stalenessUC := NewStalenessUsecase(30 * time.Minute)
+	stalenessUC.SetFallbackProvider(mockProvider)
 	finalGateUC := NewFinalGateUsecase()
 	conflictResolverUC := NewConflictResolverUsecase()
 	signalNotificationUC := NewSignalNotificationUsecase(mockNotify, storageUC)
@@ -586,6 +587,7 @@ func TestScannerUsecase_Run_AIWait_And_AIReject(t *testing.T) {
 	aiAuditorUC := NewAIAuditorUsecase(mockAI, storageUC)
 	planReconciliationUC := NewPlanReconciliationUsecase()
 	stalenessUC := NewStalenessUsecase(30 * time.Minute)
+	stalenessUC.SetFallbackProvider(mockProvider)
 	finalGateUC := NewFinalGateUsecase()
 	conflictResolverUC := NewConflictResolverUsecase()
 	signalNotificationUC := NewSignalNotificationUsecase(mockNotify, storageUC)
@@ -853,5 +855,60 @@ func TestArbiterRejectedSummaryFormattingAndDeduplication(t *testing.T) {
 	}
 	if rejectedSummary[2] != expected2 {
 		t.Errorf("expected: %q, got: %q", expected2, rejectedSummary[2])
+	}
+}
+
+func TestResolveMarketDataPrefetchLimit_DefaultUsesAllCandidates(t *testing.T) {
+	t.Setenv("MAX_MARKETDATA_PREFETCH_SYMBOLS", "")
+	limit := resolveMarketDataPrefetchLimit(MarketPolicy{
+		Regime:          DEFAULT,
+		MaxSymbols:      50,
+		MaxAICandidates: 3,
+		MaxFinalExecute: 5,
+	}, 42)
+	if limit != 18 {
+		t.Fatalf("expected dynamic default prefetch limit 18, got %d", limit)
+	}
+}
+
+func TestResolveMarketDataPrefetchLimit_EnvOverride(t *testing.T) {
+	t.Setenv("MAX_MARKETDATA_PREFETCH_SYMBOLS", "12")
+	limit := resolveMarketDataPrefetchLimit(MarketPolicy{MaxSymbols: 50, MaxAICandidates: 3}, 42)
+	if limit != 12 {
+		t.Fatalf("expected env override prefetch limit 12, got %d", limit)
+	}
+}
+
+func TestResolveMarketDataPrefetchLimit_BTCChaosIsTighter(t *testing.T) {
+	t.Setenv("MAX_MARKETDATA_PREFETCH_SYMBOLS", "")
+	limit := resolveMarketDataPrefetchLimit(MarketPolicy{
+		Regime:          BTC_CHAOS,
+		MaxSymbols:      35,
+		MaxAICandidates: 1,
+		MaxFinalExecute: 1,
+	}, 30)
+	if limit != 8 {
+		t.Fatalf("expected BTC_CHAOS prefetch limit 8, got %d", limit)
+	}
+}
+
+func TestResolveMarketDataPrefetchLimit_AltSupportiveAllowsBroaderPrefetch(t *testing.T) {
+	t.Setenv("MAX_MARKETDATA_PREFETCH_SYMBOLS", "")
+	limit := resolveMarketDataPrefetchLimit(MarketPolicy{
+		Regime:          ALT_SUPPORTIVE,
+		MaxSymbols:      75,
+		MaxAICandidates: 3,
+		MaxFinalExecute: 5,
+	}, 40)
+	if limit != 18 {
+		t.Fatalf("expected ALT_SUPPORTIVE prefetch limit 18, got %d", limit)
+	}
+}
+
+func TestEstimateScanRequestWeight(t *testing.T) {
+	weight := estimateScanRequestWeight(20, 8)
+	expected := 40 + 10 + 20 + (8 * 4)
+	if weight != expected {
+		t.Fatalf("expected weight %d, got %d", expected, weight)
 	}
 }

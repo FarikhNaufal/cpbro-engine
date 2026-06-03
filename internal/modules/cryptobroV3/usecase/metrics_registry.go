@@ -14,6 +14,13 @@ type MetricsRegistry struct {
 	ScanSuccessCount   uint64
 	ScanFailCount      uint64
 	LastScanDurationMs uint64
+	LastMarketDataMs   uint64
+	LastCandidateMs    uint64
+	LastAIBatchMs      uint64
+	LastFinalGateMs    uint64
+	LastRequestWeight  uint64
+	LastPrefetchCount  uint64
+	LastEnrichedCount  uint64
 	TotalTickers       uint64
 	UniversePass       uint64
 	UniverseReject     uint64
@@ -73,6 +80,34 @@ func (m *MetricsRegistry) IncrementScanFail() {
 
 func (m *MetricsRegistry) SetLastScanDuration(d time.Duration) {
 	atomic.StoreUint64(&m.LastScanDurationMs, uint64(d.Milliseconds()))
+}
+
+func (m *MetricsRegistry) SetLastMarketDataDuration(d time.Duration) {
+	atomic.StoreUint64(&m.LastMarketDataMs, uint64(d.Milliseconds()))
+}
+
+func (m *MetricsRegistry) SetLastCandidatePipelineDuration(d time.Duration) {
+	atomic.StoreUint64(&m.LastCandidateMs, uint64(d.Milliseconds()))
+}
+
+func (m *MetricsRegistry) SetLastAIBatchDuration(d time.Duration) {
+	atomic.StoreUint64(&m.LastAIBatchMs, uint64(d.Milliseconds()))
+}
+
+func (m *MetricsRegistry) SetLastFinalGateDuration(d time.Duration) {
+	atomic.StoreUint64(&m.LastFinalGateMs, uint64(d.Milliseconds()))
+}
+
+func (m *MetricsRegistry) SetLastScanRequestWeight(weight uint64) {
+	atomic.StoreUint64(&m.LastRequestWeight, weight)
+}
+
+func (m *MetricsRegistry) SetLastPrefetchCandidateCount(count uint64) {
+	atomic.StoreUint64(&m.LastPrefetchCount, count)
+}
+
+func (m *MetricsRegistry) SetLastEnrichedCandidateCount(count uint64) {
+	atomic.StoreUint64(&m.LastEnrichedCount, count)
 }
 
 func (m *MetricsRegistry) AddTotalTickers(val uint64) {
