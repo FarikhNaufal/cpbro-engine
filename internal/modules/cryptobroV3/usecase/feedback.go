@@ -349,8 +349,11 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	var watchTP1Hits, watchTP2Hits, watchSLHits, watchExpiredHits int
 	var watchSumMFE, watchSumMAE, watchTotalPnl float64
 
+	now := time.Now()
 	for _, item := range watchJournal {
-		if item.Status == WATCH_MONITORING {
+		isVirtualExpired := item.Status == VIRTUAL_EXPIRED
+		isVirtualMonitoring := item.Status == WATCH_MONITORING || (item.Status == VIRTUAL_TP1_HIT && now.Before(item.ExpiresAt))
+		if isVirtualMonitoring && !isVirtualExpired {
 			continue
 		}
 		watchFinalized = append(watchFinalized, item)
