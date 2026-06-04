@@ -51,18 +51,20 @@ type EvaluationConfig struct {
 
 // BinanceConfig API settings for read-only connectivity
 type BinanceConfig struct {
-	APIKey                string `json:"-"`
-	APISecret             string `json:"-"`
-	BaseURL               string `json:"base_url"`
-	RequestTimeoutSeconds int    `json:"request_timeout_seconds"`
-	MaxRetry              int    `json:"max_retry"`
-	RetryBackoffMs        int    `json:"retry_backoff_ms"`
-	WebsocketEnabled      bool   `json:"websocket_enabled"`
-	WebsocketBaseURL      string `json:"websocket_base_url"`
-	WSMaxActiveSymbols    int    `json:"ws_max_active_symbols"`
-	WSReconnectSeconds    int    `json:"ws_reconnect_seconds"`
-	WSStalePriceSeconds   int    `json:"ws_stale_price_seconds"`
-	WSForceRestartHours   int    `json:"ws_force_restart_hours"`
+	APIKey                  string `json:"-"`
+	APISecret               string `json:"-"`
+	BaseURL                 string `json:"base_url"`
+	RequestTimeoutSeconds   int    `json:"request_timeout_seconds"`
+	BootstrapTimeoutSeconds int    `json:"bootstrap_timeout_seconds"`
+	BootstrapCacheSeconds   int    `json:"bootstrap_cache_seconds"`
+	MaxRetry                int    `json:"max_retry"`
+	RetryBackoffMs          int    `json:"retry_backoff_ms"`
+	WebsocketEnabled        bool   `json:"websocket_enabled"`
+	WebsocketBaseURL        string `json:"websocket_base_url"`
+	WSMaxActiveSymbols      int    `json:"ws_max_active_symbols"`
+	WSReconnectSeconds      int    `json:"ws_reconnect_seconds"`
+	WSStalePriceSeconds     int    `json:"ws_stale_price_seconds"`
+	WSForceRestartHours     int    `json:"ws_force_restart_hours"`
 }
 
 // GeminiConfig API settings for Gemini AI Candles auditor
@@ -230,18 +232,20 @@ func LoadConfigFromEnv() (*Config, error) {
 			MinSampleHigh:    getEnvInt("EVALUATION_MIN_SAMPLE_HIGH", 50),
 		},
 		Binance: BinanceConfig{
-			APIKey:                getEnv("BINANCE_API_KEY", ""),
-			APISecret:             getEnv("BINANCE_API_SECRET", ""),
-			BaseURL:               getEnv("BINANCE_BASE_URL", "https://fapi.binance.com"),
-			RequestTimeoutSeconds: getEnvInt("BINANCE_REQUEST_TIMEOUT_SECONDS", 15),
-			MaxRetry:              getEnvInt("BINANCE_MAX_RETRY", 2),
-			RetryBackoffMs:        getEnvInt("BINANCE_RETRY_BACKOFF_MS", 300),
-			WebsocketEnabled:      getEnvBool("BINANCE_WS_ENABLED", false),
-			WebsocketBaseURL:      getEnv("BINANCE_WS_BASE_URL", "wss://fstream.binance.com"),
-			WSMaxActiveSymbols:    getEnvInt("BINANCE_WS_MAX_ACTIVE_SYMBOLS", 50),
-			WSReconnectSeconds:    getEnvInt("BINANCE_WS_RECONNECT_SECONDS", 5),
-			WSStalePriceSeconds:   getEnvInt("BINANCE_WS_STALE_PRICE_SECONDS", 15),
-			WSForceRestartHours:   getEnvInt("BINANCE_WS_FORCE_RESTART_HOURS", 23),
+			APIKey:                  getEnv("BINANCE_API_KEY", ""),
+			APISecret:               getEnv("BINANCE_API_SECRET", ""),
+			BaseURL:                 getEnv("BINANCE_BASE_URL", "https://fapi.binance.com"),
+			RequestTimeoutSeconds:   getEnvInt("BINANCE_REQUEST_TIMEOUT_SECONDS", 15),
+			BootstrapTimeoutSeconds: getEnvInt("BINANCE_BOOTSTRAP_TIMEOUT_SECONDS", 20),
+			BootstrapCacheSeconds:   getEnvInt("BINANCE_BOOTSTRAP_CACHE_SECONDS", 30),
+			MaxRetry:                getEnvInt("BINANCE_MAX_RETRY", 2),
+			RetryBackoffMs:          getEnvInt("BINANCE_RETRY_BACKOFF_MS", 300),
+			WebsocketEnabled:        getEnvBool("BINANCE_WS_ENABLED", false),
+			WebsocketBaseURL:        getEnv("BINANCE_WS_BASE_URL", "wss://fstream.binance.com"),
+			WSMaxActiveSymbols:      getEnvInt("BINANCE_WS_MAX_ACTIVE_SYMBOLS", 50),
+			WSReconnectSeconds:      getEnvInt("BINANCE_WS_RECONNECT_SECONDS", 5),
+			WSStalePriceSeconds:     getEnvInt("BINANCE_WS_STALE_PRICE_SECONDS", 15),
+			WSForceRestartHours:     getEnvInt("BINANCE_WS_FORCE_RESTART_HOURS", 23),
 		},
 		Gemini: GeminiConfig{
 			APIKey:                getEnv("GEMINI_API_KEY", ""),
@@ -384,6 +388,12 @@ func ValidateConfig(cfg *Config) error {
 	if cfg.Binance.RequestTimeoutSeconds <= 0 {
 		return fmt.Errorf("BINANCE_REQUEST_TIMEOUT_SECONDS must be greater than zero")
 	}
+	if cfg.Binance.BootstrapTimeoutSeconds <= 0 {
+		return fmt.Errorf("BINANCE_BOOTSTRAP_TIMEOUT_SECONDS must be greater than zero")
+	}
+	if cfg.Binance.BootstrapCacheSeconds <= 0 {
+		return fmt.Errorf("BINANCE_BOOTSTRAP_CACHE_SECONDS must be greater than zero")
+	}
 	if cfg.Binance.WebsocketEnabled {
 		if strings.TrimSpace(cfg.Binance.WebsocketBaseURL) == "" {
 			return fmt.Errorf("BINANCE_WS_BASE_URL cannot be empty when BINANCE_WS_ENABLED=true")
@@ -504,17 +514,19 @@ func SafeConfigView(cfg *Config) map[string]any {
 			"min_sample_high":    cfg.Evaluation.MinSampleHigh,
 		},
 		"binance": map[string]any{
-			"base_url":                cfg.Binance.BaseURL,
-			"request_timeout_seconds": cfg.Binance.RequestTimeoutSeconds,
-			"max_retry":               cfg.Binance.MaxRetry,
-			"retry_backoff_ms":        cfg.Binance.RetryBackoffMs,
-			"api_key_set":             cfg.Binance.APIKey != "",
-			"websocket_enabled":       cfg.Binance.WebsocketEnabled,
-			"websocket_base_url":      cfg.Binance.WebsocketBaseURL,
-			"ws_max_active_symbols":   cfg.Binance.WSMaxActiveSymbols,
-			"ws_reconnect_seconds":    cfg.Binance.WSReconnectSeconds,
-			"ws_stale_price_seconds":  cfg.Binance.WSStalePriceSeconds,
-			"ws_force_restart_hours":  cfg.Binance.WSForceRestartHours,
+			"base_url":                  cfg.Binance.BaseURL,
+			"request_timeout_seconds":   cfg.Binance.RequestTimeoutSeconds,
+			"bootstrap_timeout_seconds": cfg.Binance.BootstrapTimeoutSeconds,
+			"bootstrap_cache_seconds":   cfg.Binance.BootstrapCacheSeconds,
+			"max_retry":                 cfg.Binance.MaxRetry,
+			"retry_backoff_ms":          cfg.Binance.RetryBackoffMs,
+			"api_key_set":               cfg.Binance.APIKey != "",
+			"websocket_enabled":         cfg.Binance.WebsocketEnabled,
+			"websocket_base_url":        cfg.Binance.WebsocketBaseURL,
+			"ws_max_active_symbols":     cfg.Binance.WSMaxActiveSymbols,
+			"ws_reconnect_seconds":      cfg.Binance.WSReconnectSeconds,
+			"ws_stale_price_seconds":    cfg.Binance.WSStalePriceSeconds,
+			"ws_force_restart_hours":    cfg.Binance.WSForceRestartHours,
 		},
 		"gemini": map[string]any{
 			"model":                   cfg.Gemini.Model,

@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,12 @@ type recordingMarketDataProvider struct {
 	mu              sync.Mutex
 	calls           []fetchClosedCall
 	openInterestHit int
+	tickerCalls     int
+	fundingCalls    int
+	tickers         []dto.Ticker24h
+	tickerErr       error
+	funding         map[string]float64
+	fundingErr      error
 }
 
 type fetchClosedCall struct {
@@ -56,11 +63,27 @@ func (p *recordingMarketDataProvider) FetchLatestPrice(ctx context.Context, symb
 }
 
 func (p *recordingMarketDataProvider) FetchAllFuturesTickers24h(ctx context.Context) ([]dto.Ticker24h, error) {
-	return nil, nil
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.tickerCalls++
+	if p.tickerErr != nil {
+		return nil, p.tickerErr
+	}
+	return append([]dto.Ticker24h(nil), p.tickers...), nil
 }
 
 func (p *recordingMarketDataProvider) FetchPremiumFundingRates(ctx context.Context) (map[string]float64, error) {
-	return nil, nil
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.fundingCalls++
+	if p.fundingErr != nil {
+		return nil, p.fundingErr
+	}
+	out := make(map[string]float64, len(p.funding))
+	for k, v := range p.funding {
+		out[k] = v
+	}
+	return out, nil
 }
 
 func (p *recordingMarketDataProvider) FetchOpenInterest(ctx context.Context, symbol string) (float64, error) {
@@ -141,4 +164,56 @@ func TestMarketDataUsecase_EnrichMarketData_ReusesOpenInterestCache(t *testing.T
 	provider.mu.Lock()
 	defer provider.mu.Unlock()
 	require.Equal(t, 1, provider.openInterestHit, "expected open interest to be cached across enrich calls")
+}
+
+func TestMarketDataUsecase_FetchAllFuturesTickers24h_UsesFreshCacheOnFailure(t *testing.T) {
+	provider := &recordingMarketDataProvider{
+		tickers: []dto.Ticker24h{{Symbol: "BTCUSDT", LastPrice: 100000}},
+	}
+	uc := NewMarketDataUsecase(provider, MarketDataUsecaseConfig{
+		BootstrapTimeout: 2 * time.Second,
+		GlobalCacheTTL:   30 * time.Second,
+	})
+
+	first, err := uc.FetchAllFuturesTickers24h(context.Background())
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+
+	provider.mu.Lock()
+	provider.tickerErr = errors.New("timeout")
+	provider.mu.Unlock()
+
+	second, err := uc.FetchAllFuturesTickers24h(context.Background())
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	require.Equal(t, 2, provider.tickerCalls)
+}
+
+func TestMarketDataUsecase_FetchPremiumFundingRates_UsesFreshCacheOnFailure(t *testing.T) {
+	provider := &recordingMarketDataProvider{
+		funding: map[string]float64{"BTCUSDT": 0.001},
+	}
+	uc := NewMarketDataUsecase(provider, MarketDataUsecaseConfig{
+		BootstrapTimeout: 2 * time.Second,
+		GlobalCacheTTL:   30 * time.Second,
+	})
+
+	first, err := uc.FetchPremiumFundingRates(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 0.001, first["BTCUSDT"])
+
+	provider.mu.Lock()
+	provider.fundingErr = errors.New("timeout")
+	provider.mu.Unlock()
+
+	second, err := uc.FetchPremiumFundingRates(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 0.001, second["BTCUSDT"])
+
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+	require.Equal(t, 2, provider.fundingCalls)
 }

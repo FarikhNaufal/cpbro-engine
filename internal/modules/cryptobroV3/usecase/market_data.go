@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -12,6 +13,11 @@ import (
 type MarketDataUsecase struct {
 	provider MarketDataProvider
 
+	bootstrapTimeout time.Duration
+	initialTimeout   time.Duration
+	enrichTimeout    time.Duration
+	globalCacheTTL   time.Duration
+
 	oiMu             sync.Mutex
 	lastOpenInterest map[string]float64
 	oiCacheMu        sync.RWMutex
@@ -19,6 +25,16 @@ type MarketDataUsecase struct {
 
 	candleCacheMu sync.RWMutex
 	candleCache   map[string]cachedClosedCandles
+
+	tickerCacheMu      sync.RWMutex
+	tickerCache        []dto.Ticker24h
+	tickerCacheUntil   time.Time
+	tickerCacheFetched time.Time
+
+	fundingCacheMu      sync.RWMutex
+	fundingCache        map[string]float64
+	fundingCacheUntil   time.Time
+	fundingCacheFetched time.Time
 }
 
 type cachedClosedCandles struct {
@@ -31,29 +47,85 @@ type cachedFloat64 struct {
 	validUntil time.Time
 }
 
-func NewMarketDataUsecase(provider MarketDataProvider) *MarketDataUsecase {
+type MarketDataUsecaseConfig struct {
+	BootstrapTimeout time.Duration
+	InitialTimeout   time.Duration
+	EnrichTimeout    time.Duration
+	GlobalCacheTTL   time.Duration
+}
+
+func NewMarketDataUsecase(provider MarketDataProvider, configs ...MarketDataUsecaseConfig) *MarketDataUsecase {
+	cfg := MarketDataUsecaseConfig{
+		BootstrapTimeout: 20 * time.Second,
+		InitialTimeout:   10 * time.Second,
+		EnrichTimeout:    15 * time.Second,
+		GlobalCacheTTL:   30 * time.Second,
+	}
+	if len(configs) > 0 {
+		in := configs[0]
+		if in.BootstrapTimeout > 0 {
+			cfg.BootstrapTimeout = in.BootstrapTimeout
+		}
+		if in.InitialTimeout > 0 {
+			cfg.InitialTimeout = in.InitialTimeout
+		}
+		if in.EnrichTimeout > 0 {
+			cfg.EnrichTimeout = in.EnrichTimeout
+		}
+		if in.GlobalCacheTTL > 0 {
+			cfg.GlobalCacheTTL = in.GlobalCacheTTL
+		}
+	}
+
 	return &MarketDataUsecase{
 		provider:         provider,
+		bootstrapTimeout: cfg.BootstrapTimeout,
+		initialTimeout:   cfg.InitialTimeout,
+		enrichTimeout:    cfg.EnrichTimeout,
+		globalCacheTTL:   cfg.GlobalCacheTTL,
 		lastOpenInterest: make(map[string]float64),
 		oiCache:          make(map[string]cachedFloat64),
 		candleCache:      make(map[string]cachedClosedCandles),
+		fundingCache:     make(map[string]float64),
 	}
 }
 
 // FetchAllFuturesTickers24h fetches stats for all tickers.
 func (uc *MarketDataUsecase) FetchAllFuturesTickers24h(ctx context.Context) ([]dto.Ticker24h, error) {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(ctx, uc.bootstrapTimeout)
 	defer cancel()
 
-	return uc.provider.FetchAllFuturesTickers24h(timeoutCtx)
+	tickers, err := uc.provider.FetchAllFuturesTickers24h(timeoutCtx)
+	if err == nil {
+		uc.storeTickerCache(tickers, time.Now())
+		return tickers, nil
+	}
+
+	if cached, fetchedAt, ok := uc.loadTickerCache(time.Now()); ok {
+		slog.Warn("Binance futures ticker bootstrap failed; using cached ticker snapshot", "error", err, "cached_count", len(cached), "cache_age_seconds", roundDurationSeconds(time.Since(fetchedAt)))
+		return cached, nil
+	}
+
+	return nil, err
 }
 
 // FetchPremiumFundingRates fetches all active symbols funding rates.
 func (uc *MarketDataUsecase) FetchPremiumFundingRates(ctx context.Context) (map[string]float64, error) {
-	timeoutCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	timeoutCtx, cancel := context.WithTimeout(ctx, uc.bootstrapTimeout)
 	defer cancel()
 
-	return uc.provider.FetchPremiumFundingRates(timeoutCtx)
+	funding, err := uc.provider.FetchPremiumFundingRates(timeoutCtx)
+	if err == nil {
+		uc.storeFundingCache(funding, time.Now())
+		return funding, nil
+	}
+
+	if cached, fetchedAt, ok := uc.loadFundingCache(time.Now()); ok {
+		slog.Warn("Binance premium funding bootstrap failed; using cached funding snapshot", "error", err, "cached_count", len(cached), "cache_age_seconds", roundDurationSeconds(time.Since(fetchedAt)))
+		return cached, nil
+	}
+
+	return nil, err
 }
 
 // FetchMarketData retrieves klines, open interest, funding rate, and latest price concurrently.
@@ -68,7 +140,7 @@ func (uc *MarketDataUsecase) FetchMarketData(ctx context.Context, symbol string,
 // FetchInitialMarketData retrieves the cheapest closed-candle input first so callers can fast-reject stale symbols
 // before paying the full H1/H4/OI snapshot cost.
 func (uc *MarketDataUsecase) FetchInitialMarketData(ctx context.Context, symbol string, fundingRates map[string]float64) (MarketData, error) {
-	rootCtx, cancelRoot := context.WithTimeout(ctx, 10*time.Second)
+	rootCtx, cancelRoot := context.WithTimeout(ctx, uc.initialTimeout)
 	defer cancelRoot()
 
 	m15, err := uc.fetchClosedCandlesCached(rootCtx, symbol, "15m", 50)
@@ -92,7 +164,7 @@ func (uc *MarketDataUsecase) FetchInitialMarketData(ctx context.Context, symbol 
 // EnrichMarketData fills the higher-timeframe and derivatives context for a symbol that has already passed cheap
 // initial checks (for example M15 freshness).
 func (uc *MarketDataUsecase) EnrichMarketData(ctx context.Context, base MarketData) (MarketData, error) {
-	rootCtx, cancelRoot := context.WithTimeout(ctx, 15*time.Second)
+	rootCtx, cancelRoot := context.WithTimeout(ctx, uc.enrichTimeout)
 	defer cancelRoot()
 	symbol := base.Symbol
 
@@ -214,6 +286,68 @@ func (uc *MarketDataUsecase) EnrichMarketData(ctx context.Context, base MarketDa
 		PriceChange24h:  base.PriceChange24h,
 		LastUpdated:     time.Now(),
 	}, nil
+}
+
+func (uc *MarketDataUsecase) storeTickerCache(tickers []dto.Ticker24h, now time.Time) {
+	if uc == nil {
+		return
+	}
+	cloned := append([]dto.Ticker24h(nil), tickers...)
+	uc.tickerCacheMu.Lock()
+	uc.tickerCache = cloned
+	uc.tickerCacheFetched = now
+	uc.tickerCacheUntil = now.Add(uc.globalCacheTTL)
+	uc.tickerCacheMu.Unlock()
+}
+
+func (uc *MarketDataUsecase) loadTickerCache(now time.Time) ([]dto.Ticker24h, time.Time, bool) {
+	if uc == nil {
+		return nil, time.Time{}, false
+	}
+	uc.tickerCacheMu.RLock()
+	defer uc.tickerCacheMu.RUnlock()
+	if len(uc.tickerCache) == 0 || !now.Before(uc.tickerCacheUntil) {
+		return nil, time.Time{}, false
+	}
+	return append([]dto.Ticker24h(nil), uc.tickerCache...), uc.tickerCacheFetched, true
+}
+
+func (uc *MarketDataUsecase) storeFundingCache(funding map[string]float64, now time.Time) {
+	if uc == nil {
+		return
+	}
+	cloned := make(map[string]float64, len(funding))
+	for k, v := range funding {
+		cloned[k] = v
+	}
+	uc.fundingCacheMu.Lock()
+	uc.fundingCache = cloned
+	uc.fundingCacheFetched = now
+	uc.fundingCacheUntil = now.Add(uc.globalCacheTTL)
+	uc.fundingCacheMu.Unlock()
+}
+
+func (uc *MarketDataUsecase) loadFundingCache(now time.Time) (map[string]float64, time.Time, bool) {
+	if uc == nil {
+		return nil, time.Time{}, false
+	}
+	uc.fundingCacheMu.RLock()
+	defer uc.fundingCacheMu.RUnlock()
+	if len(uc.fundingCache) == 0 || !now.Before(uc.fundingCacheUntil) {
+		return nil, time.Time{}, false
+	}
+	cloned := make(map[string]float64, len(uc.fundingCache))
+	for k, v := range uc.fundingCache {
+		cloned[k] = v
+	}
+	return cloned, uc.fundingCacheFetched, true
+}
+
+func roundDurationSeconds(d time.Duration) float64 {
+	if d <= 0 {
+		return 0
+	}
+	return float64(d.Milliseconds()) / 1000.0
 }
 
 // FetchCandles fetches finalized candles for M15, H1, and H4 timeframes.

@@ -135,10 +135,10 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	macroWG.Wait()
 
 	if tickersErr == nil {
-		slog.Info("Successfully fetched futures tickers", "scan_id", scanID, "count", len(tickers))
+		slog.Info("Futures ticker bootstrap ready", "scan_id", scanID, "count", len(tickers))
 	}
 	if fundingErr == nil {
-		slog.Info("Successfully fetched premium funding rates", "scan_id", scanID, "count", len(fundingRates))
+		slog.Info("Premium funding bootstrap ready", "scan_id", scanID, "count", len(fundingRates))
 	}
 
 	if tickersErr != nil {

@@ -471,14 +471,56 @@ func TestScannerUsecase_Run(t *testing.T) {
 		_ = res
 	})
 
-	t.Run("Scan Fails when Binance Tickers unavailable", func(t *testing.T) {
+	t.Run("Scan Uses Fresh Bootstrap Cache when Binance Tickers unavailable", func(t *testing.T) {
 		mockProvider.tickers = nil
 		ctx := context.Background()
 		_, err := uc.Run(ctx, dto.ScanRequest{
 			TriggerTime: time.Now(),
 		})
+		if err != nil {
+			t.Errorf("expected scanner to succeed using fresh cached tickers, got err=%v", err)
+		}
+	})
+
+	t.Run("Fresh Scanner Fails when Binance Tickers unavailable and no cache exists", func(t *testing.T) {
+		coldProvider := &mockMarketDataProvider{
+			tickers:      nil,
+			fundingRates: fundingRates,
+			m15Candles:   m15Candles,
+			h1Candles:    h1Candles,
+			h4Candles:    h4Candles,
+			prices:       prices,
+		}
+		coldMarketDataUC := NewMarketDataUsecase(coldProvider)
+		coldUC := NewScannerUsecase(
+			coldMarketDataUC,
+			marketPolicyUC,
+			universeUC,
+			strategySelectorUC,
+			playbookEligibilityUC,
+			playbookQuantEngineUC,
+			scoringUC,
+			candidateArbiterUC,
+			localGateUC,
+			aiCandidateSelectorUC,
+			aiAuditorUC,
+			planReconciliationUC,
+			stalenessUC,
+			finalGateUC,
+			conflictResolverUC,
+			signalNotificationUC,
+			opsNotificationUC,
+			monitoringUC,
+			feedbackUC,
+			storageUC,
+		)
+
+		ctx := context.Background()
+		_, err := coldUC.Run(ctx, dto.ScanRequest{
+			TriggerTime: time.Now(),
+		})
 		if err == nil {
-			t.Errorf("expected scanner to fail when tickers are nil")
+			t.Errorf("expected scanner to fail when tickers are nil and no cache exists")
 		}
 	})
 

@@ -152,7 +152,12 @@ func main() {
 
 	// 4. Initialize Usecases
 	storageUC := usecase.NewStorageUsecase(storageRepo)
-	marketDataUC := usecase.NewMarketDataUsecase(binanceService)
+	marketDataUC := usecase.NewMarketDataUsecase(binanceService, usecase.MarketDataUsecaseConfig{
+		BootstrapTimeout: time.Duration(cfg.Binance.BootstrapTimeoutSeconds) * time.Second,
+		InitialTimeout:   10 * time.Second,
+		EnrichTimeout:    15 * time.Second,
+		GlobalCacheTTL:   time.Duration(cfg.Binance.BootstrapCacheSeconds) * time.Second,
+	})
 	marketPolicyUC := usecase.NewMarketPolicyUsecase()
 	universeUC := usecase.NewUniverseUsecase()
 	strategySelectorUC := usecase.NewStrategySelectorUsecase()
