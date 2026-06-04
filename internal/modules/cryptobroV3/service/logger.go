@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -100,6 +101,22 @@ func (m *MultiHandler) Enabled(ctx context.Context, level slog.Level) bool {
 
 // Handle routes the log record to all underlying handlers
 func (m *MultiHandler) Handle(ctx context.Context, r slog.Record) error {
+	// Auto-inject module tag if not manually specified
+	hasModule := false
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Key == "module" || a.Key == "tag" {
+			hasModule = true
+			return false
+		}
+		return true
+	})
+	if !hasModule {
+		mod := resolveModuleFromCallstack()
+		if mod != "" {
+			r.AddAttrs(slog.String("module", mod))
+		}
+	}
+
 	var errs []string
 	for _, h := range m.handlers {
 		if h.Enabled(ctx, r.Level) {
@@ -267,4 +284,48 @@ func ReadLastNLines(filePath string, n int) ([]string, error) {
 	}
 
 	return result, nil
+}
+
+// resolveModuleFromCallstack walks back stack trace to tag log calls automatically
+func resolveModuleFromCallstack() string {
+	pcs := make([]uintptr, 15)
+	n := runtime.Callers(2, pcs)
+	if n == 0 {
+		return ""
+	}
+	frames := runtime.CallersFrames(pcs[:n])
+	for {
+		frame, more := frames.Next()
+		// Capture cryptobroV3 module files or main daemon files, skipping logger.go
+		if (strings.Contains(frame.File, "cryptobroV3") || strings.Contains(frame.File, "cmd/api")) && !strings.Contains(frame.File, "logger.go") {
+			fileName := filepath.Base(frame.File)
+			switch {
+			case strings.Contains(fileName, "pocketbase"):
+				return "pocketbase"
+			case strings.Contains(fileName, "telegram") || strings.Contains(fileName, "notification"):
+				return "telegram"
+			case strings.Contains(fileName, "binance") || strings.Contains(fileName, "market") || strings.Contains(fileName, "price"):
+				return "market"
+			case strings.Contains(fileName, "gemini") || strings.Contains(fileName, "ai_"):
+				return "gemini"
+			case strings.Contains(fileName, "backtest"):
+				return "backtest"
+			case strings.Contains(fileName, "monitoring") || strings.Contains(fileName, "position"):
+				return "monitoring"
+			case strings.Contains(fileName, "evaluation") || strings.Contains(fileName, "feedback"):
+				return "evaluation"
+			case strings.Contains(fileName, "storage") || strings.Contains(fileName, "json"):
+				return "storage"
+			case strings.Contains(fileName, "scanner") || strings.Contains(frame.File, "usecase/") || strings.Contains(fileName, "main.go"):
+				// Fallback for general scanner usecases or main daemon logs
+				return "scanner"
+			case strings.Contains(fileName, "handler") || strings.Contains(fileName, "middleware") || strings.Contains(fileName, "router"):
+				return "http"
+			}
+		}
+		if !more {
+			break
+		}
+	}
+	return ""
 }

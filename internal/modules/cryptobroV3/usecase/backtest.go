@@ -984,6 +984,15 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 		slog.Error("Failed to save backtest report atomically", "error", err)
 	}
 
+	slog.Info("Historical Backtest Run Completed",
+		"run_id", report.RunID,
+		"symbol", report.Symbol,
+		"total_setups", report.TotalSetups,
+		"total_executed", report.TotalFinalExecuteSimulated,
+		"winrate", report.Winrate,
+		"expectancy", report.Expectancy,
+	)
+
 	return report, nil
 }
 

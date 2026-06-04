@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -46,17 +45,19 @@ func notificationTime(t time.Time) string {
 // @schemes   http
 
 func main() {
-	log.Println("Starting Cryptobro V3 Engine...")
+	slog.Info("Starting Cryptobro V3 Engine...")
 
 	// 1. Load Configuration
 	cfg, err := config.LoadConfig()
 	if err != nil {
-		log.Fatalf("failed to load configuration: %v", err)
+		slog.Error("failed to load configuration", "error", err)
+		os.Exit(1)
 	}
 
 	// Initialize Custom Structured Logger
 	if err := service.InitLogger(cfg); err != nil {
-		log.Fatalf("failed to initialize logger: %v", err)
+		slog.Error("failed to initialize logger", "error", err)
+		os.Exit(1)
 	}
 
 	slog.Info("Configuration loaded successfully", "env", cfg.App.Env, "version", cfg.App.Version)
@@ -64,7 +65,8 @@ func main() {
 	// 2. Initialize Storage from config
 	jsonStorage, err := service.NewJSONStorageService(cfg.Storage.StoragePath)
 	if err != nil {
-		log.Fatalf("failed to initialize json storage: %v", err)
+		slog.Error("failed to initialize json storage", "error", err)
+		os.Exit(1)
 	}
 	var storageRepo usecase.StorageRepository = jsonStorage
 
@@ -83,12 +85,14 @@ func main() {
 			err = nil
 		}
 		if err != nil {
-			log.Fatalf("failed to initialize pocketbase client: %v", err)
+			slog.Error("failed to initialize pocketbase client", "error", err)
+			os.Exit(1)
 		}
 		if pbClient != nil {
 			pbStorage, err := service.NewPocketBaseStorageService(jsonStorage, pbClient, cfg.PocketBase.JournalSourceMode)
 			if err != nil {
-				log.Fatalf("failed to initialize pocketbase storage: %v", err)
+				slog.Error("failed to initialize pocketbase storage", "error", err)
+				os.Exit(1)
 			}
 			storageRepo = pbStorage
 			slog.Info("PocketBase storage enabled for signal_journals + watch_journals + evaluation_runs", "journal_source_mode", cfg.PocketBase.JournalSourceMode)
@@ -119,7 +123,7 @@ func main() {
 	if cfg.Gemini.APIKey != "" {
 		geminiService, err = service.NewGeminiServiceWithTimeout(cfg.Gemini.Model, time.Duration(cfg.Gemini.RequestTimeoutSeconds)*time.Second)
 		if err != nil {
-			log.Printf("warning: Gemini service failed to initialize: %v (AI audits will fail)", err)
+			slog.Warn("Gemini service failed to initialize", "error", err, "context", "AI audits will fail")
 		}
 	}
 
@@ -290,7 +294,8 @@ func main() {
 
 	slog.Info("Server listening...", "port", cfg.HTTP.Port)
 	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		log.Fatalf("failed to start server: %v", err)
+		slog.Error("failed to start server", "error", err)
+		os.Exit(1)
 	}
 }
 

@@ -30,11 +30,13 @@ type BinanceRealtimePriceStream struct {
 	cfg    BinanceRealtimePriceConfig
 	dialer *websocket.Dialer
 
-	mu      sync.RWMutex
-	symbols []string
-	prices  map[string]priceTick
-	conn    *websocket.Conn
-	writeMu sync.Mutex
+	mu                  sync.RWMutex
+	symbols             []string
+	prices              map[string]priceTick
+	conn                *websocket.Conn
+	connCancel          context.CancelFunc
+	consecutiveFailures int
+	writeMu             sync.Mutex
 
 	startOnce sync.Once
 	stopOnce  sync.Once
@@ -227,33 +229,68 @@ func (s *BinanceRealtimePriceStream) run(ctx context.Context) {
 			slog.Warn("Binance websocket price stream disconnected", "error", err)
 		}
 
+		delay := s.cfg.ReconnectDelay
+		s.mu.RLock()
+		failures := s.consecutiveFailures
+		s.mu.RUnlock()
+		if failures > 0 {
+			backoffFactor := 1 << (failures - 1)
+			delay = s.cfg.ReconnectDelay * time.Duration(backoffFactor)
+			if delay > 60*time.Second {
+				delay = 60 * time.Second
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			return
 		case <-s.updateCh:
-		case <-time.After(s.cfg.ReconnectDelay):
+			slog.Info("Reconnecting immediately to Binance realtime price stream due to subscription update...")
+		case <-time.After(delay):
+			slog.Info("Reconnecting to Binance realtime price stream after delay...", "delay", delay)
 		}
 	}
 }
 
 func (s *BinanceRealtimePriceStream) runConnection(ctx context.Context, symbols []string) error {
-	conn, _, err := s.dialer.DialContext(ctx, s.buildURL(symbols), http.Header{})
+	slog.Info("Connecting to Binance realtime price stream...", "url", s.buildURL(symbols), "symbols_count", len(symbols))
+
+	connCtx, connCancel := context.WithCancel(ctx)
+	defer connCancel()
+
+	s.mu.Lock()
+	s.connCancel = connCancel
+	s.mu.Unlock()
+
+	conn, _, err := s.dialer.DialContext(connCtx, s.buildURL(symbols), http.Header{})
 	if err != nil {
 		s.connected.Store(false)
+		s.mu.Lock()
+		s.consecutiveFailures++
+		s.mu.Unlock()
 		return err
 	}
 
 	s.mu.Lock()
+	s.consecutiveFailures = 0
 	s.conn = conn
 	s.mu.Unlock()
 	defer s.closeConn()
 
 	s.connected.Store(true)
+	slog.Info("Successfully connected to Binance realtime price stream", "symbols_count", len(symbols))
+
 	startedAt := time.Now()
 	readDeadline := 10 * time.Minute
 	_ = conn.SetReadDeadline(time.Now().Add(readDeadline))
 	conn.SetPongHandler(func(appData string) error {
 		return conn.SetReadDeadline(time.Now().Add(readDeadline))
+	})
+	conn.SetPingHandler(func(appData string) error {
+		_ = conn.SetReadDeadline(time.Now().Add(readDeadline))
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+		return conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(5*time.Second))
 	})
 
 	for {
@@ -264,6 +301,9 @@ func (s *BinanceRealtimePriceStream) runConnection(ctx context.Context, symbols 
 		_, payload, err := conn.ReadMessage()
 		if err != nil {
 			s.connected.Store(false)
+			s.mu.Lock()
+			s.consecutiveFailures++
+			s.mu.Unlock()
 			return err
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(readDeadline))
@@ -359,7 +399,12 @@ func (s *BinanceRealtimePriceStream) snapshotSymbols() []string {
 func (s *BinanceRealtimePriceStream) closeConn() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.connCancel != nil {
+		s.connCancel()
+		s.connCancel = nil
+	}
 	if s.conn != nil {
+		slog.Info("Closing active Binance realtime price stream websocket connection...")
 		_ = s.conn.Close()
 		s.conn = nil
 	}
@@ -386,6 +431,7 @@ func (s *BinanceRealtimePriceStream) scheduleReconnect() {
 		s.timer.Stop()
 	}
 	s.timer = time.AfterFunc(debounce, func() {
+		slog.Info("Reconnection timer fired; closing connection to trigger reconnect", "debounce", debounce)
 		s.closeConn()
 	})
 }

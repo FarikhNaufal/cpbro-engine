@@ -99,6 +99,7 @@ func (c *PocketBaseClient) ensureToken(ctx context.Context) (string, error) {
 	if strings.TrimSpace(c.token) != "" {
 		return c.token, nil
 	}
+	slog.Info("PocketBase token missing or expired; initiating login...", "auth_mode", string(c.authMode), "host", pocketBaseHost(c.baseURL))
 	switch c.authMode {
 	case PocketBaseAuthModeToken:
 		return c.token, nil
@@ -120,6 +121,7 @@ func (c *PocketBaseClient) clearToken() {
 }
 
 func (c *PocketBaseClient) login(ctx context.Context, path string) (string, error) {
+	slog.Info("PocketBase login initiated", "auth_mode", string(c.authMode), "host", pocketBaseHost(c.baseURL), "path", path)
 	body := map[string]any{
 		"identity": c.identity,
 		"password": c.password,
@@ -128,25 +130,30 @@ func (c *PocketBaseClient) login(ctx context.Context, path string) (string, erro
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(c.baseURL, "/")+path, bytes.NewReader(b))
 	if err != nil {
+		slog.Error("PocketBase login request creation failed", "path", path, "error", err)
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		slog.Error("PocketBase login HTTP request failed", "path", path, "error", err)
 		return "", err
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		slog.Error("PocketBase login returned non-2xx status code", "path", path, "status_code", resp.StatusCode, "body", sanitizePBBody(raw))
 		return "", fmt.Errorf("pocketbase auth failed: status=%d body=%s", resp.StatusCode, sanitizePBBody(raw))
 	}
 
 	var out pocketBaseAuthResponse
 	if err := json.Unmarshal(raw, &out); err != nil {
+		slog.Error("PocketBase login auth parse failed", "path", path, "error", err)
 		return "", fmt.Errorf("pocketbase auth parse failed: %w", err)
 	}
 	if strings.TrimSpace(out.Token) == "" {
+		slog.Error("PocketBase login returned empty token", "path", path)
 		return "", errors.New("pocketbase auth returned empty token")
 	}
 	c.token = out.Token

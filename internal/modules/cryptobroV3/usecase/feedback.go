@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -113,6 +114,7 @@ func getSampleGuard(sampleSize int) (confidence string, requiresMoreData bool, s
 
 // GenerateEvaluationReport compiles win rates, excursions, durations, and detailed threshold/policy recommendations.
 func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
+	slog.Info("Starting Feedback Loop evaluation report generation...")
 	var sourceFiles []string
 	var completeness DataCompleteness
 
@@ -1389,6 +1391,14 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	}
 	GetGlobalMetrics().SetEvalMetrics(uint64(len(recommendations)), uint64(len(gateBugFindings)))
 	GetGlobalMetrics().SetLastEvaluationTime(report.GeneratedAt)
+
+	slog.Info("Feedback Loop evaluation report generated successfully",
+		"finalized_signals", len(finalized),
+		"recommendations", len(recommendations),
+		"gate_bugs", len(gateBugFindings),
+		"best_playbook", bestPb,
+		"worst_playbook", worstPb,
+	)
 
 	return uc.storageUsecase.SaveEvaluationReport(report)
 }

@@ -115,6 +115,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	}
 
 	// Fetch tickers & funding rates to feed the macro Policy Engine
+	slog.Info("Fetching futures tickers and premium funding rates from market data provider...", "scan_id", scanID)
 	var (
 		tickers      []dto.Ticker24h
 		fundingRates map[string]float64
@@ -132,6 +133,13 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		fundingRates, fundingErr = uc.marketDataUsecase.FetchPremiumFundingRates(ctx)
 	}()
 	macroWG.Wait()
+
+	if tickersErr == nil {
+		slog.Info("Successfully fetched futures tickers", "scan_id", scanID, "count", len(tickers))
+	}
+	if fundingErr == nil {
+		slog.Info("Successfully fetched premium funding rates", "scan_id", scanID, "count", len(fundingRates))
+	}
 
 	if tickersErr != nil {
 		slog.Error("Failed to fetch futures tickers", "error", tickersErr)
@@ -208,10 +216,13 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 	// Evaluate global Policy
 	policy := uc.marketPolicyUsecase.EvaluatePolicy(ctx, btcTrend, btcScore, ethBtcPerf, btcChaos, volatility, breadth)
+	slog.Info("Market policy evaluated", "scan_id", scanID, "regime", policy.Regime, "long_mode", policy.LongMode, "short_mode", policy.ShortMode)
 
 	// Filter dynamic universe candidates
+	slog.Info("Filtering dynamic universe candidates...", "scan_id", scanID, "total_tickers", len(tickers))
 	candidates, rejectedCandidatesList := uc.universeUsecase.FilterUniverse(tickers, fundingRates, policy)
 	universePassCount := len(candidates)
+	slog.Info("Dynamic universe candidates filtered", "scan_id", scanID, "passed", universePassCount, "rejected", len(rejectedCandidatesList))
 
 	rejectedSummary := []string{}
 	for _, rej := range rejectedCandidatesList {
@@ -245,6 +256,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		prefetchCandidates = candidates[:prefetchLimit]
 	}
 
+	slog.Info("Prefetching market data for passed candidates...", "scan_id", scanID, "candidates_count", len(prefetchCandidates), "concurrency_limit", concurrencyLimit)
 	candlesMap := make(map[string]candlesCache)
 	var mapMu sync.Mutex
 
@@ -273,6 +285,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	wg.Wait()
 	marketDataDuration := time.Since(scanStart)
 	metrics.SetLastMarketDataDuration(marketDataDuration)
+	slog.Info("Prefetching market data completed", "scan_id", scanID, "duration", marketDataDuration.String())
 
 	var allCandidates []QuantResult
 	policyRejectedSummary := append([]string{}, prefetchDeferredSummary...)
@@ -313,6 +326,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		pipelineConcurrency = requestGuard.PipelineConcurrency
 	}
 
+	slog.Info("Running candidate quant pipeline...", "scan_id", scanID, "pipeline_concurrency", pipelineConcurrency)
 	pipelineResults := make([]candidatePipelineResult, len(prefetchCandidates))
 	var pipelineWG sync.WaitGroup
 	pipelineSem := make(chan struct{}, pipelineConcurrency)
@@ -416,6 +430,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	pipelineWG.Wait()
 	candidatePipelineDuration := time.Since(pipelineStart)
 	metrics.SetLastCandidatePipelineDuration(candidatePipelineDuration)
+	slog.Info("Candidate quant pipeline completed", "scan_id", scanID, "total_playbook_candidates", len(allCandidates), "duration", candidatePipelineDuration.String())
 	estimatedRequestWeight := estimateScanRequestWeight(len(prefetchCandidates), int(atomic.LoadUint64(&enrichedSymbolCount)))
 	metrics.SetLastScanRequestWeight(uint64(estimatedRequestWeight))
 	metrics.SetLastScanRequestWeightBudget(uint64(requestGuard.Budget))
@@ -473,7 +488,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	}
 
 	// Run Candidate Arbiter
+	slog.Info("Running candidate arbiter selection...", "scan_id", scanID, "input_candidates", len(allCandidates))
 	selectedCandidates, arbiterRejected := uc.candidateArbiterUsecase.Arbitrate(allCandidates, policy)
+	slog.Info("Candidate arbiter completed", "scan_id", scanID, "selected_candidates", len(selectedCandidates), "rejected_candidates", len(arbiterRejected))
 	activeWatchSignals, _ := uc.storageUsecase.LoadWatchJournal()
 	selectedSymbols := make([]string, 0, len(selectedCandidates))
 	for _, candidate := range selectedCandidates {
@@ -496,6 +513,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	}
 
 	// Evaluate Local Quality Gate
+	slog.Info("Evaluating local quality gates for selected candidates...", "scan_id", scanID, "candidates_count", len(selectedCandidates))
 	var localCandidates []QuantResult
 	localGateMap := make(map[string]LocalGateResult)
 	for _, qResult := range selectedCandidates {
@@ -507,8 +525,10 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			localCandidates = append(localCandidates, qResult)
 		}
 	}
+	slog.Info("Local quality gates evaluation completed", "scan_id", scanID, "passed", len(localCandidates), "failed_or_watch", len(selectedCandidates)-len(localCandidates))
 
 	// Select AI Candidates based on MaxAICandidates quota limit
+	slog.Info("Selecting AI candidates based on policy MaxAICandidates quota limit...", "scan_id", scanID, "passed_local", len(localCandidates), "max_ai_candidates", policy.MaxAICandidates)
 	aiCandidates, skippedCandidates := uc.aiCandidateSelectorUsecase.SelectCandidates(localCandidates, policy)
 	_ = skippedCandidates
 
@@ -538,6 +558,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 	GetGlobalMetrics().AddAICandidateCount(uint64(len(aiCandidates)))
 
+	if len(aiCandidates) > 0 {
+		slog.Info("Dispatching AI Audit queries to Gemini API...", "scan_id", scanID, "candidates_count", len(aiCandidates), "concurrency_limit", aiConcurrencyLimit)
+	}
 	aiBatchStart := time.Now()
 	for _, qResult := range aiCandidates {
 		aiWg.Add(1)
@@ -602,6 +625,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	aiWg.Wait()
 	aiBatchDuration := time.Since(aiBatchStart)
 	metrics.SetLastAIBatchDuration(aiBatchDuration)
+	if len(aiCandidates) > 0 {
+		slog.Info("AI Audit batch processing completed", "scan_id", scanID, "confirm", totalAIConfirm, "wait", totalAIWait, "reject", totalAIReject, "error", totalAIError, "duration", aiBatchDuration.String())
+	}
 
 	// Build context and run Staleness Check and Final Execution Gates for all candidates
 	var decisions []FinalDecision
@@ -616,6 +642,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	}
 	ctxMap := make(map[string]candContext)
 
+	slog.Info("Evaluating final execution gates and resolving conflicts...", "scan_id", scanID, "candidates_count", len(selectedCandidates))
 	finalGateStart := time.Now()
 	for _, qResult := range selectedCandidates {
 		pair := qResult.Symbol
@@ -980,6 +1007,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		EvaluationDataCompletenessHint:  "has_decision_audit: true",
 	}
 
+	slog.Info("Dispatching scanner notifications and saving latest results...", "scan_id", scanID, "execute_signals", totalFinalExecute, "watch_signals", totalFinalWatch)
 	var notificationReqs []SignalNotificationRequest
 	for _, dec := range resolvedDecisions {
 		pair := dec.Symbol

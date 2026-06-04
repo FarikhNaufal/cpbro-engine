@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"sort"
 	"strconv"
@@ -332,6 +333,18 @@ func monitorJournalEntries(ctx context.Context, uc *MonitoringUsecase, provider 
 
 		if !monitoringJournalEntryChanged(original, item) {
 			continue
+		}
+
+		if original.Status != item.Status {
+			slog.Info("Monitoring status transitioned",
+				"symbol", item.Symbol,
+				"direction", string(item.Direction),
+				"old_status", string(original.Status),
+				"new_status", string(item.Status),
+				"entry", item.EntryPrice,
+				"latest_price", item.LatestPrice,
+				"reason", item.OutcomeReason,
+			)
 		}
 
 		item.UpdatedAt = now
