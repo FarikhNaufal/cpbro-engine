@@ -318,8 +318,18 @@ func (h *Handler) GetJournal(c *gin.Context) {
 		if statusFilter != "" && !strings.EqualFold(string(item.Status), statusFilter) {
 			continue
 		}
-		if playbookFilter != "" && !strings.EqualFold(string(item.Playbook), playbookFilter) {
-			continue
+		if playbookFilter != "" {
+			matched := false
+			parts := strings.Split(playbookFilter, ",")
+			for _, p := range parts {
+				if strings.EqualFold(string(item.Playbook), strings.TrimSpace(p)) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
 		}
 		if directionFilter != "" && !strings.EqualFold(string(item.Direction), directionFilter) {
 			continue
@@ -412,8 +422,18 @@ func (h *Handler) GetWatchJournal(c *gin.Context) {
 		if statusFilter != "" && !strings.EqualFold(string(item.Status), statusFilter) {
 			continue
 		}
-		if playbookFilter != "" && !strings.EqualFold(string(item.Playbook), playbookFilter) {
-			continue
+		if playbookFilter != "" {
+			matched := false
+			parts := strings.Split(playbookFilter, ",")
+			for _, p := range parts {
+				if strings.EqualFold(string(item.Playbook), strings.TrimSpace(p)) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
 		}
 		if directionFilter != "" && !strings.EqualFold(string(item.Direction), directionFilter) {
 			continue
@@ -593,8 +613,18 @@ func (h *Handler) GetDecisionAudit(c *gin.Context) {
 		if statusFilter != "" && !strings.EqualFold(string(item.FinalStatus), statusFilter) {
 			continue
 		}
-		if playbookFilter != "" && !strings.EqualFold(string(item.Playbook), playbookFilter) {
-			continue
+		if playbookFilter != "" {
+			matched := false
+			parts := strings.Split(playbookFilter, ",")
+			for _, p := range parts {
+				if strings.EqualFold(string(item.Playbook), strings.TrimSpace(p)) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
 		}
 		if directionFilter != "" && !strings.EqualFold(string(item.Direction), directionFilter) {
 			continue
