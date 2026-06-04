@@ -5,11 +5,13 @@ go 1.25.1
 require (
 	github.com/adshao/go-binance/v2 v2.8.11
 	github.com/gin-gonic/gin v1.12.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/stretchr/testify v1.11.1
 	github.com/swaggo/files v1.0.1
 	github.com/swaggo/gin-swagger v1.6.1
 	github.com/swaggo/swag v1.16.6
 	google.golang.org/genai v1.57.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (
@@ -41,7 +43,6 @@ require (
 	github.com/google/s2a-go v0.1.8 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.4 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect

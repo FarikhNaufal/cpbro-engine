@@ -53,6 +53,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load configuration: %v", err)
 	}
+
+	// Initialize Custom Structured Logger
+	if err := service.InitLogger(cfg); err != nil {
+		log.Fatalf("failed to initialize logger: %v", err)
+	}
+
 	slog.Info("Configuration loaded successfully", "env", cfg.App.Env, "version", cfg.App.Version)
 
 	// 2. Initialize Storage from config

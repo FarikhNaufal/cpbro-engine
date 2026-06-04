@@ -46,6 +46,7 @@ func SetupRouter(cfg *config.Config, h *Handler) *gin.Engine {
 		v3.GET("/journal", h.GetJournal)
 		v3.GET("/watch-journal", h.GetWatchJournal)
 		v3.GET("/evaluation", h.GetEvaluation)
+		v3.GET("/observability/logs", h.GetLogs)
 
 		// Optional Safe Endpoints
 		if cfg.Route.EnableEvaluationRunEndpoint {

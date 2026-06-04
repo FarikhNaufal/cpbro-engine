@@ -143,6 +143,11 @@ type LoggingConfig struct {
 	LogLevel         string `json:"log_level"`
 	LogFormat        string `json:"log_format"`
 	LogIncludeScanID bool   `json:"log_include_scan_id"`
+	LogFilePath      string `json:"log_file_path"`
+	LogMaxSizeMB     int    `json:"log_max_size_mb"`
+	LogMaxBackups    int    `json:"log_max_backups"`
+	LogMaxAgeDays    int    `json:"log_max_age_days"`
+	LogCompress      bool   `json:"log_compress"`
 }
 
 // RouteConfig prefix settings for exposing REST endpoints
@@ -302,6 +307,11 @@ func LoadConfigFromEnv() (*Config, error) {
 			LogLevel:         getEnv("LOG_LEVEL", "info"),
 			LogFormat:        getEnv("LOG_FORMAT", "json"),
 			LogIncludeScanID: getEnvBool("LOG_INCLUDE_SCAN_ID", true),
+			LogFilePath:      getEnv("LOG_FILE_PATH", "storage/logs/app.log"),
+			LogMaxSizeMB:     getEnvInt("LOG_MAX_SIZE_MB", 10),
+			LogMaxBackups:    getEnvInt("LOG_MAX_BACKUPS", 5),
+			LogMaxAgeDays:    getEnvInt("LOG_MAX_AGE_DAYS", 7),
+			LogCompress:      getEnvBool("LOG_COMPRESS", true),
 		},
 		Route: RouteConfig{
 			APIPrefix:                   getEnv("API_PREFIX", "/api/v3"),
@@ -566,6 +576,11 @@ func SafeConfigView(cfg *Config) map[string]any {
 			"log_level":           cfg.Logging.LogLevel,
 			"log_format":          cfg.Logging.LogFormat,
 			"log_include_scan_id": cfg.Logging.LogIncludeScanID,
+			"log_file_path":       cfg.Logging.LogFilePath,
+			"log_max_size_mb":     cfg.Logging.LogMaxSizeMB,
+			"log_max_backups":     cfg.Logging.LogMaxBackups,
+			"log_max_age_days":    cfg.Logging.LogMaxAgeDays,
+			"log_compress":        cfg.Logging.LogCompress,
 		},
 		"route": map[string]any{
 			"api_prefix":                     cfg.Route.APIPrefix,

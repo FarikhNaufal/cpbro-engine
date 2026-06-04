@@ -15,6 +15,7 @@ import (
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 	"cpbro-engine/internal/modules/cryptobroV3/entity"
+	"cpbro-engine/internal/modules/cryptobroV3/service"
 	"cpbro-engine/internal/modules/cryptobroV3/usecase"
 	"github.com/gin-gonic/gin"
 )
@@ -743,3 +744,226 @@ func (h *Handler) GetBacktestReportByID(c *gin.Context) {
 
 	c.JSON(http.StatusOK, ok("backtest run report retrieved successfully", report))
 }
+
+// LogEntry represents a single parsed structured JSON log line
+type LogEntry struct {
+	Time       string         `json:"time"`
+	Level      string         `json:"level"`
+	Message    string         `json:"msg"`
+	ScanID     string         `json:"scan_id,omitempty"`
+	Module     string         `json:"module,omitempty"`
+	Tag        string         `json:"tag,omitempty"`
+	Attributes map[string]any `json:"attributes,omitempty"`
+}
+
+// LogFilters wraps query filters for filtering logs
+type LogFilters struct {
+	Level  string
+	ScanID string
+	Module string
+	Search string
+}
+
+// Matches evaluates if a LogEntry matches the specified LogFilters
+func (e *LogEntry) Matches(f LogFilters) bool {
+	if f.Level != "" && !strings.EqualFold(e.Level, f.Level) {
+		return false
+	}
+	if f.ScanID != "" && e.ScanID != f.ScanID {
+		return false
+	}
+	if f.Module != "" && !strings.EqualFold(e.Module, f.Module) && !strings.EqualFold(e.Tag, f.Module) {
+		return false
+	}
+	if f.Search != "" {
+		sLower := strings.ToLower(f.Search)
+		if strings.Contains(strings.ToLower(e.Message), sLower) {
+			return true
+		}
+		for k, v := range e.Attributes {
+			if strings.Contains(strings.ToLower(k), sLower) {
+				return true
+			}
+			if strings.Contains(strings.ToLower(fmt.Sprintf("%v", v)), sLower) {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
+// ParseLogJSON parses a JSON log line into a structured LogEntry
+func ParseLogJSON(line string) (*LogEntry, error) {
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(line), &raw); err != nil {
+		return nil, err
+	}
+	e := &LogEntry{Attributes: make(map[string]any)}
+	for k, v := range raw {
+		switch k {
+		case "time":
+			if s, ok := v.(string); ok {
+				e.Time = s
+			}
+		case "level":
+			if s, ok := v.(string); ok {
+				e.Level = s
+			}
+		case "msg":
+			if s, ok := v.(string); ok {
+				e.Message = s
+			}
+		case "scan_id":
+			if s, ok := v.(string); ok {
+				e.ScanID = s
+			}
+		case "module":
+			if s, ok := v.(string); ok {
+				e.Module = s
+			}
+		case "tag":
+			if s, ok := v.(string); ok {
+				e.Tag = s
+			}
+		default:
+			e.Attributes[k] = v
+		}
+	}
+	if e.Module == "" && e.Tag != "" {
+		e.Module = e.Tag
+	} else if e.Tag == "" && e.Module != "" {
+		e.Tag = e.Module
+	}
+	return e, nil
+}
+
+// GetLogs godoc
+// @Summary      Get system logs
+// @Description  Retrieves historical system logs or establishes a real-time SSE logs stream.
+// @Tags         observability
+// @Produce      json
+// @Produce      text/event-stream
+// @Param        stream query bool false "Establish real-time SSE stream"
+// @Param        limit query int false "Maximum number of history logs (default 100)"
+// @Param        offset query int false "Pagination offset for history logs"
+// @Param        level query string false "Filter by level (INFO, WARN, ERROR, DEBUG)"
+// @Param        scan_id query string false "Filter by specific scan ID"
+// @Param        module query string false "Filter by specific module/tag (e.g. market, gemini, pocketbase, storage)"
+// @Param        search query string false "Free text search in messages and attributes"
+// @Success      200 {object} APIResponse
+// @Router       /observability/logs [get]
+func (h *Handler) GetLogs(c *gin.Context) {
+	// Parse common filters
+	filters := LogFilters{
+		Level:  c.Query("level"),
+		ScanID: c.Query("scan_id"),
+		Module: c.Query("module"),
+		Search: c.Query("search"),
+	}
+
+	// Resolve log file path
+	logFilePath := os.Getenv("LOG_FILE_PATH")
+	if logFilePath == "" {
+		logFilePath = "storage/logs/app.log"
+	}
+
+	// Check if streaming is requested
+	stream := c.Query("stream") == "true" || c.GetHeader("Accept") == "text/event-stream"
+
+	limit := 100
+	if s := c.Query("limit"); s != "" {
+		if val, err := strconv.Atoi(s); err == nil && val > 0 {
+			limit = val
+		}
+	}
+
+	if stream {
+		c.Writer.Header().Set("Content-Type", "text/event-stream")
+		c.Writer.Header().Set("Cache-Control", "no-cache")
+		c.Writer.Header().Set("Connection", "keep-alive")
+		c.Writer.Header().Set("Transfer-Encoding", "chunked")
+
+		// 1. Send initial logs history (chronological order)
+		lines, err := service.ReadLastNLines(logFilePath, limit)
+		if err == nil {
+			for _, line := range lines {
+				entry, err := ParseLogJSON(line)
+				if err == nil && entry.Matches(filters) {
+					c.SSEvent("log", entry)
+				}
+			}
+			c.Writer.Flush()
+		}
+
+		// 2. Subscribe to new logs
+		logChan := service.GlobalLogBroadcaster.Subscribe()
+		defer service.GlobalLogBroadcaster.Unsubscribe(logChan)
+
+		// 3. Loop and push
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-c.Request.Context().Done():
+				return
+			case logStr, ok := <-logChan:
+				if !ok {
+					return
+				}
+				entry, err := ParseLogJSON(logStr)
+				if err == nil && entry.Matches(filters) {
+					c.SSEvent("log", entry)
+					c.Writer.Flush()
+				}
+			case <-ticker.C:
+				c.SSEvent("ping", "keep-alive")
+				c.Writer.Flush()
+			}
+		}
+	} else {
+		// Non-streaming history fetch (reversed chronological order: newest first)
+		offset := 0
+		if s := c.Query("offset"); s != "" {
+			if val, err := strconv.Atoi(s); err == nil && val >= 0 {
+				offset = val
+			}
+		}
+
+		// Read up to 1000 lines from log file
+		lines, err := service.ReadLastNLines(logFilePath, 1000)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, fail("failed to read log file", err.Error()))
+			return
+		}
+
+		var entries []*LogEntry
+		for i := len(lines) - 1; i >= 0; i-- {
+			entry, err := ParseLogJSON(lines[i])
+			if err == nil && entry.Matches(filters) {
+				entries = append(entries, entry)
+			}
+		}
+
+		total := len(entries)
+		start := offset
+		if start > total {
+			start = total
+		}
+		end := start + limit
+		if end > total {
+			end = total
+		}
+
+		paged := entries[start:end]
+
+		c.JSON(http.StatusOK, ok("logs retrieved successfully", map[string]any{
+			"items":  paged,
+			"total":  total,
+			"limit":  limit,
+			"offset": offset,
+		}))
+	}
+}
+
