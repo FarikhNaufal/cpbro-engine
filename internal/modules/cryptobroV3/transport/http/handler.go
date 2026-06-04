@@ -766,14 +766,35 @@ type LogFilters struct {
 
 // Matches evaluates if a LogEntry matches the specified LogFilters
 func (e *LogEntry) Matches(f LogFilters) bool {
-	if f.Level != "" && !strings.EqualFold(e.Level, f.Level) {
-		return false
+	if f.Level != "" {
+		matched := false
+		parts := strings.Split(f.Level, ",")
+		for _, p := range parts {
+			if strings.EqualFold(e.Level, strings.TrimSpace(p)) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
 	}
 	if f.ScanID != "" && e.ScanID != f.ScanID {
 		return false
 	}
-	if f.Module != "" && !strings.EqualFold(e.Module, f.Module) && !strings.EqualFold(e.Tag, f.Module) {
-		return false
+	if f.Module != "" {
+		matched := false
+		parts := strings.Split(f.Module, ",")
+		for _, p := range parts {
+			trimmed := strings.TrimSpace(p)
+			if strings.EqualFold(e.Module, trimmed) || strings.EqualFold(e.Tag, trimmed) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
 	}
 	if f.Search != "" {
 		sLower := strings.ToLower(f.Search)
