@@ -126,11 +126,14 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	macroWG.Add(2)
 	go func() {
 		defer macroWG.Done()
-		tickers, tickersErr = uc.marketDataUsecase.FetchAllFuturesTickers24h(ctx)
+		// Use context.Background() (detached from scanCtx) so that BINANCE_MAX_RETRY
+		// retries can execute even when the scanCtx deadline has just been reached.
+		// The bootstrapTimeout inside MarketDataUsecase still provides per-attempt timeout.
+		tickers, tickersErr = uc.marketDataUsecase.FetchAllFuturesTickers24h(context.Background())
 	}()
 	go func() {
 		defer macroWG.Done()
-		fundingRates, fundingErr = uc.marketDataUsecase.FetchPremiumFundingRates(ctx)
+		fundingRates, fundingErr = uc.marketDataUsecase.FetchPremiumFundingRates(context.Background())
 	}()
 	macroWG.Wait()
 
