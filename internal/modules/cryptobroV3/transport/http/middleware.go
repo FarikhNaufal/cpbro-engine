@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,8 +14,13 @@ import (
 // LoggerMiddleware outputs structured SRE logs utilizing slog
 func LoggerMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		start := time.Now()
 		path := c.Request.URL.Path
+		if strings.Contains(path, "/observability/logs") {
+			c.Next()
+			return
+		}
+
+		start := time.Now()
 		rawQuery := c.Request.URL.RawQuery
 
 		// Process request
