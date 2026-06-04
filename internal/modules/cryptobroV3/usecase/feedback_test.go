@@ -1,8 +1,10 @@
 package usecase_test
 
 import (
+	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 	"cpbro-engine/internal/modules/cryptobroV3/entity"
@@ -306,6 +308,151 @@ func TestFeedback_WatchJournalOnlyProducesVirtualMetrics(t *testing.T) {
 	}
 	if !repo.report.DataCompleteness.CanEvaluateWatchMissedOpportunity {
 		t.Fatal("expected CanEvaluateWatchMissedOpportunity=true")
+	}
+}
+
+func TestFeedback_SignalMetrics_ExcludeActiveTP1AndUseRealizedPnL(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &mockFeedbackStorageRepo{
+		journal: []usecase.SignalJournal{
+			{
+				ID:            "sig_active_tp1",
+				Playbook:      usecase.TREND_PULLBACK,
+				Direction:     usecase.LONG,
+				Status:        usecase.TP1_HIT,
+				EntryPrice:    100,
+				TP1:           105,
+				TP2:           110,
+				StopLoss:      95,
+				TimeToTP1:     "10m",
+				ExpiresAt:     now.Add(30 * time.Minute),
+				PnlPercentage: 9.9,
+			},
+			{
+				ID:            "sig_partial_final",
+				Playbook:      usecase.LIQUIDITY_SWEEP_REVERSAL,
+				Direction:     usecase.LONG,
+				Status:        usecase.TP1_HIT,
+				EntryPrice:    100,
+				TP1:           105,
+				TP2:           110,
+				StopLoss:      95,
+				TimeToTP1:     "12m",
+				ExpiresAt:     now.Add(-1 * time.Minute),
+				PnlPercentage: 99.0,
+			},
+			{
+				ID:            "sig_tp2",
+				Playbook:      usecase.LIQUIDITY_SWEEP_REVERSAL,
+				Direction:     usecase.LONG,
+				Status:        usecase.TP2_HIT,
+				EntryPrice:    100,
+				TP1:           105,
+				TP2:           110,
+				StopLoss:      95,
+				TimeToTP1:     "5m",
+				TimeToTP2:     "20m",
+				PnlPercentage: 1.0,
+			},
+			{
+				ID:            "sig_sl_after_tp1",
+				Playbook:      usecase.LIQUIDITY_SWEEP_REVERSAL,
+				Direction:     usecase.LONG,
+				Status:        usecase.SL_HIT,
+				EntryPrice:    100,
+				TP1:           105,
+				TP2:           110,
+				StopLoss:      95,
+				TimeToTP1:     "8m",
+				TimeToSL:      "15m",
+				PnlPercentage: -5.0,
+			},
+		},
+	}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if repo.report == nil {
+		t.Fatal("expected report to be saved")
+	}
+	if repo.report.TotalSignals != 3 {
+		t.Fatalf("expected 3 finalized signals, got %d", repo.report.TotalSignals)
+	}
+	if math.Abs(repo.report.Metrics["win_rate"]-((2.0/3.0)*100.0)) > 1e-9 {
+		t.Fatalf("expected win_rate 66.666..., got %v", repo.report.Metrics["win_rate"])
+	}
+	expectedPnl := 2.5 + 10.0 + 0.0
+	if repo.report.Metrics["total_pnl_percentage"] != expectedPnl {
+		t.Fatalf("expected realized total_pnl_percentage %v, got %v", expectedPnl, repo.report.Metrics["total_pnl_percentage"])
+	}
+}
+
+func TestFeedback_WatchMetrics_ExcludeActiveVirtualTP1AndUseRealizedPnL(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &mockFeedbackStorageRepo{
+		watch: []usecase.WatchJournal{
+			{
+				ID:            "watch_active_tp1",
+				Playbook:      usecase.TREND_PULLBACK,
+				Direction:     usecase.LONG,
+				Status:        usecase.VIRTUAL_TP1_HIT,
+				EntryPrice:    100,
+				TP1:           105,
+				TP2:           110,
+				StopLoss:      95,
+				TimeToTP1:     "7m",
+				ExpiresAt:     now.Add(25 * time.Minute),
+				PnlPercentage: 9.0,
+			},
+			{
+				ID:            "watch_partial_final",
+				Playbook:      usecase.LIQUIDITY_SWEEP_REVERSAL,
+				Direction:     usecase.LONG,
+				Status:        usecase.VIRTUAL_TP1_HIT,
+				EntryPrice:    100,
+				TP1:           105,
+				TP2:           110,
+				StopLoss:      95,
+				TimeToTP1:     "11m",
+				ExpiresAt:     now.Add(-1 * time.Minute),
+				PnlPercentage: 99.0,
+			},
+			{
+				ID:            "watch_sl",
+				Playbook:      usecase.LIQUIDITY_SWEEP_REVERSAL,
+				Direction:     usecase.LONG,
+				Status:        usecase.VIRTUAL_SL_HIT,
+				EntryPrice:    100,
+				TP1:           105,
+				TP2:           110,
+				StopLoss:      95,
+				PnlPercentage: -2.0,
+			},
+		},
+	}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if repo.report == nil {
+		t.Fatal("expected report to be saved")
+	}
+	if repo.report.Metrics["watch_finalized"] != 2 {
+		t.Fatalf("expected 2 finalized virtual watches, got %v", repo.report.Metrics["watch_finalized"])
+	}
+	if repo.report.Metrics["watch_virtual_win_rate"] != 50.0 {
+		t.Fatalf("expected watch_virtual_win_rate 50, got %v", repo.report.Metrics["watch_virtual_win_rate"])
+	}
+	expectedPnl := 2.5 - 5.0
+	if repo.report.Metrics["watch_total_pnl_percentage"] != expectedPnl {
+		t.Fatalf("expected watch_total_pnl_percentage %v, got %v", expectedPnl, repo.report.Metrics["watch_total_pnl_percentage"])
 	}
 }
 

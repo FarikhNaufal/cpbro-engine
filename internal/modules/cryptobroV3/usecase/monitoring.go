@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -208,7 +209,7 @@ func monitorJournalEntries(ctx context.Context, uc *MonitoringUsecase, provider 
 	for i := range journal {
 		original := journal[i]
 		item := original
-		if !isActiveMonitoringStatus(item.Status, profile, now, item.ExpiresAt) {
+		if !isActiveMonitoringStatus(item.Status, profile, item.ClosedAt) {
 			continue
 		}
 
@@ -227,7 +228,11 @@ func monitorJournalEntries(ctx context.Context, uc *MonitoringUsecase, provider 
 				if isStopLossHit(item.Direction, c, item.StopLoss) {
 					item.Status = profile.SLHit
 					item.TimeToSL = c.Time.Sub(item.CreatedAt).String()
-					item.OutcomeReason = profile.CandleSLReason
+					if item.TimeToTP1 != "" {
+						item.OutcomeReason = profile.LiveSLAfterTP1
+					} else {
+						item.OutcomeReason = profile.CandleSLReason
+					}
 					break
 				}
 
@@ -262,6 +267,7 @@ func monitorJournalEntries(ctx context.Context, uc *MonitoringUsecase, provider 
 					case item.Status == profile.TP1Hit && price <= item.StopLoss:
 						item.TimeToSL = time.Since(item.CreatedAt).String()
 						item.OutcomeReason = profile.LiveSLAfterTP1
+						item.ClosedAt = now
 						item.ExpiresAt = now.Add(-1 * time.Minute)
 					case item.Status == profile.Monitoring && price >= item.TP1:
 						item.Status = profile.TP1Hit
@@ -286,6 +292,7 @@ func monitorJournalEntries(ctx context.Context, uc *MonitoringUsecase, provider 
 					case item.Status == profile.TP1Hit && price >= item.StopLoss:
 						item.TimeToSL = time.Since(item.CreatedAt).String()
 						item.OutcomeReason = profile.LiveSLAfterTP1
+						item.ClosedAt = now
 						item.ExpiresAt = now.Add(-1 * time.Minute)
 					case item.Status == profile.Monitoring && price <= item.TP1:
 						item.Status = profile.TP1Hit
@@ -311,17 +318,24 @@ func monitorJournalEntries(ctx context.Context, uc *MonitoringUsecase, provider 
 					item.Status = profile.Expired
 					item.OutcomeReason = profile.ExpiredMonitoring
 				} else if item.Status == profile.TP1Hit {
-					item.OutcomeReason = profile.ExpiredAfterTP1
+					if strings.TrimSpace(item.OutcomeReason) == "" || item.OutcomeReason == profile.LiveTP1Reason || item.OutcomeReason == profile.CandleTP1Reason {
+						item.OutcomeReason = profile.ExpiredAfterTP1
+					}
+					if item.ClosedAt.IsZero() {
+						item.ClosedAt = now
+					}
 				}
 			}
 		}
+
+		applyJournalOutcomePnl(&item, profile, now)
 
 		if !monitoringJournalEntryChanged(original, item) {
 			continue
 		}
 
 		item.UpdatedAt = now
-		if item.Status != profile.Monitoring && item.Status != profile.TP1Hit && item.ClosedAt.IsZero() {
+		if isTerminalMonitoringStatus(item.Status, profile) && item.ClosedAt.IsZero() {
 			item.ClosedAt = now
 		}
 		journal[i] = item
@@ -417,8 +431,92 @@ func monitoringJournalEntryChanged(before, after SignalJournal) bool {
 	return false
 }
 
-func isActiveMonitoringStatus(status Status, profile monitoringStatusProfile, now time.Time, expiresAt time.Time) bool {
-	return status == profile.Monitoring || (status == profile.TP1Hit && now.Before(expiresAt))
+func isTerminalMonitoringStatus(status Status, profile monitoringStatusProfile) bool {
+	switch status {
+	case profile.TP2Hit, profile.SLHit, profile.Expired:
+		return true
+	default:
+		return false
+	}
+}
+
+func applyJournalOutcomePnl(item *SignalJournal, profile monitoringStatusProfile, now time.Time) {
+	if item == nil || item.EntryPrice <= 0 {
+		return
+	}
+
+	switch item.Status {
+	case profile.TP2Hit:
+		item.PnlPercentage = realizedTP2Pnl(*item)
+	case profile.SLHit:
+		if item.TimeToTP1 != "" {
+			item.PnlPercentage = realizedStoppedAfterTP1Pnl(*item)
+			return
+		}
+		item.PnlPercentage = realizedSLPnl(*item)
+	case profile.Expired:
+		item.PnlPercentage = 0.0
+	case profile.TP1Hit:
+		if isTP1FinalizedForJournal(*item, now) {
+			if item.TimeToSL != "" {
+				item.PnlPercentage = realizedStoppedAfterTP1Pnl(*item)
+			} else {
+				item.PnlPercentage = realizedTP1PartialPnl(*item)
+			}
+		}
+	}
+}
+
+func isTP1FinalizedForJournal(item SignalJournal, now time.Time) bool {
+	if item.ClosedAt.IsZero() == false {
+		return true
+	}
+	if item.ExpiresAt.IsZero() {
+		return true
+	}
+	return !now.Before(item.ExpiresAt)
+}
+
+func realizedTP1PartialPnl(item SignalJournal) float64 {
+	if item.EntryPrice <= 0 {
+		return 0.0
+	}
+	return 50.0 * (absFloat(item.TP1-item.EntryPrice) / item.EntryPrice)
+}
+
+func realizedTP2Pnl(item SignalJournal) float64 {
+	if item.EntryPrice <= 0 {
+		return 0.0
+	}
+	return 100.0 * (absFloat(item.TP2-item.EntryPrice) / item.EntryPrice)
+}
+
+func realizedSLPnl(item SignalJournal) float64 {
+	if item.EntryPrice <= 0 {
+		return 0.0
+	}
+	return -100.0 * (absFloat(item.EntryPrice-item.StopLoss) / item.EntryPrice)
+}
+
+func realizedStoppedAfterTP1Pnl(item SignalJournal) float64 {
+	return realizedTP1PartialPnl(item) + (realizedSLPnl(item) / 2.0)
+}
+
+func absFloat(v float64) float64 {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+func isActiveMonitoringStatus(status Status, profile monitoringStatusProfile, closedAt time.Time) bool {
+	if status == profile.Monitoring {
+		return true
+	}
+	if status == profile.TP1Hit && closedAt.IsZero() {
+		return true
+	}
+	return false
 }
 
 func updateExcursionFromCandle(item *SignalJournal, candle dto.Candle) {

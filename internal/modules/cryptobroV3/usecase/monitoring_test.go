@@ -337,6 +337,54 @@ func TestMonitoring_MonitorVirtualPositions_Expired(t *testing.T) {
 	}
 }
 
+func TestMonitoring_MonitorVirtualPositions_ExpiredAfterTP1KeepsPartialPnL(t *testing.T) {
+	createdAt := time.Now().Add(-150 * time.Minute)
+	expiresAt := createdAt.Add(120 * time.Minute)
+
+	journal := []usecase.SignalJournal{
+		{
+			ID:         "test_signal_expired_tp1",
+			Symbol:     "SOLUSDT",
+			Direction:  usecase.LONG,
+			EntryPrice: 100.0,
+			StopLoss:   95.0,
+			TP1:        105.0,
+			TP2:        110.0,
+			CreatedAt:  createdAt,
+			ExpiresAt:  expiresAt,
+			Status:     usecase.TP1_HIT,
+			TimeToTP1:  "10m",
+			MFE:        5.0,
+			MAE:        1.0,
+		},
+	}
+
+	repo := &mockStorageRepo{journal: journal}
+	storage := usecase.NewStorageUsecase(repo)
+	provider := &mockMarketDataProvider{candles: nil, price: 104.0}
+	monitor := usecase.NewMonitoringUsecase(provider, storage)
+
+	err := monitor.MonitorVirtualPositions(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	updatedJournal, _ := storage.LoadSignalJournal()
+	item := updatedJournal[0]
+	if item.Status != usecase.TP1_HIT {
+		t.Fatalf("expected TP1_HIT status to remain for partial completion, got %s", item.Status)
+	}
+	if item.OutcomeReason != "Monitoring period expired (120 minutes elapsed) with TP1 success" {
+		t.Fatalf("unexpected outcome reason: %s", item.OutcomeReason)
+	}
+	if item.PnlPercentage != 2.5 {
+		t.Fatalf("expected partial realized pnl 2.5, got %v", item.PnlPercentage)
+	}
+	if item.ClosedAt.IsZero() {
+		t.Fatal("expected ClosedAt to be set for finalized TP1 partial outcome")
+	}
+}
+
 func TestMonitoring_MonitorVirtualWatchPositions_TP1Hit(t *testing.T) {
 	createdAt := time.Now().Add(-20 * time.Minute)
 	expiresAt := createdAt.Add(120 * time.Minute)

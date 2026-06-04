@@ -33,6 +33,71 @@ func safeDiv(val, div float64) float64 {
 	return val / div
 }
 
+func isFinalizedSignalJournalForEvaluation(item SignalJournal, now time.Time) bool {
+	switch item.Status {
+	case TP2_HIT, SL_HIT, EXPIRED, BREAKEVEN:
+		return true
+	case TP1_HIT:
+		return isTP1FinalizedForJournal(item, now)
+	default:
+		return false
+	}
+}
+
+func isFinalizedWatchJournalForEvaluation(item WatchJournal, now time.Time) bool {
+	switch item.Status {
+	case VIRTUAL_TP2_HIT, VIRTUAL_SL_HIT, VIRTUAL_EXPIRED:
+		return true
+	case VIRTUAL_TP1_HIT:
+		return isTP1FinalizedForJournal(SignalJournal(item), now)
+	default:
+		return false
+	}
+}
+
+func signalHasTP1Achievement(item SignalJournal) bool {
+	return item.TimeToTP1 != "" || item.Status == TP1_HIT || item.Status == TP2_HIT
+}
+
+func watchHasTP1Achievement(item WatchJournal) bool {
+	return item.TimeToTP1 != "" || item.Status == VIRTUAL_TP1_HIT || item.Status == VIRTUAL_TP2_HIT
+}
+
+func isWinningSignalOutcome(item SignalJournal, now time.Time) bool {
+	switch item.Status {
+	case TP2_HIT:
+		return true
+	case TP1_HIT:
+		return isTP1FinalizedForJournal(item, now)
+	default:
+		return false
+	}
+}
+
+func realizedEvaluationPnl(item SignalJournal, now time.Time) float64 {
+	switch item.Status {
+	case TP2_HIT, VIRTUAL_TP2_HIT:
+		return realizedTP2Pnl(item)
+	case TP1_HIT, VIRTUAL_TP1_HIT:
+		if isTP1FinalizedForJournal(item, now) {
+			if item.TimeToSL != "" {
+				return realizedStoppedAfterTP1Pnl(item)
+			}
+			return realizedTP1PartialPnl(item)
+		}
+		return item.PnlPercentage
+	case SL_HIT, VIRTUAL_SL_HIT:
+		if item.TimeToTP1 != "" {
+			return realizedStoppedAfterTP1Pnl(item)
+		}
+		return realizedSLPnl(item)
+	case EXPIRED, VIRTUAL_EXPIRED:
+		return 0.0
+	default:
+		return item.PnlPercentage
+	}
+}
+
 // getSampleGuard returns confidence, requiresMoreData, and severity based on sample size
 func getSampleGuard(sampleSize int) (confidence string, requiresMoreData bool, severity string) {
 	if sampleSize < 10 {
@@ -135,9 +200,10 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	}
 
 	// 2. Identify finalised signals (from journal)
+	now := time.Now()
 	var finalized []SignalJournal
 	for _, item := range journal {
-		if item.Status != MONITORING {
+		if isFinalizedSignalJournalForEvaluation(item, now) {
 			finalized = append(finalized, item)
 		}
 	}
@@ -186,7 +252,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	}
 
 	for _, item := range finalized {
-		isWin := item.Status == TP1_HIT || item.Status == TP2_HIT
+		isWin := isWinningSignalOutcome(item, now)
 		isLoss := item.Status == SL_HIT
 		isExpired := item.Status == EXPIRED
 
@@ -197,7 +263,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 			losses++
 		}
 
-		hasHitTP1 := item.TimeToTP1 != "" || item.Status == TP1_HIT || item.Status == TP2_HIT
+		hasHitTP1 := signalHasTP1Achievement(item)
 		if hasHitTP1 {
 			tp1Hits++
 		}
@@ -211,7 +277,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 			expiredHits++
 		}
 
-		totalPnl += item.PnlPercentage
+		totalPnl += realizedEvaluationPnl(item, now)
 		sumMFE += item.MFE
 		sumMAE += item.MAE
 		sumRR += item.RR
@@ -349,16 +415,13 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	var watchTP1Hits, watchTP2Hits, watchSLHits, watchExpiredHits int
 	var watchSumMFE, watchSumMAE, watchTotalPnl float64
 
-	now := time.Now()
 	for _, item := range watchJournal {
-		isVirtualExpired := item.Status == VIRTUAL_EXPIRED
-		isVirtualMonitoring := item.Status == WATCH_MONITORING || (item.Status == VIRTUAL_TP1_HIT && now.Before(item.ExpiresAt))
-		if isVirtualMonitoring && !isVirtualExpired {
+		if !isFinalizedWatchJournalForEvaluation(item, now) {
 			continue
 		}
 		watchFinalized = append(watchFinalized, item)
 
-		if item.TimeToTP1 != "" || item.Status == VIRTUAL_TP1_HIT || item.Status == VIRTUAL_TP2_HIT {
+		if watchHasTP1Achievement(item) {
 			watchTP1Hits++
 		}
 		if item.Status == VIRTUAL_TP2_HIT {
@@ -372,7 +435,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		}
 		watchSumMFE += item.MFE
 		watchSumMAE += item.MAE
-		watchTotalPnl += item.PnlPercentage
+		watchTotalPnl += realizedEvaluationPnl(SignalJournal(item), now)
 	}
 
 	watchFinalizedCount := len(watchFinalized)
