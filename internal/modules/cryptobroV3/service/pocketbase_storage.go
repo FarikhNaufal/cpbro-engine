@@ -28,8 +28,14 @@ type PocketBaseStorageService struct {
 	fallback usecase.StorageRepository
 	client   *PocketBaseClient
 
-	mu sync.Mutex
+	mu                sync.Mutex
+	journalSourceMode string
 }
+
+const (
+	journalSourcePocketBaseFirst = "pocketbase_first"
+	journalSourceLocalFirst      = "local_first"
+)
 
 type pbListResponse struct {
 	Page       int              `json:"page"`
@@ -40,16 +46,21 @@ type pbListResponse struct {
 	Raw        json.RawMessage  `json:"-"`
 }
 
-func NewPocketBaseStorageService(fallback usecase.StorageRepository, client *PocketBaseClient) (*PocketBaseStorageService, error) {
+func NewPocketBaseStorageService(fallback usecase.StorageRepository, client *PocketBaseClient, sourceMode ...string) (*PocketBaseStorageService, error) {
 	if fallback == nil {
 		return nil, errors.New("fallback storage repo is nil")
 	}
 	if client == nil {
 		return nil, errors.New("pocketbase client is nil")
 	}
+	mode := journalSourcePocketBaseFirst
+	if len(sourceMode) > 0 {
+		mode = normalizeJournalSourceMode(sourceMode[0])
+	}
 	return &PocketBaseStorageService{
-		fallback: fallback,
-		client:   client,
+		fallback:          fallback,
+		client:            client,
+		journalSourceMode: mode,
 	}, nil
 }
 
@@ -101,7 +112,7 @@ func (s *PocketBaseStorageService) AppendDecisionAudits(entries []usecase.Decisi
 
 func (s *PocketBaseStorageService) LoadSignalJournal() ([]usecase.SignalJournal, error) {
 	localJournal, localErr := s.fallback.LoadSignalJournal()
-	if localErr == nil && len(localJournal) > 0 {
+	if s.journalSourceMode == journalSourceLocalFirst && localErr == nil && len(localJournal) > 0 {
 		return localJournal, nil
 	}
 
@@ -133,6 +144,9 @@ func (s *PocketBaseStorageService) LoadSignalJournal() ([]usecase.SignalJournal,
 		if err := s.fallback.SaveSignalJournal(out); err != nil {
 			slog.Warn("JSON fallback signal_journals sync failed after PocketBase load", "error", err)
 		}
+	}
+	if len(out) == 0 {
+		return []usecase.SignalJournal{}, nil
 	}
 	return out, nil
 }
@@ -325,7 +339,7 @@ func (s *PocketBaseStorageService) UpsertSignalJournalEntries(entries []usecase.
 
 func (s *PocketBaseStorageService) LoadWatchJournal() ([]usecase.WatchJournal, error) {
 	localJournal, localErr := s.fallback.LoadWatchJournal()
-	if localErr == nil && len(localJournal) > 0 {
+	if s.journalSourceMode == journalSourceLocalFirst && localErr == nil && len(localJournal) > 0 {
 		return localJournal, nil
 	}
 
@@ -356,6 +370,60 @@ func (s *PocketBaseStorageService) LoadWatchJournal() ([]usecase.WatchJournal, e
 			slog.Warn("JSON fallback watch_journals sync failed after PocketBase load", "error", err)
 		}
 	}
+	if len(out) == 0 {
+		return []usecase.WatchJournal{}, nil
+	}
+	return out, nil
+}
+
+func (s *PocketBaseStorageService) FindWatchJournalCandidates(probe usecase.WatchJournal) ([]usecase.WatchJournal, error) {
+	if s.journalSourceMode == journalSourceLocalFirst {
+		localJournal, err := s.fallback.LoadWatchJournal()
+		if err == nil && len(localJournal) > 0 {
+			return filterMatchingWatchJournalCandidates(localJournal, probe), nil
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	q := url.Values{}
+	q.Set("perPage", "50")
+	q.Set("page", "1")
+	q.Set("sort", "-updated_at,-created_at")
+	q.Set("filter", fmt.Sprintf(
+		"symbol='%s' && direction='%s' && playbook='%s'",
+		escapePBFilterValue(probe.Symbol),
+		escapePBFilterValue(string(probe.Direction)),
+		escapePBFilterValue(string(probe.Playbook)),
+	))
+
+	var resp pbListResponse
+	if err := s.client.doJSON(ctx, "GET", "/api/collections/watch_journals/records", q, nil, &resp); err != nil {
+		slog.Warn("PocketBase watch_journals candidate lookup failed; falling back to JSON storage", "error", err)
+		localJournal, localErr := s.fallback.LoadWatchJournal()
+		if localErr != nil {
+			return nil, localErr
+		}
+		return filterMatchingWatchJournalCandidates(localJournal, probe), nil
+	}
+
+	out := make([]usecase.WatchJournal, 0, len(resp.Items))
+	for _, m := range resp.Items {
+		j, err := decodeSignalJournal(m)
+		if err != nil {
+			continue
+		}
+		out = append(out, usecase.WatchJournal(j))
+	}
+
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].UpdatedAt.After(out[j].UpdatedAt)
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+
 	return out, nil
 }
 
@@ -532,6 +600,15 @@ func (s *PocketBaseStorageService) listAll(ctx context.Context, collection strin
 		page++
 	}
 	return out, nil
+}
+
+func normalizeJournalSourceMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case journalSourceLocalFirst, "local_mirror_first":
+		return journalSourceLocalFirst
+	default:
+		return journalSourcePocketBaseFirst
+	}
 }
 
 func (s *PocketBaseStorageService) updateFallbackSignalJournal(update func([]usecase.SignalJournal) ([]usecase.SignalJournal, error)) error {

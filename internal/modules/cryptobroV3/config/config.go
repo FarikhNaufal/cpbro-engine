@@ -120,6 +120,7 @@ type PocketBaseConfig struct {
 	AdminPassword         string `json:"-"`
 	RequestTimeoutSeconds int    `json:"request_timeout_seconds"`
 	LoginRetryMax         int    `json:"login_retry_max"`
+	JournalSourceMode     string `json:"journal_source_mode"`
 }
 
 // SafetyConfig strict runtime overrides (must never be false in production)
@@ -282,6 +283,7 @@ func LoadConfigFromEnv() (*Config, error) {
 			AdminPassword:         getEnv("POCKETBASE_ADMIN_PASSWORD", ""),
 			RequestTimeoutSeconds: getEnvInt("POCKETBASE_REQUEST_TIMEOUT_SECONDS", 10),
 			LoginRetryMax:         getEnvInt("POCKETBASE_LOGIN_RETRY_MAX", 1),
+			JournalSourceMode:     getEnv("POCKETBASE_JOURNAL_SOURCE_MODE", "pocketbase_first"),
 		},
 		Safety: SafetyConfig{
 			AlertOnly:                    getEnvBool("ALERT_ONLY", true),
@@ -354,6 +356,14 @@ func ValidateConfig(cfg *Config) error {
 		if cfg.PocketBase.LoginRetryMax > 3 {
 			// prevent accidental long retry loops
 			cfg.PocketBase.LoginRetryMax = 3
+		}
+		switch strings.ToLower(strings.TrimSpace(cfg.PocketBase.JournalSourceMode)) {
+		case "", "pocketbase_first":
+			cfg.PocketBase.JournalSourceMode = "pocketbase_first"
+		case "local_first", "local_mirror_first":
+			cfg.PocketBase.JournalSourceMode = "local_first"
+		default:
+			return fmt.Errorf("POCKETBASE_JOURNAL_SOURCE_MODE must be pocketbase_first or local_first")
 		}
 	}
 

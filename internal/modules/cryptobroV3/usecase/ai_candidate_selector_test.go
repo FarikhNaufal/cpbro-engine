@@ -168,3 +168,39 @@ func TestAICandidateSelector_OpposingAndTiers(t *testing.T) {
 		t.Errorf("Expected SOLUSDT Tier C to be in skipped list under chaos")
 	}
 }
+
+func TestAICandidateSelector_ChopRangePrefersRangeEdgeOverSweepOnNearTie(t *testing.T) {
+	selector := NewAICandidateSelectorUsecase(7.5)
+
+	policy := MarketPolicy{
+		Regime:          CHOP_RANGE,
+		MaxAICandidates: 1,
+	}
+
+	candidates := []QuantResult{
+		{
+			Symbol:    "SOLUSDT",
+			Direction: LONG,
+			Playbook:  LIQUIDITY_SWEEP_REVERSAL,
+			Score:     8.0,
+			Tier:      TierA,
+			TradePlan: TradePlan{EntryPrice: 10.0, TakeProfit: 12.0, StopLoss: 9.0},
+		},
+		{
+			Symbol:    "ARBUSDT",
+			Direction: LONG,
+			Playbook:  RANGE_EDGE_REVERSAL,
+			Score:     8.0,
+			Tier:      TierA,
+			TradePlan: TradePlan{EntryPrice: 10.0, TakeProfit: 12.0, StopLoss: 9.0},
+		},
+	}
+
+	selected, _ := selector.SelectCandidates(candidates, policy)
+	if len(selected) != 1 {
+		t.Fatalf("expected one selected candidate, got %d", len(selected))
+	}
+	if selected[0].Playbook != RANGE_EDGE_REVERSAL {
+		t.Fatalf("expected RANGE_EDGE_REVERSAL to win CHOP_RANGE near tie, got %s", selected[0].Playbook)
+	}
+}

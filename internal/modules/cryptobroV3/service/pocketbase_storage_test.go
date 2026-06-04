@@ -211,6 +211,101 @@ func TestPocketBaseStorageService_WatchJournalAppendAndLoad(t *testing.T) {
 	}
 }
 
+func TestPocketBaseStorageService_FindWatchJournalCandidates_UsesFilteredLookup(t *testing.T) {
+	var requestedFilter string
+	var requestedSort string
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/collections/_superusers/auth-with-password":
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": "testtoken"})
+			return
+		case r.Method == http.MethodGet && r.URL.Path == "/api/collections/watch_journals/records":
+			if got := r.Header.Get("Authorization"); got != "Bearer testtoken" {
+				http.Error(w, "missing bearer", http.StatusUnauthorized)
+				return
+			}
+			requestedFilter = r.URL.Query().Get("filter")
+			requestedSort = r.URL.Query().Get("sort")
+			if requestedFilter == "" {
+				http.Error(w, "expected targeted filter", http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"page":       1,
+				"perPage":    50,
+				"totalItems": 1,
+				"totalPages": 1,
+				"items": []map[string]any{
+					{
+						"id":         "watchrec1",
+						"signal_id":  "watch_1",
+						"symbol":     "SOLUSDT",
+						"direction":  "LONG",
+						"playbook":   "LIQUIDITY_SWEEP_REVERSAL",
+						"entry":      100.0,
+						"sl":         98.0,
+						"tp1":        103.0,
+						"tp2":        105.0,
+						"rr":         2.5,
+						"status":     "WATCH_MONITORING",
+						"created_at": time.Now().UTC().Add(-10 * time.Minute).Format(time.RFC3339Nano),
+						"updated_at": time.Now().UTC().Format(time.RFC3339Nano),
+						"expires_at": time.Now().UTC().Add(2 * time.Hour).Format(time.RFC3339Nano),
+					},
+				},
+			})
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	})
+
+	httpClient := &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, r)
+			return rr.Result(), nil
+		}),
+	}
+
+	tmpDir := t.TempDir()
+	fallback, err := NewJSONStorageService(filepath.Join(tmpDir, "storage"))
+	if err != nil {
+		t.Fatalf("NewJSONStorageService: %v", err)
+	}
+
+	client, err := NewPocketBaseClientWithHTTPClient("http://pocketbase.local", httpClient, 2*time.Second, PocketBaseAuthModeSuperuser, "", "admin@example.com", "pass", 1)
+	if err != nil {
+		t.Fatalf("NewPocketBaseClient: %v", err)
+	}
+
+	st, err := NewPocketBaseStorageService(fallback, client)
+	if err != nil {
+		t.Fatalf("NewPocketBaseStorageService: %v", err)
+	}
+
+	candidates, err := st.FindWatchJournalCandidates(usecase.WatchJournal{
+		Symbol:    "SOLUSDT",
+		Direction: usecase.LONG,
+		Playbook:  usecase.LIQUIDITY_SWEEP_REVERSAL,
+	})
+	if err != nil {
+		t.Fatalf("FindWatchJournalCandidates: %v", err)
+	}
+
+	if len(candidates) != 1 || candidates[0].ID != "watch_1" {
+		t.Fatalf("unexpected candidates: %+v", candidates)
+	}
+	if !strings.Contains(requestedFilter, "symbol='SOLUSDT'") || !strings.Contains(requestedFilter, "direction='LONG'") || !strings.Contains(requestedFilter, "playbook='LIQUIDITY_SWEEP_REVERSAL'") {
+		t.Fatalf("unexpected filter: %s", requestedFilter)
+	}
+	if requestedSort != "-updated_at,-created_at" {
+		t.Fatalf("unexpected sort: %s", requestedSort)
+	}
+}
+
 func TestPocketBaseStorageService_UpsertSignalJournalEntries_UsesTargetedLookup(t *testing.T) {
 	var patchedPayload map[string]any
 
@@ -306,7 +401,7 @@ func TestPocketBaseStorageService_UpsertSignalJournalEntries_UsesTargetedLookup(
 	}
 }
 
-func TestPocketBaseStorageService_LoadSignalJournal_PrefersLocalMirror(t *testing.T) {
+func TestPocketBaseStorageService_LoadSignalJournal_LocalFirstModePrefersMirror(t *testing.T) {
 	httpClient := &http.Client{
 		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 			t.Fatalf("unexpected PocketBase request during local mirror load: %s %s", r.Method, r.URL.Path)
@@ -343,7 +438,7 @@ func TestPocketBaseStorageService_LoadSignalJournal_PrefersLocalMirror(t *testin
 		t.Fatalf("NewPocketBaseClient: %v", err)
 	}
 
-	st, err := NewPocketBaseStorageService(fallback, client)
+	st, err := NewPocketBaseStorageService(fallback, client, "local_first")
 	if err != nil {
 		t.Fatalf("NewPocketBaseStorageService: %v", err)
 	}
@@ -354,6 +449,92 @@ func TestPocketBaseStorageService_LoadSignalJournal_PrefersLocalMirror(t *testin
 	}
 	if len(journal) != 1 || journal[0].ID != "sig_local" {
 		t.Fatalf("unexpected local mirror journal result: %+v", journal)
+	}
+}
+
+func TestPocketBaseStorageService_LoadSignalJournal_PocketBaseFirstIgnoresLocalMirror(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/collections/_superusers/auth-with-password":
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": "testtoken"})
+			return
+		case r.Method == http.MethodGet && r.URL.Path == "/api/collections/signal_journals/records":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"page":       1,
+				"perPage":    200,
+				"totalItems": 1,
+				"totalPages": 1,
+				"items": []map[string]any{
+					{
+						"id":         "rec-pb-1",
+						"signal_id":  "sig_pb",
+						"symbol":     "ETHUSDT",
+						"direction":  "SHORT",
+						"playbook":   "LIQUIDITY_SWEEP_REVERSAL",
+						"entry":      100.0,
+						"sl":         102.0,
+						"tp1":        97.0,
+						"tp2":        95.0,
+						"rr":         2.0,
+						"status":     "MONITORING",
+						"created_at": time.Now().UTC().Format(time.RFC3339Nano),
+						"expires_at": time.Now().UTC().Add(2 * time.Hour).Format(time.RFC3339Nano),
+					},
+				},
+			})
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	})
+
+	httpClient := &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, r)
+			return rr.Result(), nil
+		}),
+	}
+
+	tmpDir := t.TempDir()
+	fallback, err := NewJSONStorageService(filepath.Join(tmpDir, "storage"))
+	if err != nil {
+		t.Fatalf("NewJSONStorageService: %v", err)
+	}
+	if err := fallback.SaveSignalJournal([]usecase.SignalJournal{{
+		ID:         "sig_local",
+		Symbol:     "BTCUSDT",
+		Direction:  usecase.LONG,
+		Playbook:   usecase.TREND_PULLBACK,
+		EntryPrice: 100,
+		StopLoss:   98,
+		TP1:        105,
+		TP2:        110,
+		RR:         2.5,
+		Status:     usecase.MONITORING,
+		CreatedAt:  time.Now().UTC(),
+		ExpiresAt:  time.Now().UTC().Add(2 * time.Hour),
+	}}); err != nil {
+		t.Fatalf("SaveSignalJournal local mirror: %v", err)
+	}
+
+	client, err := NewPocketBaseClientWithHTTPClient("http://pocketbase.local", httpClient, 2*time.Second, PocketBaseAuthModeSuperuser, "", "admin@example.com", "pass", 1)
+	if err != nil {
+		t.Fatalf("NewPocketBaseClient: %v", err)
+	}
+
+	st, err := NewPocketBaseStorageService(fallback, client)
+	if err != nil {
+		t.Fatalf("NewPocketBaseStorageService: %v", err)
+	}
+
+	journal, err := st.LoadSignalJournal()
+	if err != nil {
+		t.Fatalf("LoadSignalJournal: %v", err)
+	}
+	if len(journal) != 1 || journal[0].ID != "sig_pb" {
+		t.Fatalf("expected PocketBase-first row, got %+v", journal)
 	}
 }
 

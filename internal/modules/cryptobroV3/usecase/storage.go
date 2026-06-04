@@ -4,6 +4,7 @@ import (
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 	"cpbro-engine/internal/modules/cryptobroV3/entity"
 	"strings"
+	"time"
 )
 
 type StorageUsecase struct {
@@ -30,6 +31,10 @@ type signalJournalEntryUpserter interface {
 
 type watchJournalEntryUpserter interface {
 	UpsertWatchJournalEntries(entries []WatchJournal) error
+}
+
+type watchJournalCandidateFinder interface {
+	FindWatchJournalCandidates(probe WatchJournal) ([]WatchJournal, error)
 }
 
 type decisionAuditBatchAppender interface {
@@ -178,11 +183,44 @@ func (uc *StorageUsecase) UpdateWatchJournal(update func([]WatchJournal) ([]Watc
 }
 
 func (uc *StorageUsecase) SaveWatchToJournal(sig WatchJournal) error {
-	err := uc.repo.AppendWatchJournal(sig)
+	now := sig.CreatedAt
+	if now.IsZero() {
+		now = time.Now()
+	}
+
+	current, loadErr := uc.loadWatchJournalCandidates(sig)
+	if loadErr != nil {
+		GetGlobalMetrics().IncrementStorageWriteFail()
+		return loadErr
+	}
+
+	decision, entry := resolveWatchJournalPersistence(current, sig, now)
+
+	var err error
+	switch decision {
+	case watchPersistSkip:
+		return nil
+	case watchPersistUpdate:
+		return uc.UpsertWatchJournalEntries([]WatchJournal{entry})
+	default:
+		err = uc.repo.AppendWatchJournal(sig)
+	}
 	if err != nil {
 		GetGlobalMetrics().IncrementStorageWriteFail()
 	}
 	return err
+}
+
+func (uc *StorageUsecase) loadWatchJournalCandidates(probe WatchJournal) ([]WatchJournal, error) {
+	if finder, ok := uc.repo.(watchJournalCandidateFinder); ok {
+		return finder.FindWatchJournalCandidates(probe)
+	}
+
+	current, err := uc.repo.LoadWatchJournal()
+	if err != nil {
+		return nil, err
+	}
+	return filterWatchJournalCandidates(current, probe), nil
 }
 
 func (uc *StorageUsecase) UpsertWatchJournalEntries(entries []WatchJournal) error {

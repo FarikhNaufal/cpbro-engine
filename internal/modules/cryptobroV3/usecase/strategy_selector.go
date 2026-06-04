@@ -56,6 +56,12 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 	}
 
 	hasDerivativesEvidence := tech != nil && tech.IndicatorValues != nil && tech.IndicatorValues[IndicatorHasCrowdingEvidence] == 1.0
+	finalizeSelections := func(selections []StrategySelection) []StrategySelection {
+		for i := range selections {
+			selections[i].Priority = resolvePlaybookPriority(regime, selections[i].Direction, Playbook(selections[i].StrategyName))
+		}
+		return selections
+	}
 
 	// 1. BTC_CHAOS regime
 	if regime == BTC_CHAOS {
@@ -112,7 +118,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 				})
 			}
 		}
-		return selections
+		return finalizeSelections(selections)
 	}
 
 	// 2. COMPRESSION regime
@@ -144,7 +150,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 				})
 			}
 		}
-		return selections
+		return finalizeSelections(selections)
 	}
 
 	// 3. ALT_SUPPORTIVE regime
@@ -203,7 +209,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 				})
 			}
 		}
-		return selections
+		return finalizeSelections(selections)
 	}
 
 	// 4. BTC_DOMINANCE regime
@@ -238,7 +244,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 				})
 			}
 		}
-		return selections
+		return finalizeSelections(selections)
 	}
 
 	// 5. RISK_OFF regime
@@ -321,7 +327,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 				})
 			}
 		}
-		return selections
+		return finalizeSelections(selections)
 	}
 
 	// 6. CHOP_RANGE regime
@@ -405,7 +411,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 				})
 			}
 		}
-		return selections
+		return finalizeSelections(selections)
 	}
 
 	// 7. Fallback to evaluating allowed playbooks linearly
@@ -439,5 +445,5 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 		}
 	}
 
-	return selections
+	return finalizeSelections(selections)
 }

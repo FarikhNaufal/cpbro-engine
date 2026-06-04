@@ -64,6 +64,7 @@ type SREMetrics struct {
 	AIBatchDurationMs      uint64  `json:"ai_batch_duration_ms"`
 	FinalGateDurationMs    uint64  `json:"final_gate_duration_ms"`
 	EstimatedRequestWeight uint64  `json:"estimated_request_weight"`
+	RequestWeightBudget    uint64  `json:"request_weight_budget"`
 	PrefetchCandidateCount uint64  `json:"prefetch_candidate_count"`
 	EnrichedCandidateCount uint64  `json:"enriched_candidate_count"`
 	ScanSuccessCount       uint64  `json:"scan_success_count"`
@@ -206,6 +207,7 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 		AIBatchDurationMs:      atomic.LoadUint64(&reg.LastAIBatchMs),
 		FinalGateDurationMs:    atomic.LoadUint64(&reg.LastFinalGateMs),
 		EstimatedRequestWeight: atomic.LoadUint64(&reg.LastRequestWeight),
+		RequestWeightBudget:    atomic.LoadUint64(&reg.LastRequestBudget),
 		PrefetchCandidateCount: atomic.LoadUint64(&reg.LastPrefetchCount),
 		EnrichedCandidateCount: atomic.LoadUint64(&reg.LastEnrichedCount),
 		ScanSuccessCount:       atomic.LoadUint64(&reg.ScanSuccessCount),

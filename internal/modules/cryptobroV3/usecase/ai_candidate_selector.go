@@ -55,8 +55,8 @@ func (uc *AICandidateSelectorUsecase) SelectCandidates(candidates []QuantResult,
 			return rrI > rrJ
 		}
 		// Playbook Priority
-		prioI := uc.getPlaybookPriorityIndex(sorted[i].Playbook, regime)
-		prioJ := uc.getPlaybookPriorityIndex(sorted[j].Playbook, regime)
+		prioI := uc.getPlaybookPriorityIndex(sorted[i].Playbook, sorted[i].Direction, regime)
+		prioJ := uc.getPlaybookPriorityIndex(sorted[j].Playbook, sorted[j].Direction, regime)
 		if prioI != prioJ {
 			return prioI < prioJ
 		}
@@ -159,69 +159,6 @@ func (uc *AICandidateSelectorUsecase) calculateRR(cand QuantResult) float64 {
 }
 
 // getPlaybookPriorityIndex maps playbook priority index based on the regime
-func (uc *AICandidateSelectorUsecase) getPlaybookPriorityIndex(playbook Playbook, regime MarketRegime) int {
-	if regime == CHOP_RANGE {
-		switch playbook {
-		case LIQUIDITY_SWEEP_REVERSAL:
-			return 0
-		case RANGE_EDGE_REVERSAL:
-			return 1
-		case CROWDED_POSITIONING_SQUEEZE:
-			return 2
-		case COMPRESSION_BREAKOUT_RETEST:
-			return 3
-		case TREND_PULLBACK:
-			return 4
-		}
-	} else if regime == BTC_CHAOS {
-		switch playbook {
-		case LIQUIDITY_SWEEP_REVERSAL:
-			return 0
-		case CROWDED_POSITIONING_SQUEEZE:
-			return 1
-		default:
-			return 99
-		}
-	} else if regime == RISK_OFF {
-		switch playbook {
-		case LIQUIDITY_SWEEP_REVERSAL:
-			return 0
-		case RANGE_EDGE_REVERSAL:
-			return 1
-		case TREND_PULLBACK:
-			return 2
-		case COMPRESSION_BREAKOUT_RETEST:
-			return 3
-		case CROWDED_POSITIONING_SQUEEZE:
-			return 4
-		}
-	} else if regime == ALT_SUPPORTIVE {
-		switch playbook {
-		case TREND_PULLBACK:
-			return 0
-		case COMPRESSION_BREAKOUT_RETEST:
-			return 1
-		case LIQUIDITY_SWEEP_REVERSAL:
-			return 2
-		case CROWDED_POSITIONING_SQUEEZE:
-			return 3
-		case RANGE_EDGE_REVERSAL:
-			return 4
-		}
-	}
-
-	// Default normal priority
-	switch playbook {
-	case TREND_PULLBACK:
-		return 0
-	case LIQUIDITY_SWEEP_REVERSAL:
-		return 1
-	case COMPRESSION_BREAKOUT_RETEST:
-		return 2
-	case CROWDED_POSITIONING_SQUEEZE:
-		return 3
-	case RANGE_EDGE_REVERSAL:
-		return 4
-	}
-	return 100
+func (uc *AICandidateSelectorUsecase) getPlaybookPriorityIndex(playbook Playbook, dir Direction, regime MarketRegime) int {
+	return resolvePlaybookPriority(regime, dir, playbook)
 }

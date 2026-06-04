@@ -19,6 +19,7 @@ type MetricsRegistry struct {
 	LastAIBatchMs      uint64
 	LastFinalGateMs    uint64
 	LastRequestWeight  uint64
+	LastRequestBudget  uint64
 	LastPrefetchCount  uint64
 	LastEnrichedCount  uint64
 	TotalTickers       uint64
@@ -100,6 +101,10 @@ func (m *MetricsRegistry) SetLastFinalGateDuration(d time.Duration) {
 
 func (m *MetricsRegistry) SetLastScanRequestWeight(weight uint64) {
 	atomic.StoreUint64(&m.LastRequestWeight, weight)
+}
+
+func (m *MetricsRegistry) SetLastScanRequestWeightBudget(weight uint64) {
+	atomic.StoreUint64(&m.LastRequestBudget, weight)
 }
 
 func (m *MetricsRegistry) SetLastPrefetchCandidateCount(count uint64) {

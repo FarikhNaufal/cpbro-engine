@@ -912,3 +912,33 @@ func TestEstimateScanRequestWeight(t *testing.T) {
 		t.Fatalf("expected weight %d, got %d", expected, weight)
 	}
 }
+
+func TestResolveAdaptiveScanRequestGuard_ReducesPrefetchToBudget(t *testing.T) {
+	t.Setenv("SCAN_REQUEST_WEIGHT_BUDGET", "120")
+
+	guard := resolveAdaptiveScanRequestGuard(MarketPolicy{Regime: ALT_SUPPORTIVE}, 50, 24, 8)
+	if !guard.Applied {
+		t.Fatalf("expected adaptive guard to be applied")
+	}
+	if guard.PrefetchLimit >= 24 {
+		t.Fatalf("expected reduced prefetch limit, got %d", guard.PrefetchLimit)
+	}
+	if guard.ExpectedWeight > guard.Budget {
+		t.Fatalf("expected guarded weight <= budget, got weight=%d budget=%d", guard.ExpectedWeight, guard.Budget)
+	}
+	if guard.MarketDataConcurrency > 4 {
+		t.Fatalf("expected concurrency to be tightened, got %d", guard.MarketDataConcurrency)
+	}
+}
+
+func TestResolveAdaptiveScanRequestGuard_BTCChaosTightensConcurrency(t *testing.T) {
+	t.Setenv("SCAN_REQUEST_WEIGHT_BUDGET", "")
+
+	guard := resolveAdaptiveScanRequestGuard(MarketPolicy{Regime: BTC_CHAOS}, 30, 8, 6)
+	if guard.MarketDataConcurrency != 2 {
+		t.Fatalf("expected BTC_CHAOS market-data concurrency 2, got %d", guard.MarketDataConcurrency)
+	}
+	if guard.PipelineConcurrency != 2 {
+		t.Fatalf("expected BTC_CHAOS pipeline concurrency 2, got %d", guard.PipelineConcurrency)
+	}
+}

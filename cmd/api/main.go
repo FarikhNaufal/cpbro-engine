@@ -80,12 +80,12 @@ func main() {
 			log.Fatalf("failed to initialize pocketbase client: %v", err)
 		}
 		if pbClient != nil {
-			pbStorage, err := service.NewPocketBaseStorageService(jsonStorage, pbClient)
+			pbStorage, err := service.NewPocketBaseStorageService(jsonStorage, pbClient, cfg.PocketBase.JournalSourceMode)
 			if err != nil {
 				log.Fatalf("failed to initialize pocketbase storage: %v", err)
 			}
 			storageRepo = pbStorage
-			slog.Info("PocketBase storage enabled for signal_journals + watch_journals + evaluation_runs")
+			slog.Info("PocketBase storage enabled for signal_journals + watch_journals + evaluation_runs", "journal_source_mode", cfg.PocketBase.JournalSourceMode)
 		}
 	}
 

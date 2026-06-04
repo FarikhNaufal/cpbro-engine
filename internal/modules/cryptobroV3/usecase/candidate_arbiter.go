@@ -25,9 +25,6 @@ func (uc *CandidateArbiterUsecase) Arbitrate(candidates []QuantResult, policy Ma
 
 	regime := policy.EffectiveRegime()
 	isChaos := regime == BTC_CHAOS
-	isChop := regime == CHOP_RANGE
-	isRiskOff := regime == RISK_OFF
-	isAltSupportive := regime == ALT_SUPPORTIVE
 
 	// Group by symbol
 	symbolGroups := make(map[string][]QuantResult)
@@ -208,8 +205,8 @@ func (uc *CandidateArbiterUsecase) Arbitrate(candidates []QuantResult, policy Ma
 				}
 
 				// Tie-breaker 1: playbook priority index
-				pI := uc.getPlaybookPriorityIndex(cands[i].Playbook, cands[i].Direction, isChaos, isChop, isRiskOff, isAltSupportive)
-				pJ := uc.getPlaybookPriorityIndex(cands[j].Playbook, cands[j].Direction, isChaos, isChop, isRiskOff, isAltSupportive)
+				pI := uc.getPlaybookPriorityIndex(cands[i].Playbook, cands[i].Direction, regime)
+				pJ := uc.getPlaybookPriorityIndex(cands[j].Playbook, cands[j].Direction, regime)
 				if pI != pJ {
 					return pI < pJ
 				}
@@ -342,103 +339,8 @@ func (uc *CandidateArbiterUsecase) Arbitrate(candidates []QuantResult, policy Ma
 }
 
 // getPlaybookPriorityIndex returns priority ordering index (lower = higher priority).
-func (uc *CandidateArbiterUsecase) getPlaybookPriorityIndex(playbook Playbook, dir Direction, isChaos, isChop, isRiskOff, isAltSupportive bool) int {
-	if isChaos {
-		switch playbook {
-		case LIQUIDITY_SWEEP_REVERSAL:
-			return 0
-		case CROWDED_POSITIONING_SQUEEZE:
-			return 1
-		default:
-			return 99
-		}
-	}
-
-	if isChop {
-		switch playbook {
-		case RANGE_EDGE_REVERSAL:
-			return 0
-		case LIQUIDITY_SWEEP_REVERSAL:
-			return 1
-		case CROWDED_POSITIONING_SQUEEZE:
-			return 2
-		case COMPRESSION_BREAKOUT_RETEST:
-			return 3
-		case TREND_PULLBACK:
-			return 4
-		default:
-			return 99
-		}
-	}
-
-	if isRiskOff {
-		// Defensive regime: prioritize reversal-style playbooks (policy should already restrict AllowedPlaybooks).
-		switch playbook {
-		case LIQUIDITY_SWEEP_REVERSAL:
-			return 0
-		case RANGE_EDGE_REVERSAL:
-			return 1
-		case CROWDED_POSITIONING_SQUEEZE:
-			return 2
-		case TREND_PULLBACK:
-			return 3
-		case COMPRESSION_BREAKOUT_RETEST:
-			return 4
-		default:
-			return 99
-		}
-	}
-
-	if isAltSupportive {
-		// Favor LONG continuation-style playbooks; SHORT should generally be reversal-only via policy.
-		if dir == LONG {
-			switch playbook {
-			case TREND_PULLBACK:
-				return 0
-			case COMPRESSION_BREAKOUT_RETEST:
-				return 1
-			case LIQUIDITY_SWEEP_REVERSAL:
-				return 2
-			case CROWDED_POSITIONING_SQUEEZE:
-				return 3
-			case RANGE_EDGE_REVERSAL:
-				return 4
-			default:
-				return 99
-			}
-		}
-
-		switch playbook {
-		case LIQUIDITY_SWEEP_REVERSAL:
-			return 0
-		case RANGE_EDGE_REVERSAL:
-			return 1
-		case CROWDED_POSITIONING_SQUEEZE:
-			return 2
-		case TREND_PULLBACK:
-			return 3
-		case COMPRESSION_BREAKOUT_RETEST:
-			return 4
-		default:
-			return 99
-		}
-	}
-
-	// Default normal priority
-	switch playbook {
-	case TREND_PULLBACK:
-		return 0
-	case LIQUIDITY_SWEEP_REVERSAL:
-		return 1
-	case COMPRESSION_BREAKOUT_RETEST:
-		return 2
-	case CROWDED_POSITIONING_SQUEEZE:
-		return 3
-	case RANGE_EDGE_REVERSAL:
-		return 4
-	default:
-		return 99
-	}
+func (uc *CandidateArbiterUsecase) getPlaybookPriorityIndex(playbook Playbook, dir Direction, regime MarketRegime) int {
+	return resolvePlaybookPriority(regime, dir, playbook)
 }
 
 // calculateRR extracts Risk-to-Reward ratio from TradePlan parameters

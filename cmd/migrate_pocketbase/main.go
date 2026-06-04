@@ -49,7 +49,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to init PocketBase client: %v", err)
 	}
-	pbStorage, err := service.NewPocketBaseStorageService(jsonStorage, pbClient)
+	pbStorage, err := service.NewPocketBaseStorageService(jsonStorage, pbClient, cfg.PocketBase.JournalSourceMode)
 	if err != nil {
 		log.Fatalf("failed to init PocketBase storage: %v", err)
 	}

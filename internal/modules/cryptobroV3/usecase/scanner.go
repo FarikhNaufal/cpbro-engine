@@ -40,6 +40,15 @@ type ScannerUsecase struct {
 	storageUsecase             *StorageUsecase
 }
 
+type scanRequestGuardProfile struct {
+	Budget                int
+	ExpectedWeight        int
+	PrefetchLimit         int
+	MarketDataConcurrency int
+	PipelineConcurrency   int
+	Applied               bool
+}
+
 func NewScannerUsecase(
 	marketData *MarketDataUsecase,
 	marketPolicy *MarketPolicyUsecase,
@@ -226,6 +235,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	prefetchCandidates := candidates
 	prefetchDeferredSummary := []string{}
 	prefetchLimit := resolveMarketDataPrefetchLimit(policy, len(candidates))
+	requestGuard := resolveAdaptiveScanRequestGuard(policy, len(candidates), prefetchLimit, concurrencyLimit)
+	prefetchLimit = requestGuard.PrefetchLimit
+	concurrencyLimit = requestGuard.MarketDataConcurrency
 	if prefetchLimit > 0 && prefetchLimit < len(candidates) {
 		for _, deferred := range candidates[prefetchLimit:] {
 			prefetchDeferredSummary = append(prefetchDeferredSummary, fmt.Sprintf("%s: deferred by market data prefetch limit", deferred.Symbol))
@@ -296,6 +308,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	}
 	if pipelineConcurrency <= 0 {
 		pipelineConcurrency = 1
+	}
+	if requestGuard.PipelineConcurrency > 0 && pipelineConcurrency > requestGuard.PipelineConcurrency {
+		pipelineConcurrency = requestGuard.PipelineConcurrency
 	}
 
 	pipelineResults := make([]candidatePipelineResult, len(prefetchCandidates))
@@ -403,6 +418,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	metrics.SetLastCandidatePipelineDuration(candidatePipelineDuration)
 	estimatedRequestWeight := estimateScanRequestWeight(len(prefetchCandidates), int(atomic.LoadUint64(&enrichedSymbolCount)))
 	metrics.SetLastScanRequestWeight(uint64(estimatedRequestWeight))
+	metrics.SetLastScanRequestWeightBudget(uint64(requestGuard.Budget))
 	metrics.SetLastPrefetchCandidateCount(uint64(len(prefetchCandidates)))
 	metrics.SetLastEnrichedCandidateCount(atomic.LoadUint64(&enrichedSymbolCount))
 
@@ -1077,16 +1093,19 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		"prefetch_candidates", len(prefetchCandidates),
 		"enriched_candidates", atomic.LoadUint64(&enrichedSymbolCount),
 		"estimated_request_weight", estimatedRequestWeight,
+		"request_weight_budget", requestGuard.Budget,
+		"adaptive_request_guard", requestGuard.Applied,
 		"market_data_ms", marketDataDuration.Milliseconds(),
 		"candidate_pipeline_ms", candidatePipelineDuration.Milliseconds(),
 		"ai_batch_ms", aiBatchDuration.Milliseconds(),
 		"final_gate_ms", finalGateDuration.Milliseconds(),
 		"total_ms", duration.Milliseconds(),
 	)
-	if estimatedRequestWeight >= 1600 {
+	if estimatedRequestWeight >= maxInt(1, int(float64(requestGuard.Budget)*0.9)) {
 		slog.Warn("AnalyzeMarketV3 estimated request weight is elevated",
 			"scan_id", scanID,
 			"estimated_request_weight", estimatedRequestWeight,
+			"request_weight_budget", requestGuard.Budget,
 			"prefetch_candidates", len(prefetchCandidates),
 			"enriched_candidates", atomic.LoadUint64(&enrichedSymbolCount),
 		)
@@ -1162,6 +1181,86 @@ func resolveMarketDataPrefetchLimit(policy MarketPolicy, totalCandidates int) in
 	}
 
 	return minInt(totalCandidates, recommended)
+}
+
+func resolveAdaptiveScanRequestGuard(policy MarketPolicy, totalCandidates, requestedPrefetch, marketConcurrency int) scanRequestGuardProfile {
+	guard := scanRequestGuardProfile{
+		Budget:                resolveScanRequestWeightBudget(policy),
+		PrefetchLimit:         requestedPrefetch,
+		MarketDataConcurrency: marketConcurrency,
+	}
+
+	if guard.PrefetchLimit <= 0 {
+		guard.PrefetchLimit = 0
+		return guard
+	}
+
+	for guard.PrefetchLimit > 1 {
+		guard.ExpectedWeight = estimateScanRequestWeight(guard.PrefetchLimit, guard.PrefetchLimit)
+		if guard.ExpectedWeight <= guard.Budget {
+			break
+		}
+		guard.PrefetchLimit--
+		guard.Applied = true
+	}
+	guard.ExpectedWeight = estimateScanRequestWeight(guard.PrefetchLimit, guard.PrefetchLimit)
+
+	utilization := float64(guard.ExpectedWeight) / float64(maxInt(guard.Budget, 1))
+	if utilization >= 1.0 {
+		if guard.MarketDataConcurrency > 3 {
+			guard.MarketDataConcurrency = 3
+			guard.Applied = true
+		}
+		guard.PipelineConcurrency = 3
+	} else if utilization >= 0.85 {
+		if guard.MarketDataConcurrency > 4 {
+			guard.MarketDataConcurrency = 4
+			guard.Applied = true
+		}
+		guard.PipelineConcurrency = 4
+	}
+
+	if policy.EffectiveRegime() == BTC_CHAOS && guard.MarketDataConcurrency > 2 {
+		guard.MarketDataConcurrency = 2
+		guard.Applied = true
+		if guard.PipelineConcurrency == 0 || guard.PipelineConcurrency > 2 {
+			guard.PipelineConcurrency = 2
+		}
+	}
+
+	if guard.PrefetchLimit > totalCandidates {
+		guard.PrefetchLimit = totalCandidates
+	}
+	if guard.PipelineConcurrency > guard.PrefetchLimit {
+		guard.PipelineConcurrency = guard.PrefetchLimit
+	}
+
+	return guard
+}
+
+func resolveScanRequestWeightBudget(policy MarketPolicy) int {
+	if val := strings.TrimSpace(os.Getenv("SCAN_REQUEST_WEIGHT_BUDGET")); val != "" {
+		if limit, err := strconv.Atoi(val); err == nil && limit > 0 {
+			return limit
+		}
+	}
+
+	switch policy.EffectiveRegime() {
+	case BTC_CHAOS:
+		return 110
+	case LOW_VOL:
+		return 125
+	case HIGH_VOL:
+		return 140
+	case CHOP_RANGE, COMPRESSION:
+		return 150
+	case BTC_DOMINANCE:
+		return 160
+	case ALT_SUPPORTIVE:
+		return 180
+	default:
+		return 170
+	}
 }
 
 func estimateScanRequestWeight(prefetchCandidates int, enrichedCandidates int) int {

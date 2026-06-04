@@ -122,6 +122,14 @@ func (s *JSONStorageService) LoadWatchJournal() ([]usecase.WatchJournal, error) 
 	return journal, nil
 }
 
+func (s *JSONStorageService) FindWatchJournalCandidates(probe usecase.WatchJournal) ([]usecase.WatchJournal, error) {
+	journal, err := s.LoadWatchJournal()
+	if err != nil {
+		return nil, err
+	}
+	return filterMatchingWatchJournalCandidates(journal, probe), nil
+}
+
 func (s *JSONStorageService) SaveWatchJournal(journal []usecase.WatchJournal) error {
 	return s.writeJSON("watch_journal.json", journal)
 }
@@ -148,6 +156,28 @@ func (s *JSONStorageService) UpsertWatchJournalEntries(entries []usecase.WatchJo
 
 func (s *JSONStorageService) AppendWatchJournal(entry usecase.WatchJournal) error {
 	return appendJSONSliceFile(s, "watch_journal.json", entry)
+}
+
+func filterMatchingWatchJournalCandidates(journal []usecase.WatchJournal, probe usecase.WatchJournal) []usecase.WatchJournal {
+	if len(journal) == 0 {
+		return []usecase.WatchJournal{}
+	}
+
+	filtered := make([]usecase.WatchJournal, 0, len(journal))
+	for i := range journal {
+		entry := journal[i]
+		if entry.Symbol != probe.Symbol {
+			continue
+		}
+		if entry.Direction != probe.Direction {
+			continue
+		}
+		if entry.Playbook != probe.Playbook {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
 }
 
 func updateJSONSliceFile[T any](s *JSONStorageService, filename string, update func([]T) ([]T, error)) error {
