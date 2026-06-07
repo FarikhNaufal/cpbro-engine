@@ -259,54 +259,58 @@ func monitorJournalEntries(ctx context.Context, uc *MonitoringUsecase, provider 
 				updateLivePnl(&item, price)
 				updateExcursionFromPrice(&item, price)
 
+				// Capture elapsed once to ensure TimeToTP1 <= TimeToTP2 and
+				// prevent tp2_before_tp1 anomaly from multiple time.Since() calls.
+				elapsed := time.Since(item.CreatedAt)
+
 				if item.Direction == LONG {
 					switch {
 					case item.Status == profile.Monitoring && price <= item.StopLoss:
 						item.Status = profile.SLHit
-						item.TimeToSL = time.Since(item.CreatedAt).String()
+						item.TimeToSL = elapsed.String()
 						item.OutcomeReason = profile.LiveSLReason
 					case item.Status == profile.TP1Hit && price <= item.StopLoss:
-						item.TimeToSL = time.Since(item.CreatedAt).String()
+						item.TimeToSL = elapsed.String()
 						item.OutcomeReason = profile.LiveSLAfterTP1
 						item.ClosedAt = now
 						item.ExpiresAt = now.Add(-1 * time.Minute)
 					case item.Status == profile.Monitoring && price >= item.TP1:
 						item.Status = profile.TP1Hit
-						item.TimeToTP1 = time.Since(item.CreatedAt).String()
+						item.TimeToTP1 = elapsed.String()
 						item.OutcomeReason = profile.LiveTP1Reason
 						if price >= item.TP2 {
 							item.Status = profile.TP2Hit
-							item.TimeToTP2 = time.Since(item.CreatedAt).String()
+							item.TimeToTP2 = elapsed.String()
 							item.OutcomeReason = profile.LiveTP2Reason
 						}
 					case item.Status == profile.TP1Hit && price >= item.TP2:
 						item.Status = profile.TP2Hit
-						item.TimeToTP2 = time.Since(item.CreatedAt).String()
+						item.TimeToTP2 = elapsed.String()
 						item.OutcomeReason = profile.LiveTP2Reason
 					}
 				} else {
 					switch {
 					case item.Status == profile.Monitoring && price >= item.StopLoss:
 						item.Status = profile.SLHit
-						item.TimeToSL = time.Since(item.CreatedAt).String()
+						item.TimeToSL = elapsed.String()
 						item.OutcomeReason = profile.LiveSLReason
 					case item.Status == profile.TP1Hit && price >= item.StopLoss:
-						item.TimeToSL = time.Since(item.CreatedAt).String()
+						item.TimeToSL = elapsed.String()
 						item.OutcomeReason = profile.LiveSLAfterTP1
 						item.ClosedAt = now
 						item.ExpiresAt = now.Add(-1 * time.Minute)
 					case item.Status == profile.Monitoring && price <= item.TP1:
 						item.Status = profile.TP1Hit
-						item.TimeToTP1 = time.Since(item.CreatedAt).String()
+						item.TimeToTP1 = elapsed.String()
 						item.OutcomeReason = profile.LiveTP1Reason
 						if price <= item.TP2 {
 							item.Status = profile.TP2Hit
-							item.TimeToTP2 = time.Since(item.CreatedAt).String()
+							item.TimeToTP2 = elapsed.String()
 							item.OutcomeReason = profile.LiveTP2Reason
 						}
 					case item.Status == profile.TP1Hit && price <= item.TP2:
 						item.Status = profile.TP2Hit
-						item.TimeToTP2 = time.Since(item.CreatedAt).String()
+						item.TimeToTP2 = elapsed.String()
 						item.OutcomeReason = profile.LiveTP2Reason
 					}
 				}
@@ -460,21 +464,30 @@ func applyJournalOutcomePnl(item *SignalJournal, profile monitoringStatusProfile
 
 	switch item.Status {
 	case profile.TP2Hit:
-		item.PnlPercentage = realizedTP2Pnl(*item)
+		item.PnlPercentage = realizedTP2Pnl(item.EntryPrice, item.TP1, item.TP2)
 	case profile.SLHit:
 		if item.TimeToTP1 != "" {
-			item.PnlPercentage = realizedStoppedAfterTP1Pnl(*item)
+			item.PnlPercentage = realizedStoppedAfterTP1Pnl(item.EntryPrice, item.TP1, item.StopLoss)
 			return
 		}
-		item.PnlPercentage = realizedSLPnl(*item)
+		item.PnlPercentage = realizedSLPnl(item.EntryPrice, item.StopLoss)
 	case profile.Expired:
 		item.PnlPercentage = 0.0
 	case profile.TP1Hit:
 		if isTP1FinalizedForJournal(*item, now) {
 			if item.TimeToSL != "" {
-				item.PnlPercentage = realizedStoppedAfterTP1Pnl(*item)
+				item.PnlPercentage = realizedStoppedAfterTP1Pnl(item.EntryPrice, item.TP1, item.StopLoss)
 			} else {
-				item.PnlPercentage = realizedTP1PartialPnl(*item)
+				// 50% closed at TP1 + 50% closed at the actual close/expiration price (LatestPrice)
+				floatingPnl := 0.0
+				if item.LatestPrice > 0 {
+					if item.Direction == LONG {
+						floatingPnl = 50.0 * ((item.LatestPrice - item.EntryPrice) / item.EntryPrice)
+					} else {
+						floatingPnl = 50.0 * ((item.EntryPrice - item.LatestPrice) / item.EntryPrice)
+					}
+				}
+				item.PnlPercentage = realizedTP1PartialPnl(item.EntryPrice, item.TP1) + floatingPnl
 			}
 		}
 	}
@@ -490,29 +503,29 @@ func isTP1FinalizedForJournal(item SignalJournal, now time.Time) bool {
 	return !now.Before(item.ExpiresAt)
 }
 
-func realizedTP1PartialPnl(item SignalJournal) float64 {
-	if item.EntryPrice <= 0 {
+func realizedTP1PartialPnl(entryPrice, tp1 float64) float64 {
+	if entryPrice <= 0 {
 		return 0.0
 	}
-	return 50.0 * (absFloat(item.TP1-item.EntryPrice) / item.EntryPrice)
+	return 50.0 * (absFloat(tp1-entryPrice) / entryPrice)
 }
 
-func realizedTP2Pnl(item SignalJournal) float64 {
-	if item.EntryPrice <= 0 {
+func realizedTP2Pnl(entryPrice, tp1, tp2 float64) float64 {
+	if entryPrice <= 0 {
 		return 0.0
 	}
-	return 100.0 * (absFloat(item.TP2-item.EntryPrice) / item.EntryPrice)
+	return realizedTP1PartialPnl(entryPrice, tp1) + (50.0 * (absFloat(tp2-entryPrice) / entryPrice))
 }
 
-func realizedSLPnl(item SignalJournal) float64 {
-	if item.EntryPrice <= 0 {
+func realizedSLPnl(entryPrice, stopLoss float64) float64 {
+	if entryPrice <= 0 {
 		return 0.0
 	}
-	return -100.0 * (absFloat(item.EntryPrice-item.StopLoss) / item.EntryPrice)
+	return -100.0 * (absFloat(entryPrice-stopLoss) / entryPrice)
 }
 
-func realizedStoppedAfterTP1Pnl(item SignalJournal) float64 {
-	return realizedTP1PartialPnl(item) + (realizedSLPnl(item) / 2.0)
+func realizedStoppedAfterTP1Pnl(entryPrice, tp1, stopLoss float64) float64 {
+	return realizedTP1PartialPnl(entryPrice, tp1) + (realizedSLPnl(entryPrice, stopLoss) / 2.0)
 }
 
 func absFloat(v float64) float64 {
@@ -584,12 +597,21 @@ func updateLivePnl(item *SignalJournal, price float64) {
 	if item.EntryPrice <= 0 {
 		return
 	}
+	isTP1 := item.Status == TP1_HIT || item.Status == VIRTUAL_TP1_HIT
 	if item.Direction == LONG {
-		item.PnlPercentage = ((price - item.EntryPrice) / item.EntryPrice) * 100
+		if isTP1 {
+			item.PnlPercentage = realizedTP1PartialPnl(item.EntryPrice, item.TP1) + (50.0 * ((price - item.EntryPrice) / item.EntryPrice))
+		} else {
+			item.PnlPercentage = ((price - item.EntryPrice) / item.EntryPrice) * 100
+		}
 		return
 	}
 	if item.Direction == SHORT {
-		item.PnlPercentage = ((item.EntryPrice - price) / item.EntryPrice) * 100
+		if isTP1 {
+			item.PnlPercentage = realizedTP1PartialPnl(item.EntryPrice, item.TP1) + (50.0 * ((item.EntryPrice - price) / item.EntryPrice))
+		} else {
+			item.PnlPercentage = ((item.EntryPrice - price) / item.EntryPrice) * 100
+		}
 	}
 }
 

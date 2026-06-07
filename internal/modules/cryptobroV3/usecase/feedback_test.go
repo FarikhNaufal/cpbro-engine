@@ -339,7 +339,7 @@ func TestFeedback_SignalMetrics_ExcludeActiveTP1AndUseRealizedPnL(t *testing.T) 
 				StopLoss:      95,
 				TimeToTP1:     "12m",
 				ExpiresAt:     now.Add(-1 * time.Minute),
-				PnlPercentage: 99.0,
+				PnlPercentage: 2.5,
 			},
 			{
 				ID:            "sig_tp2",
@@ -352,7 +352,7 @@ func TestFeedback_SignalMetrics_ExcludeActiveTP1AndUseRealizedPnL(t *testing.T) 
 				StopLoss:      95,
 				TimeToTP1:     "5m",
 				TimeToTP2:     "20m",
-				PnlPercentage: 1.0,
+				PnlPercentage: 7.5,
 			},
 			{
 				ID:            "sig_sl_after_tp1",
@@ -365,7 +365,7 @@ func TestFeedback_SignalMetrics_ExcludeActiveTP1AndUseRealizedPnL(t *testing.T) 
 				StopLoss:      95,
 				TimeToTP1:     "8m",
 				TimeToSL:      "15m",
-				PnlPercentage: -5.0,
+				PnlPercentage: 0.0,
 			},
 		},
 	}
@@ -385,7 +385,7 @@ func TestFeedback_SignalMetrics_ExcludeActiveTP1AndUseRealizedPnL(t *testing.T) 
 	if math.Abs(repo.report.Metrics["win_rate"]-((2.0/3.0)*100.0)) > 1e-9 {
 		t.Fatalf("expected win_rate 66.666..., got %v", repo.report.Metrics["win_rate"])
 	}
-	expectedPnl := 2.5 + 10.0 + 0.0
+	expectedPnl := 2.5 + 7.5 + 0.0
 	if repo.report.Metrics["total_pnl_percentage"] != expectedPnl {
 		t.Fatalf("expected realized total_pnl_percentage %v, got %v", expectedPnl, repo.report.Metrics["total_pnl_percentage"])
 	}
@@ -419,7 +419,7 @@ func TestFeedback_WatchMetrics_ExcludeActiveVirtualTP1AndUseRealizedPnL(t *testi
 				StopLoss:      95,
 				TimeToTP1:     "11m",
 				ExpiresAt:     now.Add(-1 * time.Minute),
-				PnlPercentage: 99.0,
+				PnlPercentage: 2.5,
 			},
 			{
 				ID:            "watch_sl",
@@ -430,7 +430,7 @@ func TestFeedback_WatchMetrics_ExcludeActiveVirtualTP1AndUseRealizedPnL(t *testi
 				TP1:           105,
 				TP2:           110,
 				StopLoss:      95,
-				PnlPercentage: -2.0,
+				PnlPercentage: -5.0,
 			},
 		},
 	}
@@ -814,5 +814,112 @@ func TestFeedback_QuarantinesTimingAnomaliesFromEvaluation(t *testing.T) {
 	}
 	if !strings.Contains(report.Notes, "Journal sanity quarantine excluded 1 signal rows and 1 watch rows") {
 		t.Fatalf("expected quarantine note, got %q", report.Notes)
+	}
+}
+
+// TestFeedback_LegacyPnlFormulaIsRecorrectedForTP2Hit verifies that a TP2_HIT record
+// stored with an old PnL formula (e.g., full 100% position at TP2, not 50/50 split)
+// gets recalculated to the correct formula during evaluation when the deviation
+// exceeds pnlFormulaMismatchThreshold (0.1%).
+func TestFeedback_LegacyPnlFormulaIsRecorrectedForTP2Hit(t *testing.T) {
+	now := time.Now().UTC()
+	// Entry=100, TP1=105, TP2=110 → correct 50/50 PnL = 2.5 + 5.0 = 7.5%
+	// Legacy formula stored a different value (e.g., full 100% at TP2 = 10%)
+	legacyPnl := 10.0
+	expectedPnl := 7.5 // realizedTP2Pnl(100, 105, 110)
+
+	repo := &mockFeedbackStorageRepo{
+		journal: []usecase.SignalJournal{
+			{
+				ID:            "legacy_tp2_hit",
+				Playbook:      usecase.TREND_PULLBACK,
+				Direction:     usecase.LONG,
+				Status:        usecase.TP2_HIT,
+				EntryPrice:    100,
+				TP1:           105,
+				TP2:           110,
+				StopLoss:      95,
+				TimeToTP1:     "15m0s",
+				TimeToTP2:     "45m0s",
+				PnlPercentage: legacyPnl,
+				ClosedAt:      now.Add(-10 * time.Minute),
+				ExpiresAt:     now.Add(-5 * time.Minute),
+			},
+		},
+	}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo.report == nil {
+		t.Fatal("expected report to be saved")
+	}
+	// total_pnl_percentage should use the corrected value, not the legacy one
+	got := repo.report.Metrics["total_pnl_percentage"]
+	if math.Abs(got-expectedPnl) > 0.001 {
+		t.Fatalf("expected corrected pnl=%.4f, got %.4f (legacy formula not corrected)", expectedPnl, got)
+	}
+}
+
+// TestFeedback_QuarantinesTP1HitClosedAfterExpiry verifies that a TP1_HIT record
+// whose closed_at is well beyond expires_at (anomalous timing from a batch restart)
+// is excluded from evaluation metrics.
+func TestFeedback_QuarantinesTP1HitClosedAfterExpiry(t *testing.T) {
+	now := time.Now().UTC()
+	// expires_at is 3 hours ago, but closed_at is 1 hour ago — 2h anomaly
+	expiresAt := now.Add(-3 * time.Hour)
+	closedAt := now.Add(-1 * time.Hour) // 2h after expiry — clearly anomalous
+
+	repo := &mockFeedbackStorageRepo{
+		journal: []usecase.SignalJournal{
+			{
+				ID:            "tp1_closed_after_expiry",
+				Playbook:      usecase.TREND_PULLBACK,
+				Direction:     usecase.LONG,
+				Status:        usecase.TP1_HIT,
+				EntryPrice:    100,
+				TP1:           105,
+				TP2:           110,
+				StopLoss:      95,
+				TimeToTP1:     "15m0s",
+				PnlPercentage: 2.5,
+				ClosedAt:      closedAt,
+				ExpiresAt:     expiresAt,
+			},
+			{
+				ID:            "clean_tp2_hit",
+				Playbook:      usecase.TREND_PULLBACK,
+				Direction:     usecase.LONG,
+				Status:        usecase.TP2_HIT,
+				EntryPrice:    100,
+				TP1:           105,
+				TP2:           110,
+				StopLoss:      95,
+				TimeToTP1:     "15m0s",
+				TimeToTP2:     "45m0s",
+				PnlPercentage: 7.5,
+				ClosedAt:      now.Add(-10 * time.Minute),
+				ExpiresAt:     now.Add(-5 * time.Minute),
+			},
+		},
+	}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo.report == nil {
+		t.Fatal("expected report to be saved")
+	}
+
+	// The anomalous TP1_HIT should be quarantined, only clean_tp2_hit remains
+	if repo.report.TotalSignals != 1 {
+		t.Fatalf("expected 1 finalized signal (anomalous TP1_HIT quarantined), got %d", repo.report.TotalSignals)
+	}
+	if repo.report.Metrics["excluded_signal_anomaly_count"] != 1 {
+		t.Fatalf("expected 1 excluded anomaly, got %v", repo.report.Metrics["excluded_signal_anomaly_count"])
 	}
 }

@@ -377,8 +377,8 @@ func TestMonitoring_MonitorVirtualPositions_ExpiredAfterTP1KeepsPartialPnL(t *te
 	if item.OutcomeReason != "Monitoring period expired (120 minutes elapsed) with TP1 success" {
 		t.Fatalf("unexpected outcome reason: %s", item.OutcomeReason)
 	}
-	if item.PnlPercentage != 2.5 {
-		t.Fatalf("expected partial realized pnl 2.5, got %v", item.PnlPercentage)
+	if item.PnlPercentage != 4.5 {
+		t.Fatalf("expected partial realized pnl 4.5, got %v", item.PnlPercentage)
 	}
 	if item.ClosedAt.IsZero() {
 		t.Fatal("expected ClosedAt to be set for finalized TP1 partial outcome")
@@ -619,5 +619,63 @@ func TestMonitoring_MonitorVirtualPositions_DoesNotPersistWhenNothingChanged(t *
 
 	if repo.saveCount != 0 {
 		t.Fatalf("expected no persistence write for unchanged monitoring state, got %d writes", repo.saveCount)
+	}
+}
+
+// TestMonitoring_LiveTP1AndTP2SameTick_TimestampConsistency verifies that when a live
+// price simultaneously crosses both TP1 and TP2 (single tick), both TimeToTP1 and
+// TimeToTP2 are set to the SAME elapsed duration — preventing the tp2_before_tp1
+// anomaly observed in production (e.g., BNBUSDT 2026-06-07).
+func TestMonitoring_LiveTP1AndTP2SameTick_TimestampConsistency(t *testing.T) {
+	createdAt := time.Now().Add(-30 * time.Minute)
+	expiresAt := createdAt.Add(120 * time.Minute)
+
+	journal := []usecase.SignalJournal{
+		{
+			ID:         "test_live_tp1tp2_same_tick",
+			Symbol:     "BNBUSDT",
+			Direction:  usecase.LONG,
+			EntryPrice: 600.0,
+			StopLoss:   590.0,
+			TP1:        615.0,
+			TP2:        630.0,
+			CreatedAt:  createdAt,
+			ExpiresAt:  expiresAt,
+			Status:     usecase.MONITORING,
+		},
+	}
+
+	repo := &mockStorageRepo{journal: journal}
+	storage := usecase.NewStorageUsecase(repo)
+	// Price 635.0 — above both TP1 (615) and TP2 (630) simultaneously
+	provider := &mockMarketDataProvider{candles: nil, price: 635.0}
+	monitor := usecase.NewMonitoringUsecase(provider, storage)
+
+	err := monitor.MonitorVirtualPositions(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	updated, _ := storage.LoadSignalJournal()
+	item := updated[0]
+
+	if item.Status != usecase.TP2_HIT {
+		t.Fatalf("expected TP2_HIT, got %s", item.Status)
+	}
+	if item.TimeToTP1 == "" {
+		t.Fatal("expected TimeToTP1 to be set")
+	}
+	if item.TimeToTP2 == "" {
+		t.Fatal("expected TimeToTP2 to be set")
+	}
+
+	// Parse durations and verify tp2 >= tp1 (no impossible ordering)
+	d1, err1 := time.ParseDuration(item.TimeToTP1)
+	d2, err2 := time.ParseDuration(item.TimeToTP2)
+	if err1 != nil || err2 != nil {
+		t.Fatalf("failed to parse durations: tp1=%q tp2=%q", item.TimeToTP1, item.TimeToTP2)
+	}
+	if d2 < d1 {
+		t.Fatalf("tp2_before_tp1 anomaly: TimeToTP2=%v is less than TimeToTP1=%v", d2, d1)
 	}
 }

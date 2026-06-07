@@ -77,28 +77,66 @@ func isWinningSignalOutcome(item SignalJournal, now time.Time) bool {
 	}
 }
 
+// pnlFormulaMismatchThreshold is the maximum allowed deviation (in percentage points)
+// between a stored PnL value and the value recalculated from price targets.
+// Values beyond this threshold indicate the record was stored using a legacy formula.
+const pnlFormulaMismatchThreshold = 0.1
+
 func realizedEvaluationPnl(item SignalJournal, now time.Time) float64 {
-	switch item.Status {
-	case TP2_HIT, VIRTUAL_TP2_HIT:
-		return realizedTP2Pnl(item)
-	case TP1_HIT, VIRTUAL_TP1_HIT:
-		if isTP1FinalizedForJournal(item, now) {
-			if item.TimeToSL != "" {
-				return realizedStoppedAfterTP1Pnl(item)
-			}
-			return realizedTP1PartialPnl(item)
-		}
-		return item.PnlPercentage
-	case SL_HIT, VIRTUAL_SL_HIT:
-		if item.TimeToTP1 != "" {
-			return realizedStoppedAfterTP1Pnl(item)
-		}
-		return realizedSLPnl(item)
-	case EXPIRED, VIRTUAL_EXPIRED:
-		return 0.0
-	default:
+	// In active monitoring state, return current floating Pnl
+	if item.Status == MONITORING || item.Status == WATCH_MONITORING {
 		return item.PnlPercentage
 	}
+	if item.Status == TP1_HIT || item.Status == VIRTUAL_TP1_HIT {
+		if !isTP1FinalizedForJournal(item, now) {
+			return item.PnlPercentage
+		}
+	}
+
+	// For finalized legacy data where PnlPercentage is missing (0.0) but status is a win/loss:
+	if item.PnlPercentage == 0.0 && item.Status != EXPIRED && item.Status != VIRTUAL_EXPIRED {
+		// Fallback to recalculation to prevent data corruption or missing records from skewing report
+		switch item.Status {
+		case TP2_HIT, VIRTUAL_TP2_HIT:
+			return realizedTP2Pnl(item.EntryPrice, item.TP1, item.TP2)
+		case TP1_HIT, VIRTUAL_TP1_HIT:
+			if item.TimeToSL != "" {
+				return realizedStoppedAfterTP1Pnl(item.EntryPrice, item.TP1, item.StopLoss)
+			}
+			return realizedTP1PartialPnl(item.EntryPrice, item.TP1)
+		case SL_HIT, VIRTUAL_SL_HIT:
+			if item.TimeToTP1 != "" {
+				return realizedStoppedAfterTP1Pnl(item.EntryPrice, item.TP1, item.StopLoss)
+			}
+			return realizedSLPnl(item.EntryPrice, item.StopLoss)
+		}
+	}
+
+	// Formula mismatch detection: for deterministic terminal statuses (TP2_HIT, SL_HIT),
+	// the expected PnL is fully determined by price targets. If the stored value deviates
+	// beyond threshold, the record was stored using a legacy formula — recalculate.
+	if item.EntryPrice > 0 {
+		switch item.Status {
+		case TP2_HIT, VIRTUAL_TP2_HIT:
+			expected := realizedTP2Pnl(item.EntryPrice, item.TP1, item.TP2)
+			if absFloat(item.PnlPercentage-expected) > pnlFormulaMismatchThreshold {
+				return expected
+			}
+		case SL_HIT, VIRTUAL_SL_HIT:
+			var expected float64
+			if item.TimeToTP1 != "" {
+				expected = realizedStoppedAfterTP1Pnl(item.EntryPrice, item.TP1, item.StopLoss)
+			} else {
+				expected = realizedSLPnl(item.EntryPrice, item.StopLoss)
+			}
+			if absFloat(item.PnlPercentage-expected) > pnlFormulaMismatchThreshold {
+				return expected
+			}
+		}
+	}
+
+	// Default to returning the stored database/PocketBase PnlPercentage value
+	return item.PnlPercentage
 }
 
 type journalSanityProfile struct {
@@ -155,7 +193,7 @@ func isJournalTimingAnomalous(item SignalJournal, profile journalSanityProfile) 
 	}
 
 	switch item.Status {
-	case TP2_HIT, SL_HIT, VIRTUAL_TP2_HIT, VIRTUAL_SL_HIT, BREAKEVEN:
+	case TP1_HIT, TP2_HIT, SL_HIT, VIRTUAL_TP1_HIT, VIRTUAL_TP2_HIT, VIRTUAL_SL_HIT, BREAKEVEN:
 		if !item.ClosedAt.IsZero() && !item.ExpiresAt.IsZero() && item.ClosedAt.After(item.ExpiresAt.Add(profile.expiryGrace)) {
 			return true
 		}

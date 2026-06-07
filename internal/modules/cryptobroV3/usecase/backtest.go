@@ -263,6 +263,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 	// Time progression: step by step 15m intervals
 	currentTick := req.StartTime.Truncate(15 * time.Minute)
 	endTick := req.EndTime.Truncate(15 * time.Minute)
+	var latestPrice float64
 
 	for currentTick.Before(endTick) || currentTick.Equal(endTick) {
 		// 1. Filter closed candles up to currentTick
@@ -292,7 +293,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 			closedBtcM15 = closedBtcM15[len(closedBtcM15)-50:]
 		}
 
-		latestPrice := closedM15[len(closedM15)-1].Close
+		latestPrice = closedM15[len(closedM15)-1].Close
 
 		// 2. Dynamic BTC trend/regime calculation
 		btcLatestPrice := closedBtcM15[len(closedBtcM15)-1].Close
@@ -405,7 +406,11 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 				pos.ClosedAt = currentTick
 				pos.TimeToSL = currentTick.Sub(pos.CreatedAt).String()
 				pos.OutcomeReason = "Stop Loss hit during candle evaluation"
-				pos.PnlPercentage = -100.0 * (math.Abs(pos.EntryPrice-pos.StopLoss) / pos.EntryPrice)
+				if pos.TimeToTP1 != "" {
+					pos.PnlPercentage = realizedStoppedAfterTP1Pnl(pos.EntryPrice, pos.TP1, pos.StopLoss)
+				} else {
+					pos.PnlPercentage = realizedSLPnl(pos.EntryPrice, pos.StopLoss)
+				}
 				continue
 			}
 
@@ -422,7 +427,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 					pos.Status = TP1_HIT
 					pos.TimeToTP1 = currentTick.Sub(pos.CreatedAt).String()
 					pos.OutcomeReason = "TP1 hit during candle evaluation"
-					pos.PnlPercentage = 50.0 * (math.Abs(pos.TP1-pos.EntryPrice) / pos.EntryPrice)
+					pos.PnlPercentage = realizedTP1PartialPnl(pos.EntryPrice, pos.TP1)
 				}
 			}
 
@@ -440,7 +445,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 					pos.ClosedAt = currentTick
 					pos.TimeToTP2 = currentTick.Sub(pos.CreatedAt).String()
 					pos.OutcomeReason = "TP2 hit during candle evaluation"
-					pos.PnlPercentage = 100.0 * (math.Abs(pos.TP2-pos.EntryPrice) / pos.EntryPrice)
+					pos.PnlPercentage = realizedTP2Pnl(pos.EntryPrice, pos.TP1, pos.TP2)
 					continue
 				}
 			}
@@ -454,7 +459,14 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 					pos.PnlPercentage = 0.0
 				} else if pos.Status == TP1_HIT {
 					pos.OutcomeReason = "Simulated trade expired after TP1 (partial win)"
-					// keep Pnl from TP1
+					// 50% closed at TP1 + 50% closed at expiration price (latestPrice)
+					floatingPnl := 0.0
+					if pos.Direction == LONG {
+						floatingPnl = 50.0 * ((latestPrice - pos.EntryPrice) / pos.EntryPrice)
+					} else {
+						floatingPnl = 50.0 * ((pos.EntryPrice - latestPrice) / pos.EntryPrice)
+					}
+					pos.PnlPercentage = realizedTP1PartialPnl(pos.EntryPrice, pos.TP1) + floatingPnl
 				}
 				continue
 			}
@@ -806,6 +818,14 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 			pos.PnlPercentage = 0.0
 		} else if pos.Status == TP1_HIT {
 			pos.OutcomeReason = "Force expired at end of backtest window with TP1 partial win"
+			// 50% closed at TP1 + 50% closed at the end-tick price (latestPrice)
+			floatingPnl := 0.0
+			if pos.Direction == LONG {
+				floatingPnl = 50.0 * ((latestPrice - pos.EntryPrice) / pos.EntryPrice)
+			} else {
+				floatingPnl = 50.0 * ((pos.EntryPrice - latestPrice) / pos.EntryPrice)
+			}
+			pos.PnlPercentage = realizedTP1PartialPnl(pos.EntryPrice, pos.TP1) + floatingPnl
 		}
 		pos.ClosedAt = req.EndTime
 	}
