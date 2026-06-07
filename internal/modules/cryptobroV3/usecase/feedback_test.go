@@ -725,3 +725,94 @@ func TestFeedback_PlaybookDisable(t *testing.T) {
 		t.Error("Expected PLAYBOOK_DISABLE recommendation for TREND_PULLBACK due to extreme failure rate")
 	}
 }
+
+func TestFeedback_QuarantinesTimingAnomaliesFromEvaluation(t *testing.T) {
+	t.Setenv("MONITORING_MAX_HOLD_MINUTES", "120")
+
+	now := time.Now().UTC()
+	repo := &mockFeedbackStorageRepo{
+		journal: []usecase.SignalJournal{
+			{
+				ID:         "valid_tp2",
+				Symbol:     "BTCUSDT",
+				Playbook:   "TREND_PULLBACK",
+				Status:     usecase.TP2_HIT,
+				EntryPrice: 100,
+				TP2:        102,
+				CreatedAt:  now.Add(-90 * time.Minute),
+				ExpiresAt:  now.Add(30 * time.Minute),
+				ClosedAt:   now.Add(-30 * time.Minute),
+				TimeToTP2:  "45m0s",
+			},
+			{
+				ID:         "invalid_tp2",
+				Symbol:     "ETHUSDT",
+				Playbook:   "TREND_PULLBACK",
+				Status:     usecase.TP2_HIT,
+				EntryPrice: 100,
+				TP2:        103,
+				CreatedAt:  now.Add(-48 * time.Hour),
+				ExpiresAt:  now.Add(-46 * time.Hour),
+				ClosedAt:   now.Add(-6 * time.Hour),
+				TimeToTP1:  "1h30m0s",
+				TimeToTP2:  "40h0m0s",
+			},
+		},
+		watch: []usecase.WatchJournal{
+			{
+				ID:         "valid_watch",
+				Symbol:     "SOLUSDT",
+				Playbook:   "RANGE_EDGE_REVERSAL",
+				Status:     usecase.VIRTUAL_TP2_HIT,
+				EntryPrice: 50,
+				TP2:        49,
+				CreatedAt:  now.Add(-90 * time.Minute),
+				ExpiresAt:  now.Add(30 * time.Minute),
+				ClosedAt:   now.Add(-20 * time.Minute),
+				TimeToTP1:  "20m0s",
+				TimeToTP2:  "35m0s",
+			},
+			{
+				ID:         "invalid_watch",
+				Symbol:     "DOGEUSDT",
+				Playbook:   "RANGE_EDGE_REVERSAL",
+				Status:     usecase.VIRTUAL_TP2_HIT,
+				EntryPrice: 10,
+				TP2:        9.5,
+				CreatedAt:  now.Add(-48 * time.Hour),
+				ExpiresAt:  now.Add(-46 * time.Hour),
+				ClosedAt:   now.Add(-6 * time.Hour),
+				TimeToTP1:  "50m0s",
+				TimeToTP2:  "16h0m0s",
+			},
+		},
+	}
+
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("GenerateEvaluationReport: %v", err)
+	}
+
+	report := repo.report
+	if report == nil {
+		t.Fatal("expected evaluation report")
+	}
+
+	if report.TotalSignals != 1 {
+		t.Fatalf("expected only 1 clean finalized signal, got %d", report.TotalSignals)
+	}
+	if report.Metrics["excluded_signal_anomaly_count"] != 1 {
+		t.Fatalf("expected 1 excluded signal anomaly, got %v", report.Metrics["excluded_signal_anomaly_count"])
+	}
+	if report.Metrics["excluded_watch_anomaly_count"] != 1 {
+		t.Fatalf("expected 1 excluded watch anomaly, got %v", report.Metrics["excluded_watch_anomaly_count"])
+	}
+	if report.Metrics["watch_finalized"] != 1 {
+		t.Fatalf("expected only 1 clean finalized watch, got %v", report.Metrics["watch_finalized"])
+	}
+	if !strings.Contains(report.Notes, "Journal sanity quarantine excluded 1 signal rows and 1 watch rows") {
+		t.Fatalf("expected quarantine note, got %q", report.Notes)
+	}
+}

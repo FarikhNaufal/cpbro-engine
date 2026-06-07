@@ -11,37 +11,41 @@ type MetricsRegistry struct {
 	mu sync.RWMutex
 
 	// Counters and gauges
-	ScanSuccessCount   uint64
-	ScanFailCount      uint64
-	LastScanDurationMs uint64
-	LastMarketDataMs   uint64
-	LastCandidateMs    uint64
-	LastAIBatchMs      uint64
-	LastFinalGateMs    uint64
-	LastRequestWeight  uint64
-	LastRequestBudget  uint64
-	LastPrefetchCount  uint64
-	LastEnrichedCount  uint64
-	TotalTickers       uint64
-	UniversePass       uint64
-	UniverseReject     uint64
-	MarketDataError    uint64
-	AICandidateCount   uint64
-	AITimeoutCount     uint64
-	TotalAILatencyMs   uint64
-	TotalAICalls       uint64
-	StalenessCount     uint64
-	StalenessChecked   uint64
-	FinalExecuteCount  uint64
-	FinalWatchCount    uint64
-	FinalRejectCount   uint64
-	ConflictDowngrade  uint64
-	CooldownReject     uint64
-	TelegramSuccess    uint64
-	TelegramFail       uint64
-	StorageWriteFail   uint64
-	EvalRecCount       uint64
-	GateBugCount       uint64
+	ScanSuccessCount              uint64
+	ScanFailCount                 uint64
+	LastScanDurationMs            uint64
+	LastMarketDataMs              uint64
+	LastCandidateMs               uint64
+	LastAIBatchMs                 uint64
+	LastFinalGateMs               uint64
+	LastRequestWeight             uint64
+	LastRequestBudget             uint64
+	LastPrefetchCount             uint64
+	LastEnrichedCount             uint64
+	TotalTickers                  uint64
+	UniversePass                  uint64
+	UniverseReject                uint64
+	MarketDataError               uint64
+	BootstrapTickerCacheFallback  uint64
+	BootstrapFundingCacheFallback uint64
+	LastBootstrapTickerAgeSec     uint64
+	LastBootstrapFundingAgeSec    uint64
+	AICandidateCount              uint64
+	AITimeoutCount                uint64
+	TotalAILatencyMs              uint64
+	TotalAICalls                  uint64
+	StalenessCount                uint64
+	StalenessChecked              uint64
+	FinalExecuteCount             uint64
+	FinalWatchCount               uint64
+	FinalRejectCount              uint64
+	ConflictDowngrade             uint64
+	CooldownReject                uint64
+	TelegramSuccess               uint64
+	TelegramFail                  uint64
+	StorageWriteFail              uint64
+	EvalRecCount                  uint64
+	GateBugCount                  uint64
 
 	// Timestamp trackers
 	LastScanTime       time.Time
@@ -129,6 +133,30 @@ func (m *MetricsRegistry) AddUniverseReject(val uint64) {
 
 func (m *MetricsRegistry) IncrementMarketDataError() {
 	atomic.AddUint64(&m.MarketDataError, 1)
+}
+
+func (m *MetricsRegistry) RecordBootstrapTickerCacheFallback(age time.Duration) {
+	atomic.AddUint64(&m.BootstrapTickerCacheFallback, 1)
+	if age < 0 {
+		age = 0
+	}
+	atomic.StoreUint64(&m.LastBootstrapTickerAgeSec, uint64(age.Seconds()))
+}
+
+func (m *MetricsRegistry) RecordBootstrapFundingCacheFallback(age time.Duration) {
+	atomic.AddUint64(&m.BootstrapFundingCacheFallback, 1)
+	if age < 0 {
+		age = 0
+	}
+	atomic.StoreUint64(&m.LastBootstrapFundingAgeSec, uint64(age.Seconds()))
+}
+
+func (m *MetricsRegistry) ClearBootstrapTickerCacheAge() {
+	atomic.StoreUint64(&m.LastBootstrapTickerAgeSec, 0)
+}
+
+func (m *MetricsRegistry) ClearBootstrapFundingCacheAge() {
+	atomic.StoreUint64(&m.LastBootstrapFundingAgeSec, 0)
 }
 
 func (m *MetricsRegistry) AddAICandidateCount(val uint64) {

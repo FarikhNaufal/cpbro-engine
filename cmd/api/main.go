@@ -114,6 +114,7 @@ func main() {
 	binanceService := service.NewBinanceReadonlyServiceWithOptions(
 		cfg.Binance.APIKey,
 		cfg.Binance.APISecret,
+		cfg.Binance.BaseURL,
 		time.Duration(cfg.Binance.RequestTimeoutSeconds)*time.Second,
 		cfg.Binance.MaxRetry,
 		time.Duration(cfg.Binance.RetryBackoffMs)*time.Millisecond,

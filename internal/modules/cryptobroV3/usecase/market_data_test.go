@@ -217,3 +217,32 @@ func TestMarketDataUsecase_FetchPremiumFundingRates_UsesFreshCacheOnFailure(t *t
 	defer provider.mu.Unlock()
 	require.Equal(t, 2, provider.fundingCalls)
 }
+
+func TestMarketDataUsecase_FetchAllFuturesTickers24h_RecordsCacheFallbackMetrics(t *testing.T) {
+	provider := &recordingMarketDataProvider{
+		tickers: []dto.Ticker24h{{Symbol: "BTCUSDT", LastPrice: 100000}},
+	}
+	reg := &MetricsRegistry{}
+	SetGlobalMetrics(reg)
+	t.Cleanup(func() {
+		SetGlobalMetrics(&MetricsRegistry{})
+	})
+
+	uc := NewMarketDataUsecase(provider, MarketDataUsecaseConfig{
+		BootstrapTimeout: 2 * time.Second,
+		GlobalCacheTTL:   30 * time.Second,
+	})
+
+	_, err := uc.FetchAllFuturesTickers24h(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), reg.LastBootstrapTickerAgeSec)
+
+	provider.mu.Lock()
+	provider.tickerErr = errors.New("timeout")
+	provider.mu.Unlock()
+
+	_, err = uc.FetchAllFuturesTickers24h(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), reg.BootstrapTickerCacheFallback)
+	require.GreaterOrEqual(t, reg.LastBootstrapTickerAgeSec, uint64(0))
+}

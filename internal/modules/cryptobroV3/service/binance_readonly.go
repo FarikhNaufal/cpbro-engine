@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
@@ -18,10 +19,10 @@ type BinanceReadonlyService struct {
 }
 
 func NewBinanceReadonlyService(apiKey, apiSecret string) *BinanceReadonlyService {
-	return NewBinanceReadonlyServiceWithOptions(apiKey, apiSecret, 15*time.Second, 2, 300*time.Millisecond)
+	return NewBinanceReadonlyServiceWithOptions(apiKey, apiSecret, "", 15*time.Second, 2, 300*time.Millisecond)
 }
 
-func NewBinanceReadonlyServiceWithOptions(apiKey, apiSecret string, requestTimeout time.Duration, maxRetry int, retryBackoff time.Duration) *BinanceReadonlyService {
+func NewBinanceReadonlyServiceWithOptions(apiKey, apiSecret, baseURL string, requestTimeout time.Duration, maxRetry int, retryBackoff time.Duration) *BinanceReadonlyService {
 	if requestTimeout <= 0 {
 		requestTimeout = 15 * time.Second
 	}
@@ -31,9 +32,13 @@ func NewBinanceReadonlyServiceWithOptions(apiKey, apiSecret string, requestTimeo
 	if retryBackoff <= 0 {
 		retryBackoff = 300 * time.Millisecond
 	}
+	client := futures.NewClient(apiKey, apiSecret)
+	if trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/"); trimmed != "" {
+		client.BaseURL = trimmed
+	}
 	// Note: We use read-only client config. No execution capability allowed.
 	return &BinanceReadonlyService{
-		client:         futures.NewClient(apiKey, apiSecret),
+		client:         client,
 		requestTimeout: requestTimeout,
 		maxRetry:       maxRetry,
 		retryBackoff:   retryBackoff,

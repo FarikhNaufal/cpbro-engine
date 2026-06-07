@@ -98,11 +98,14 @@ func (uc *MarketDataUsecase) FetchAllFuturesTickers24h(ctx context.Context) ([]d
 	tickers, err := uc.provider.FetchAllFuturesTickers24h(timeoutCtx)
 	if err == nil {
 		uc.storeTickerCache(tickers, time.Now())
+		GetGlobalMetrics().ClearBootstrapTickerCacheAge()
 		return tickers, nil
 	}
 
 	if cached, fetchedAt, ok := uc.loadTickerCache(time.Now()); ok {
-		slog.Warn("Binance futures ticker bootstrap failed; using cached ticker snapshot", "error", err, "cached_count", len(cached), "cache_age_seconds", roundDurationSeconds(time.Since(fetchedAt)))
+		cacheAge := time.Since(fetchedAt)
+		GetGlobalMetrics().RecordBootstrapTickerCacheFallback(cacheAge)
+		slog.Warn("Binance futures ticker bootstrap failed; using cached ticker snapshot", "error", err, "cached_count", len(cached), "cache_age_seconds", roundDurationSeconds(cacheAge))
 		return cached, nil
 	}
 
@@ -117,11 +120,14 @@ func (uc *MarketDataUsecase) FetchPremiumFundingRates(ctx context.Context) (map[
 	funding, err := uc.provider.FetchPremiumFundingRates(timeoutCtx)
 	if err == nil {
 		uc.storeFundingCache(funding, time.Now())
+		GetGlobalMetrics().ClearBootstrapFundingCacheAge()
 		return funding, nil
 	}
 
 	if cached, fetchedAt, ok := uc.loadFundingCache(time.Now()); ok {
-		slog.Warn("Binance premium funding bootstrap failed; using cached funding snapshot", "error", err, "cached_count", len(cached), "cache_age_seconds", roundDurationSeconds(time.Since(fetchedAt)))
+		cacheAge := time.Since(fetchedAt)
+		GetGlobalMetrics().RecordBootstrapFundingCacheFallback(cacheAge)
+		slog.Warn("Binance premium funding bootstrap failed; using cached funding snapshot", "error", err, "cached_count", len(cached), "cache_age_seconds", roundDurationSeconds(cacheAge))
 		return cached, nil
 	}
 

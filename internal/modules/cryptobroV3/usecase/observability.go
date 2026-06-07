@@ -58,36 +58,40 @@ type HealthStatus struct {
 }
 
 type SREMetrics struct {
-	ScanDurationMs         uint64  `json:"scan_duration_ms"`
-	MarketDataDurationMs   uint64  `json:"market_data_duration_ms"`
-	CandidatePipelineMs    uint64  `json:"candidate_pipeline_duration_ms"`
-	AIBatchDurationMs      uint64  `json:"ai_batch_duration_ms"`
-	FinalGateDurationMs    uint64  `json:"final_gate_duration_ms"`
-	EstimatedRequestWeight uint64  `json:"estimated_request_weight"`
-	RequestWeightBudget    uint64  `json:"request_weight_budget"`
-	PrefetchCandidateCount uint64  `json:"prefetch_candidate_count"`
-	EnrichedCandidateCount uint64  `json:"enriched_candidate_count"`
-	ScanSuccessCount       uint64  `json:"scan_success_count"`
-	ScanFailCount          uint64  `json:"scan_fail_count"`
-	TotalTickers           uint64  `json:"total_tickers"`
-	UniversePassCount      uint64  `json:"universe_pass_count"`
-	UniverseRejectCount    uint64  `json:"universe_reject_count"`
-	MarketDataErrorCount   uint64  `json:"market_data_error_count"`
-	AICandidateCount       uint64  `json:"ai_candidate_count"`
-	AITimeoutCount         uint64  `json:"ai_timeout_count"`
-	AILatencyAverageMs     float64 `json:"ai_latency_average_ms"`
-	StalenessRate          float64 `json:"staleness_rate"`
-	FinalExecuteCount      uint64  `json:"final_execute_count"`
-	FinalWatchCount        uint64  `json:"final_watch_count"`
-	FinalRejectCount       uint64  `json:"final_reject_count"`
-	ConflictDowngradeCount uint64  `json:"conflict_downgrade_count"`
-	CooldownRejectCount    uint64  `json:"cooldown_reject_count"`
-	TelegramSuccessCount   uint64  `json:"telegram_success_count"`
-	TelegramFailCount      uint64  `json:"telegram_fail_count"`
-	MonitoringActiveCount  uint64  `json:"monitoring_active_count"`
-	StorageWriteFailCount  uint64  `json:"storage_write_fail_count"`
-	EvaluationRecCount     uint64  `json:"evaluation_recommendation_count"`
-	GateBugCount           uint64  `json:"gate_bug_count"`
+	ScanDurationMs                     uint64  `json:"scan_duration_ms"`
+	MarketDataDurationMs               uint64  `json:"market_data_duration_ms"`
+	CandidatePipelineMs                uint64  `json:"candidate_pipeline_duration_ms"`
+	AIBatchDurationMs                  uint64  `json:"ai_batch_duration_ms"`
+	FinalGateDurationMs                uint64  `json:"final_gate_duration_ms"`
+	EstimatedRequestWeight             uint64  `json:"estimated_request_weight"`
+	RequestWeightBudget                uint64  `json:"request_weight_budget"`
+	PrefetchCandidateCount             uint64  `json:"prefetch_candidate_count"`
+	EnrichedCandidateCount             uint64  `json:"enriched_candidate_count"`
+	ScanSuccessCount                   uint64  `json:"scan_success_count"`
+	ScanFailCount                      uint64  `json:"scan_fail_count"`
+	TotalTickers                       uint64  `json:"total_tickers"`
+	UniversePassCount                  uint64  `json:"universe_pass_count"`
+	UniverseRejectCount                uint64  `json:"universe_reject_count"`
+	MarketDataErrorCount               uint64  `json:"market_data_error_count"`
+	BootstrapTickerCacheFallbackCount  uint64  `json:"bootstrap_ticker_cache_fallback_count"`
+	BootstrapFundingCacheFallbackCount uint64  `json:"bootstrap_funding_cache_fallback_count"`
+	BootstrapTickerCacheAgeSeconds     uint64  `json:"bootstrap_ticker_cache_age_seconds"`
+	BootstrapFundingCacheAgeSeconds    uint64  `json:"bootstrap_funding_cache_age_seconds"`
+	AICandidateCount                   uint64  `json:"ai_candidate_count"`
+	AITimeoutCount                     uint64  `json:"ai_timeout_count"`
+	AILatencyAverageMs                 float64 `json:"ai_latency_average_ms"`
+	StalenessRate                      float64 `json:"staleness_rate"`
+	FinalExecuteCount                  uint64  `json:"final_execute_count"`
+	FinalWatchCount                    uint64  `json:"final_watch_count"`
+	FinalRejectCount                   uint64  `json:"final_reject_count"`
+	ConflictDowngradeCount             uint64  `json:"conflict_downgrade_count"`
+	CooldownRejectCount                uint64  `json:"cooldown_reject_count"`
+	TelegramSuccessCount               uint64  `json:"telegram_success_count"`
+	TelegramFailCount                  uint64  `json:"telegram_fail_count"`
+	MonitoringActiveCount              uint64  `json:"monitoring_active_count"`
+	StorageWriteFailCount              uint64  `json:"storage_write_fail_count"`
+	EvaluationRecCount                 uint64  `json:"evaluation_recommendation_count"`
+	GateBugCount                       uint64  `json:"gate_bug_count"`
 }
 
 type ObservabilityUsecase struct {
@@ -201,36 +205,40 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 	}
 
 	metrics := &SREMetrics{
-		ScanDurationMs:         atomic.LoadUint64(&reg.LastScanDurationMs),
-		MarketDataDurationMs:   atomic.LoadUint64(&reg.LastMarketDataMs),
-		CandidatePipelineMs:    atomic.LoadUint64(&reg.LastCandidateMs),
-		AIBatchDurationMs:      atomic.LoadUint64(&reg.LastAIBatchMs),
-		FinalGateDurationMs:    atomic.LoadUint64(&reg.LastFinalGateMs),
-		EstimatedRequestWeight: atomic.LoadUint64(&reg.LastRequestWeight),
-		RequestWeightBudget:    atomic.LoadUint64(&reg.LastRequestBudget),
-		PrefetchCandidateCount: atomic.LoadUint64(&reg.LastPrefetchCount),
-		EnrichedCandidateCount: atomic.LoadUint64(&reg.LastEnrichedCount),
-		ScanSuccessCount:       atomic.LoadUint64(&reg.ScanSuccessCount),
-		ScanFailCount:          atomic.LoadUint64(&reg.ScanFailCount),
-		TotalTickers:           atomic.LoadUint64(&reg.TotalTickers),
-		UniversePassCount:      atomic.LoadUint64(&reg.UniversePass),
-		UniverseRejectCount:    atomic.LoadUint64(&reg.UniverseReject),
-		MarketDataErrorCount:   atomic.LoadUint64(&reg.MarketDataError),
-		AICandidateCount:       atomic.LoadUint64(&reg.AICandidateCount),
-		AITimeoutCount:         atomic.LoadUint64(&reg.AITimeoutCount),
-		AILatencyAverageMs:     reg.GetAverageAILatencyMs(),
-		StalenessRate:          reg.GetStalenessRate(),
-		FinalExecuteCount:      atomic.LoadUint64(&reg.FinalExecuteCount),
-		FinalWatchCount:        atomic.LoadUint64(&reg.FinalWatchCount),
-		FinalRejectCount:       atomic.LoadUint64(&reg.FinalRejectCount),
-		ConflictDowngradeCount: atomic.LoadUint64(&reg.ConflictDowngrade),
-		CooldownRejectCount:    atomic.LoadUint64(&reg.CooldownReject),
-		TelegramSuccessCount:   atomic.LoadUint64(&reg.TelegramSuccess),
-		TelegramFailCount:      atomic.LoadUint64(&reg.TelegramFail),
-		MonitoringActiveCount:  activeCount,
-		StorageWriteFailCount:  atomic.LoadUint64(&reg.StorageWriteFail),
-		EvaluationRecCount:     atomic.LoadUint64(&reg.EvalRecCount),
-		GateBugCount:           atomic.LoadUint64(&reg.GateBugCount),
+		ScanDurationMs:                     atomic.LoadUint64(&reg.LastScanDurationMs),
+		MarketDataDurationMs:               atomic.LoadUint64(&reg.LastMarketDataMs),
+		CandidatePipelineMs:                atomic.LoadUint64(&reg.LastCandidateMs),
+		AIBatchDurationMs:                  atomic.LoadUint64(&reg.LastAIBatchMs),
+		FinalGateDurationMs:                atomic.LoadUint64(&reg.LastFinalGateMs),
+		EstimatedRequestWeight:             atomic.LoadUint64(&reg.LastRequestWeight),
+		RequestWeightBudget:                atomic.LoadUint64(&reg.LastRequestBudget),
+		PrefetchCandidateCount:             atomic.LoadUint64(&reg.LastPrefetchCount),
+		EnrichedCandidateCount:             atomic.LoadUint64(&reg.LastEnrichedCount),
+		ScanSuccessCount:                   atomic.LoadUint64(&reg.ScanSuccessCount),
+		ScanFailCount:                      atomic.LoadUint64(&reg.ScanFailCount),
+		TotalTickers:                       atomic.LoadUint64(&reg.TotalTickers),
+		UniversePassCount:                  atomic.LoadUint64(&reg.UniversePass),
+		UniverseRejectCount:                atomic.LoadUint64(&reg.UniverseReject),
+		MarketDataErrorCount:               atomic.LoadUint64(&reg.MarketDataError),
+		BootstrapTickerCacheFallbackCount:  atomic.LoadUint64(&reg.BootstrapTickerCacheFallback),
+		BootstrapFundingCacheFallbackCount: atomic.LoadUint64(&reg.BootstrapFundingCacheFallback),
+		BootstrapTickerCacheAgeSeconds:     atomic.LoadUint64(&reg.LastBootstrapTickerAgeSec),
+		BootstrapFundingCacheAgeSeconds:    atomic.LoadUint64(&reg.LastBootstrapFundingAgeSec),
+		AICandidateCount:                   atomic.LoadUint64(&reg.AICandidateCount),
+		AITimeoutCount:                     atomic.LoadUint64(&reg.AITimeoutCount),
+		AILatencyAverageMs:                 reg.GetAverageAILatencyMs(),
+		StalenessRate:                      reg.GetStalenessRate(),
+		FinalExecuteCount:                  atomic.LoadUint64(&reg.FinalExecuteCount),
+		FinalWatchCount:                    atomic.LoadUint64(&reg.FinalWatchCount),
+		FinalRejectCount:                   atomic.LoadUint64(&reg.FinalRejectCount),
+		ConflictDowngradeCount:             atomic.LoadUint64(&reg.ConflictDowngrade),
+		CooldownRejectCount:                atomic.LoadUint64(&reg.CooldownReject),
+		TelegramSuccessCount:               atomic.LoadUint64(&reg.TelegramSuccess),
+		TelegramFailCount:                  atomic.LoadUint64(&reg.TelegramFail),
+		MonitoringActiveCount:              activeCount,
+		StorageWriteFailCount:              atomic.LoadUint64(&reg.StorageWriteFail),
+		EvaluationRecCount:                 atomic.LoadUint64(&reg.EvalRecCount),
+		GateBugCount:                       atomic.LoadUint64(&reg.GateBugCount),
 	}
 
 	status := HealthStatus{

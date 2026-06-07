@@ -3,7 +3,9 @@ package usecase
 import (
 	"fmt"
 	"log/slog"
+	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -97,6 +99,69 @@ func realizedEvaluationPnl(item SignalJournal, now time.Time) float64 {
 	default:
 		return item.PnlPercentage
 	}
+}
+
+type journalSanityProfile struct {
+	maxHold     time.Duration
+	expiryGrace time.Duration
+}
+
+func getJournalSanityProfile() journalSanityProfile {
+	maxHoldMinutes := 120
+	if raw := strings.TrimSpace(os.Getenv("MONITORING_MAX_HOLD_MINUTES")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+			maxHoldMinutes = parsed
+		}
+	}
+	return journalSanityProfile{
+		maxHold:     time.Duration(maxHoldMinutes) * time.Minute,
+		expiryGrace: 2 * time.Minute,
+	}
+}
+
+func parseJournalDuration(raw string) (time.Duration, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+	parsed, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, false
+	}
+	if parsed < 0 {
+		parsed = -parsed
+	}
+	return parsed, true
+}
+
+func isJournalTimingAnomalous(item SignalJournal, profile journalSanityProfile) bool {
+	limit := profile.maxHold + profile.expiryGrace
+
+	tp1Duration, hasTP1 := parseJournalDuration(item.TimeToTP1)
+	tp2Duration, hasTP2 := parseJournalDuration(item.TimeToTP2)
+	slDuration, hasSL := parseJournalDuration(item.TimeToSL)
+
+	if hasTP1 && tp1Duration > limit {
+		return true
+	}
+	if hasTP2 && tp2Duration > limit {
+		return true
+	}
+	if hasSL && slDuration > limit {
+		return true
+	}
+	if hasTP1 && hasTP2 && tp2Duration+time.Second < tp1Duration {
+		return true
+	}
+
+	switch item.Status {
+	case TP2_HIT, SL_HIT, VIRTUAL_TP2_HIT, VIRTUAL_SL_HIT, BREAKEVEN:
+		if !item.ClosedAt.IsZero() && !item.ExpiresAt.IsZero() && item.ClosedAt.After(item.ExpiresAt.Add(profile.expiryGrace)) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // getSampleGuard returns confidence, requiresMoreData, and severity based on sample size
@@ -203,8 +268,14 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 
 	// 2. Identify finalised signals (from journal)
 	now := time.Now()
+	sanityProfile := getJournalSanityProfile()
 	var finalized []SignalJournal
+	excludedSignalAnomalies := 0
 	for _, item := range journal {
+		if isJournalTimingAnomalous(item, sanityProfile) {
+			excludedSignalAnomalies++
+			continue
+		}
 		if isFinalizedSignalJournalForEvaluation(item, now) {
 			finalized = append(finalized, item)
 		}
@@ -416,8 +487,13 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	var watchFinalized []WatchJournal
 	var watchTP1Hits, watchTP2Hits, watchSLHits, watchExpiredHits int
 	var watchSumMFE, watchSumMAE, watchTotalPnl float64
+	excludedWatchAnomalies := 0
 
 	for _, item := range watchJournal {
+		if isJournalTimingAnomalous(SignalJournal(item), sanityProfile) {
+			excludedWatchAnomalies++
+			continue
+		}
 		if !isFinalizedWatchJournalForEvaluation(item, now) {
 			continue
 		}
@@ -1340,29 +1416,33 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		DataCompleteness: completeness,
 		TotalSignals:     totalCount,
 		Metrics: map[string]float64{
-			"win_rate":                   winRate,
-			"tp1_rate":                   tp1Rate,
-			"tp2_rate":                   tp2Rate,
-			"sl_rate":                    slRate,
-			"expired_rate":               expiredRate,
-			"average_mfe":                avgMFE,
-			"average_mae":                avgMAE,
-			"average_rr":                 avgRR,
-			"average_time_to_tp1":        avgTimeToTP1,
-			"average_time_to_tp2":        avgTimeToTP2,
-			"average_time_to_sl":         avgTimeToSL,
-			"average_holding_time":       avgHoldingTime,
-			"total_pnl_percentage":       totalPnl,
-			"watch_total":                float64(len(watchJournal)),
-			"watch_finalized":            float64(watchFinalizedCount),
-			"watch_virtual_win_rate":     watchVirtualWinRate,
-			"watch_virtual_tp1_rate":     watchVirtualTP1Rate,
-			"watch_virtual_tp2_rate":     watchVirtualTP2Rate,
-			"watch_virtual_sl_rate":      watchVirtualSLRate,
-			"watch_virtual_expired_rate": watchVirtualExpiredRate,
-			"watch_average_mfe":          watchAverageMFE,
-			"watch_average_mae":          watchAverageMAE,
-			"watch_total_pnl_percentage": watchTotalPnl,
+			"win_rate":                      winRate,
+			"tp1_rate":                      tp1Rate,
+			"tp2_rate":                      tp2Rate,
+			"sl_rate":                       slRate,
+			"expired_rate":                  expiredRate,
+			"average_mfe":                   avgMFE,
+			"average_mae":                   avgMAE,
+			"average_rr":                    avgRR,
+			"average_time_to_tp1":           avgTimeToTP1,
+			"average_time_to_tp2":           avgTimeToTP2,
+			"average_time_to_sl":            avgTimeToSL,
+			"average_holding_time":          avgHoldingTime,
+			"total_pnl_percentage":          totalPnl,
+			"raw_signal_journal_count":      float64(len(journal)),
+			"excluded_signal_anomaly_count": float64(excludedSignalAnomalies),
+			"watch_total":                   float64(len(watchJournal)),
+			"watch_finalized":               float64(watchFinalizedCount),
+			"watch_virtual_win_rate":        watchVirtualWinRate,
+			"watch_virtual_tp1_rate":        watchVirtualTP1Rate,
+			"watch_virtual_tp2_rate":        watchVirtualTP2Rate,
+			"watch_virtual_sl_rate":         watchVirtualSLRate,
+			"watch_virtual_expired_rate":    watchVirtualExpiredRate,
+			"watch_average_mfe":             watchAverageMFE,
+			"watch_average_mae":             watchAverageMAE,
+			"watch_total_pnl_percentage":    watchTotalPnl,
+			"raw_watch_journal_count":       float64(len(watchJournal)),
+			"excluded_watch_anomaly_count":  float64(excludedWatchAnomalies),
 		},
 		PlaybookStats:             playbookStats,
 		RegimeStats:               regimeStats,
@@ -1388,6 +1468,9 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		PlaybookDenganTP2Follow:   pbBestTP2Follow,
 		Notes:                     "Feedback Loop Revision generated successfully.",
 		Status:                    "COMPLETED",
+	}
+	if excludedSignalAnomalies > 0 || excludedWatchAnomalies > 0 {
+		report.Notes = fmt.Sprintf("%s Journal sanity quarantine excluded %d signal rows and %d watch rows from evaluation metrics.", report.Notes, excludedSignalAnomalies, excludedWatchAnomalies)
 	}
 	GetGlobalMetrics().SetEvalMetrics(uint64(len(recommendations)), uint64(len(gateBugFindings)))
 	GetGlobalMetrics().SetLastEvaluationTime(report.GeneratedAt)
