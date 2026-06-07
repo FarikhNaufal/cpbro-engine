@@ -260,6 +260,10 @@ func validateAndClampProfile(playbook Playbook, profile PlaybookThresholdProfile
 		if !profile.RequireConfirmation {
 			profile.RequireConfirmation = true
 		}
+		if !profile.RequireRetest {
+			slog.Warn("Liquidity Sweep Reversal requires retest confirmation. Overriding RequireRetest to true.")
+			profile.RequireRetest = true
+		}
 	}
 
 	// Safety validation for Compression Breakout Retest
@@ -503,7 +507,7 @@ func getDefaultProfiles() map[Playbook]PlaybookThresholdProfile {
 			RequireVolumeConfirm:     true,
 			RequireRejection:         true,
 			RequireConfirmation:      true,
-			RequireRetest:            false,
+			RequireRetest:            true,
 			MinVolumeRatio:           1.3,
 			MinWickRatio:             0.3,
 			AllowBreakoutCandleEntry: false,

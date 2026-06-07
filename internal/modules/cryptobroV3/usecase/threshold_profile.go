@@ -73,7 +73,7 @@ func GetPlaybookThresholdProfile(playbook Playbook, policy MarketPolicy, tier Ti
 				RequireVolumeConfirm:     true,
 				RequireRejection:         true,
 				RequireConfirmation:      true,
-				RequireRetest:            false,
+				RequireRetest:            true,
 				MinVolumeRatio:           1.3,
 				MinWickRatio:             0.3,
 				AllowBreakoutCandleEntry: false,

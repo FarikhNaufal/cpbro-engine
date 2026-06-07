@@ -34,6 +34,9 @@ func TestConfigRegistry_Fallback(t *testing.T) {
 	if !profile.RequireVolumeConfirm {
 		t.Error("Expected default LIQUIDITY_SWEEP_REVERSAL to require volume confirm")
 	}
+	if !profile.RequireRetest {
+		t.Error("Expected default LIQUIDITY_SWEEP_REVERSAL to require retest")
+	}
 }
 
 func TestConfigRegistry_ParseResilience(t *testing.T) {
@@ -156,6 +159,9 @@ func TestConfigRegistry_SafetyCompliance(t *testing.T) {
 	}
 	if !sweep.RequireRejection || !sweep.RequireConfirmation {
 		t.Error("Expected sweep rejection and confirmation overridden to true")
+	}
+	if !sweep.RequireRetest {
+		t.Error("Expected sweep RequireRetest overridden to true")
 	}
 
 	// Verify Breakout Retest constraints
