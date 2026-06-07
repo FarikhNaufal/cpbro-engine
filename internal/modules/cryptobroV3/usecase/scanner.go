@@ -121,6 +121,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		fundingRates map[string]float64
 		tickersErr   error
 		fundingErr   error
+		tickersMeta  bootstrapFetchMeta
+		fundingMeta  bootstrapFetchMeta
 		macroWG      sync.WaitGroup
 	)
 	macroWG.Add(2)
@@ -129,30 +131,38 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		// Use context.Background() (detached from scanCtx) so that BINANCE_MAX_RETRY
 		// retries can execute even when the scanCtx deadline has just been reached.
 		// The bootstrapTimeout inside MarketDataUsecase still provides per-attempt timeout.
-		tickers, tickersErr = uc.marketDataUsecase.FetchAllFuturesTickers24h(context.Background())
+		tickers, tickersMeta, tickersErr = uc.marketDataUsecase.FetchAllFuturesTickers24hWithMeta(context.Background())
 	}()
 	go func() {
 		defer macroWG.Done()
-		fundingRates, fundingErr = uc.marketDataUsecase.FetchPremiumFundingRates(context.Background())
+		fundingRates, fundingMeta, fundingErr = uc.marketDataUsecase.FetchPremiumFundingRatesWithMeta(context.Background())
 	}()
 	macroWG.Wait()
 
 	if tickersErr == nil {
-		slog.Info("Futures ticker bootstrap ready", "scan_id", scanID, "count", len(tickers))
+		attrs := []any{"scan_id", scanID, "source", string(tickersMeta.Source), "count", len(tickers)}
+		if tickersMeta.Source == bootstrapSourceCache {
+			attrs = append(attrs, "cache_age_seconds", roundDurationSeconds(tickersMeta.CacheAge))
+		}
+		slog.Info("Futures ticker bootstrap ready", attrs...)
 	}
 	if fundingErr == nil {
-		slog.Info("Premium funding bootstrap ready", "scan_id", scanID, "count", len(fundingRates))
+		attrs := []any{"scan_id", scanID, "source", string(fundingMeta.Source), "count", len(fundingRates)}
+		if fundingMeta.Source == bootstrapSourceCache {
+			attrs = append(attrs, "cache_age_seconds", roundDurationSeconds(fundingMeta.CacheAge))
+		}
+		slog.Info("Premium funding bootstrap ready", attrs...)
 	}
 
 	if tickersErr != nil {
-		slog.Error("Failed to fetch futures tickers", "error", tickersErr)
+		slog.Error("Failed to fetch futures tickers", "scan_id", scanID, "source", string(bootstrapSourceNone), "error", tickersErr)
 		GetGlobalMetrics().IncrementScanFail()
 		GetGlobalMetrics().SetLastScanTime(scanStart)
 		GetGlobalMetrics().IncrementMarketDataError()
 		return dto.ScanResult{}, fmt.Errorf("binance ticker total fail: %w", tickersErr)
 	}
 	if fundingErr != nil {
-		slog.Warn("Failed to fetch funding rates; using fallback values", "error", fundingErr)
+		slog.Warn("Failed to fetch funding rates; using fallback values", "scan_id", scanID, "source", string(bootstrapSourceNone), "error", fundingErr)
 		GetGlobalMetrics().IncrementMarketDataError()
 		fundingRates = make(map[string]float64)
 	}

@@ -192,6 +192,32 @@ func TestMarketDataUsecase_FetchAllFuturesTickers24h_UsesFreshCacheOnFailure(t *
 	require.Equal(t, 2, provider.tickerCalls)
 }
 
+func TestMarketDataUsecase_FetchAllFuturesTickers24hWithMeta_ReportsLiveThenCache(t *testing.T) {
+	provider := &recordingMarketDataProvider{
+		tickers: []dto.Ticker24h{{Symbol: "BTCUSDT", LastPrice: 100000}},
+	}
+	uc := NewMarketDataUsecase(provider, MarketDataUsecaseConfig{
+		BootstrapTimeout: 2 * time.Second,
+		GlobalCacheTTL:   30 * time.Second,
+	})
+
+	first, firstMeta, err := uc.FetchAllFuturesTickers24hWithMeta(context.Background())
+	require.NoError(t, err)
+	require.Len(t, first, 1)
+	require.Equal(t, bootstrapSourceLive, firstMeta.Source)
+	require.Zero(t, firstMeta.CacheAge)
+
+	provider.mu.Lock()
+	provider.tickerErr = errors.New("timeout")
+	provider.mu.Unlock()
+
+	second, secondMeta, err := uc.FetchAllFuturesTickers24hWithMeta(context.Background())
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	require.Equal(t, bootstrapSourceCache, secondMeta.Source)
+	require.GreaterOrEqual(t, secondMeta.CacheAge, time.Duration(0))
+}
+
 func TestMarketDataUsecase_FetchPremiumFundingRates_UsesFreshCacheOnFailure(t *testing.T) {
 	provider := &recordingMarketDataProvider{
 		funding: map[string]float64{"BTCUSDT": 0.001},
@@ -216,6 +242,32 @@ func TestMarketDataUsecase_FetchPremiumFundingRates_UsesFreshCacheOnFailure(t *t
 	provider.mu.Lock()
 	defer provider.mu.Unlock()
 	require.Equal(t, 2, provider.fundingCalls)
+}
+
+func TestMarketDataUsecase_FetchPremiumFundingRatesWithMeta_ReportsLiveThenCache(t *testing.T) {
+	provider := &recordingMarketDataProvider{
+		funding: map[string]float64{"BTCUSDT": 0.001},
+	}
+	uc := NewMarketDataUsecase(provider, MarketDataUsecaseConfig{
+		BootstrapTimeout: 2 * time.Second,
+		GlobalCacheTTL:   30 * time.Second,
+	})
+
+	first, firstMeta, err := uc.FetchPremiumFundingRatesWithMeta(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 0.001, first["BTCUSDT"])
+	require.Equal(t, bootstrapSourceLive, firstMeta.Source)
+	require.Zero(t, firstMeta.CacheAge)
+
+	provider.mu.Lock()
+	provider.fundingErr = errors.New("timeout")
+	provider.mu.Unlock()
+
+	second, secondMeta, err := uc.FetchPremiumFundingRatesWithMeta(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 0.001, second["BTCUSDT"])
+	require.Equal(t, bootstrapSourceCache, secondMeta.Source)
+	require.GreaterOrEqual(t, secondMeta.CacheAge, time.Duration(0))
 }
 
 func TestMarketDataUsecase_FetchAllFuturesTickers24h_RecordsCacheFallbackMetrics(t *testing.T) {

@@ -37,6 +37,19 @@ type MarketDataUsecase struct {
 	fundingCacheFetched time.Time
 }
 
+type bootstrapSource string
+
+const (
+	bootstrapSourceLive  bootstrapSource = "live"
+	bootstrapSourceCache bootstrapSource = "cache"
+	bootstrapSourceNone  bootstrapSource = "none"
+)
+
+type bootstrapFetchMeta struct {
+	Source   bootstrapSource
+	CacheAge time.Duration
+}
+
 type cachedClosedCandles struct {
 	candles    []dto.Candle
 	validUntil time.Time
@@ -92,6 +105,13 @@ func NewMarketDataUsecase(provider MarketDataProvider, configs ...MarketDataUsec
 
 // FetchAllFuturesTickers24h fetches stats for all tickers.
 func (uc *MarketDataUsecase) FetchAllFuturesTickers24h(ctx context.Context) ([]dto.Ticker24h, error) {
+	tickers, _, err := uc.FetchAllFuturesTickers24hWithMeta(ctx)
+	return tickers, err
+}
+
+// FetchAllFuturesTickers24hWithMeta fetches stats for all tickers and reports whether the result came from
+// a live Binance response or a local cache fallback.
+func (uc *MarketDataUsecase) FetchAllFuturesTickers24hWithMeta(ctx context.Context) ([]dto.Ticker24h, bootstrapFetchMeta, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, uc.bootstrapTimeout)
 	defer cancel()
 
@@ -99,21 +119,28 @@ func (uc *MarketDataUsecase) FetchAllFuturesTickers24h(ctx context.Context) ([]d
 	if err == nil {
 		uc.storeTickerCache(tickers, time.Now())
 		GetGlobalMetrics().ClearBootstrapTickerCacheAge()
-		return tickers, nil
+		return tickers, bootstrapFetchMeta{Source: bootstrapSourceLive}, nil
 	}
 
 	if cached, fetchedAt, ok := uc.loadTickerCache(time.Now()); ok {
 		cacheAge := time.Since(fetchedAt)
 		GetGlobalMetrics().RecordBootstrapTickerCacheFallback(cacheAge)
 		slog.Warn("Binance futures ticker bootstrap failed; using cached ticker snapshot", "error", err, "cached_count", len(cached), "cache_age_seconds", roundDurationSeconds(cacheAge))
-		return cached, nil
+		return cached, bootstrapFetchMeta{Source: bootstrapSourceCache, CacheAge: cacheAge}, nil
 	}
 
-	return nil, err
+	return nil, bootstrapFetchMeta{Source: bootstrapSourceNone}, err
 }
 
 // FetchPremiumFundingRates fetches all active symbols funding rates.
 func (uc *MarketDataUsecase) FetchPremiumFundingRates(ctx context.Context) (map[string]float64, error) {
+	funding, _, err := uc.FetchPremiumFundingRatesWithMeta(ctx)
+	return funding, err
+}
+
+// FetchPremiumFundingRatesWithMeta fetches funding data and reports whether it came from a live Binance
+// response or a cache fallback.
+func (uc *MarketDataUsecase) FetchPremiumFundingRatesWithMeta(ctx context.Context) (map[string]float64, bootstrapFetchMeta, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, uc.bootstrapTimeout)
 	defer cancel()
 
@@ -121,17 +148,17 @@ func (uc *MarketDataUsecase) FetchPremiumFundingRates(ctx context.Context) (map[
 	if err == nil {
 		uc.storeFundingCache(funding, time.Now())
 		GetGlobalMetrics().ClearBootstrapFundingCacheAge()
-		return funding, nil
+		return funding, bootstrapFetchMeta{Source: bootstrapSourceLive}, nil
 	}
 
 	if cached, fetchedAt, ok := uc.loadFundingCache(time.Now()); ok {
 		cacheAge := time.Since(fetchedAt)
 		GetGlobalMetrics().RecordBootstrapFundingCacheFallback(cacheAge)
 		slog.Warn("Binance premium funding bootstrap failed; using cached funding snapshot", "error", err, "cached_count", len(cached), "cache_age_seconds", roundDurationSeconds(cacheAge))
-		return cached, nil
+		return cached, bootstrapFetchMeta{Source: bootstrapSourceCache, CacheAge: cacheAge}, nil
 	}
 
-	return nil, err
+	return nil, bootstrapFetchMeta{Source: bootstrapSourceNone}, err
 }
 
 // FetchMarketData retrieves klines, open interest, funding rate, and latest price concurrently.
