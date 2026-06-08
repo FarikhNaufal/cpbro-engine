@@ -66,39 +66,59 @@ type ArbiterSelectedDetail struct {
 	FinalReason     string `json:"final_reason"`
 }
 
+type FunnelReasonCount struct {
+	Reason string `json:"reason"`
+	Count  int    `json:"count"`
+}
+
+type FunnelStageSummary struct {
+	Stage   string              `json:"stage"`
+	Total   int                 `json:"total"`
+	Reasons []FunnelReasonCount `json:"reasons"`
+}
+
+type PlaybookBlockerSummary struct {
+	Playbook string               `json:"playbook"`
+	Total    int                  `json:"total"`
+	Stages   []FunnelStageSummary `json:"stages"`
+}
+
 type LatestResultResponse struct {
-	ConfigVersion                  string                  `json:"config_version"`
-	GeneratedAt                    string                  `json:"generated_at"`
-	ScanID                         string                  `json:"scan_id"`
-	MarketPolicy                   string                  `json:"market_policy"`
-	MarketRegime                   string                  `json:"market_regime"`
-	TotalTickers                   int                     `json:"total_tickers"`
-	TotalUniversePass              int                     `json:"total_universe_pass"`
-	TotalUniverseRejected          int                     `json:"total_universe_rejected"`
-	TotalStrategySelected          int                     `json:"total_strategy_selected"`
-	TotalPlaybookEligible          int                     `json:"total_playbook_eligible"`
-	TotalQuantCandidates           int                     `json:"total_quant_candidates"`
-	TotalArbiterSelected           int                     `json:"total_arbiter_selected"`
-	TotalLocalAICandidate          int                     `json:"total_local_ai_candidate"`
-	TotalAIConfirm                 int                     `json:"total_ai_confirm"`
-	TotalAIWait                    int                     `json:"total_ai_wait"`
-	TotalAIReject                  int                     `json:"total_ai_reject"`
-	TotalAIError                   int                     `json:"total_ai_error"`
-	TotalFinalExecute              int                     `json:"total_final_execute"`
-	TotalFinalWatch                int                     `json:"total_final_watch"`
-	TotalFinalReject               int                     `json:"total_final_reject"`
-	ExecuteSignals                 []Signal                `json:"execute_signals"`
-	Watchlist                      []WatchSignal           `json:"watchlist"`
-	RejectedSummary                []string                `json:"rejected_summary"`
-	PolicyRejectedSummary          []string                `json:"policy_rejected_summary"`
-	ThresholdProfileSummary        map[string]string       `json:"threshold_profile_summary"`
-	EvaluationDataCompletenessHint string                  `json:"evaluation_data_completeness_hint"`
-	ArbiterSelectedDetails         []ArbiterSelectedDetail `json:"arbiter_selected_details"`
-	LastScanTime                   string                  `json:"last_scan_time"`
-	Duration                       string                  `json:"duration"`
-	Signals                        []Signal                `json:"signals"`
-	Warnings                       []string                `json:"warnings"`
-	PartialErrors                  []string                `json:"partial_errors"`
+	ConfigVersion                  string                   `json:"config_version"`
+	GeneratedAt                    string                   `json:"generated_at"`
+	ScanID                         string                   `json:"scan_id"`
+	MarketPolicy                   string                   `json:"market_policy"`
+	MarketRegime                   string                   `json:"market_regime"`
+	TotalTickers                   int                      `json:"total_tickers"`
+	TotalUniversePass              int                      `json:"total_universe_pass"`
+	TotalUniverseRejected          int                      `json:"total_universe_rejected"`
+	TotalStrategySelected          int                      `json:"total_strategy_selected"`
+	TotalPlaybookEligible          int                      `json:"total_playbook_eligible"`
+	TotalQuantCandidates           int                      `json:"total_quant_candidates"`
+	TotalArbiterSelected           int                      `json:"total_arbiter_selected"`
+	TotalLocalAICandidate          int                      `json:"total_local_ai_candidate"`
+	TotalAIConfirm                 int                      `json:"total_ai_confirm"`
+	TotalAIWait                    int                      `json:"total_ai_wait"`
+	TotalAIReject                  int                      `json:"total_ai_reject"`
+	TotalAIError                   int                      `json:"total_ai_error"`
+	TotalFinalExecute              int                      `json:"total_final_execute"`
+	TotalFinalWatch                int                      `json:"total_final_watch"`
+	TotalFinalReject               int                      `json:"total_final_reject"`
+	ExecuteSignals                 []Signal                 `json:"execute_signals"`
+	Watchlist                      []WatchSignal            `json:"watchlist"`
+	RejectedSummary                []string                 `json:"rejected_summary"`
+	PolicyRejectedSummary          []string                 `json:"policy_rejected_summary"`
+	ThresholdProfileSummary        map[string]string        `json:"threshold_profile_summary"`
+	FunnelStageSummary             []FunnelStageSummary     `json:"funnel_stage_summary"`
+	TopFunnelBlockers              []string                 `json:"top_funnel_blockers"`
+	PlaybookBlockerSummary         []PlaybookBlockerSummary `json:"playbook_blocker_summary"`
+	EvaluationDataCompletenessHint string                   `json:"evaluation_data_completeness_hint"`
+	ArbiterSelectedDetails         []ArbiterSelectedDetail  `json:"arbiter_selected_details"`
+	LastScanTime                   string                   `json:"last_scan_time"`
+	Duration                       string                   `json:"duration"`
+	Signals                        []Signal                 `json:"signals"`
+	Warnings                       []string                 `json:"warnings"`
+	PartialErrors                  []string                 `json:"partial_errors"`
 }
 
 type SignalJournalResponse struct {

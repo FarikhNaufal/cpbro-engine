@@ -155,6 +155,32 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 		}
 	})
 
+	t.Run("Policy medium AI can execute when global HIGH override is disabled", func(t *testing.T) {
+		t.Setenv("REQUIRE_AI_HIGH_FOR_EXECUTE", "false")
+		pol := policy
+		pol.RequireAIConfidence = AIConfidenceMedium
+		ai := baseAI
+		ai.Confidence = "MEDIUM"
+
+		res := uc.Evaluate(baseQuant, baseLocalGate, ai, basePlanReview, baseStaleness, pol, 50000, nil, nil, nil)
+		if res.Status != FINAL_EXECUTE {
+			t.Errorf("expected status %s, got %s (reason: %s)", FINAL_EXECUTE, res.Status, res.Reason)
+		}
+	})
+
+	t.Run("Policy allows LATE entry when global fresh override is disabled", func(t *testing.T) {
+		t.Setenv("REQUIRE_FRESH_ENTRY_FOR_EXECUTE", "false")
+		pol := policy
+		pol.RequireFreshEntry = false
+		st := baseStaleness
+		st.Status = LATE
+
+		res := uc.Evaluate(baseQuant, baseLocalGate, baseAI, basePlanReview, st, pol, 50000, nil, nil, nil)
+		if res.Status != FINAL_EXECUTE {
+			t.Errorf("expected status %s, got %s (reason: %s)", FINAL_EXECUTE, res.Status, res.Reason)
+		}
+	})
+
 	t.Run("Fail Staleness MISSED is REJECT", func(t *testing.T) {
 		st := baseStaleness
 		st.Status = MISSED

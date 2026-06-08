@@ -3,9 +3,7 @@ package usecase
 import (
 	"fmt"
 	"log/slog"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -145,14 +143,8 @@ type journalSanityProfile struct {
 }
 
 func getJournalSanityProfile() journalSanityProfile {
-	maxHoldMinutes := 120
-	if raw := strings.TrimSpace(os.Getenv("MONITORING_MAX_HOLD_MINUTES")); raw != "" {
-		if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
-			maxHoldMinutes = parsed
-		}
-	}
 	return journalSanityProfile{
-		maxHold:     time.Duration(maxHoldMinutes) * time.Minute,
+		maxHold:     getMonitoringMaxHoldDuration(),
 		expiryGrace: 2 * time.Minute,
 	}
 }
@@ -1236,7 +1228,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 			Playbook:           "ALL",
 			MetricName:         "EXPIRED_RATE",
 			MetricValue:        expiredRate,
-			CurrentThreshold:   "MaxHold: 120m",
+			CurrentThreshold:   "MaxHold: " + getMonitoringMaxHoldLabel(),
 			SuggestedThreshold: "Reduce TP1 distance or adjust MaxHold",
 			EvidenceSummary:    "High rate of signals expire before hitting stop-loss or take-profit.",
 			Reason:             "Profit targets are too aggressive or volatility is too low for the current timeframe.",

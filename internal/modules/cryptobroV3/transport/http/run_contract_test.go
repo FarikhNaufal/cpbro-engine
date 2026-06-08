@@ -55,7 +55,7 @@ func TestRun_Success_ReturnsLatestResultResponseShape(t *testing.T) {
 	dataBytes, _ := json.Marshal(resp.Data)
 	var d map[string]any
 	_ = json.Unmarshal(dataBytes, &d)
-	for _, k := range []string{"execute_signals", "watchlist", "signals", "rejected_summary", "policy_rejected_summary", "arbiter_selected_details", "warnings", "partial_errors"} {
+	for _, k := range []string{"execute_signals", "watchlist", "signals", "rejected_summary", "policy_rejected_summary", "funnel_stage_summary", "top_funnel_blockers", "playbook_blocker_summary", "arbiter_selected_details", "warnings", "partial_errors"} {
 		if d[k] == nil {
 			t.Fatalf("expected %s not null", k)
 		}

@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,6 +9,36 @@ import (
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 )
+
+func buildQuantEngineTestMarketData() MarketData {
+	now := time.Now()
+	m15Candles := make([]dto.Candle, 30)
+	for i := 0; i < 30; i++ {
+		m15Candles[i] = dto.Candle{
+			Time:  now.Add(-time.Duration(30-i) * 15 * time.Minute),
+			Open:  100.0,
+			High:  101.0,
+			Low:   99.0,
+			Close: 100.0,
+			Vol:   100.0,
+		}
+	}
+
+	h1Candles := make([]dto.Candle, 60)
+	h4Candles := make([]dto.Candle, 60)
+	for i := range h1Candles {
+		h1Candles[i] = dto.Candle{Time: now.Add(-time.Duration(60-i) * time.Hour), Close: 100.0, Vol: 1000.0}
+		h4Candles[i] = dto.Candle{Time: now.Add(-time.Duration(60-i) * 4 * time.Hour), Close: 100.0, Vol: 1000.0}
+	}
+
+	return MarketData{
+		Symbol:      "TESTUSDT",
+		M15Candles:  m15Candles,
+		H1Candles:   h1Candles,
+		H4Candles:   h4Candles,
+		LatestPrice: 100.0,
+	}
+}
 
 func TestQuantEngineSafetyChecks(t *testing.T) {
 	engine := NewPlaybookQuantEngineUsecase()
@@ -229,4 +260,42 @@ func TestQuantEngine_DebugSaveRawKlines_WriteErrorDoesNotPanic(t *testing.T) {
 
 	engine := NewPlaybookQuantEngineUsecase()
 	engine.saveM15RawKlines("BTCUSDT", []dto.Candle{{Time: time.Now().Add(-30 * time.Minute), Close: 100, Vol: 1}})
+}
+
+func TestQuantEngine_TrendPullbackTradePlanRespectsPolicyRR(t *testing.T) {
+	engine := NewPlaybookQuantEngineUsecase()
+	data := buildQuantEngineTestMarketData()
+	policy := MarketPolicy{
+		AllowLong:    true,
+		AllowShort:   true,
+		MinRRExecute: 1.7,
+	}
+
+	res := engine.RunEngine(TREND_PULLBACK, LONG, data, policy)
+	risk := res.TriggerPrice - res.StopLoss
+	reward := res.TakeProfit - res.TriggerPrice
+	rr := reward / risk
+
+	if math.Abs(rr-1.8) > 0.01 {
+		t.Fatalf("expected TREND_PULLBACK RR to target policy minimum + buffer (1.8), got %.4f", rr)
+	}
+}
+
+func TestQuantEngine_CrowdedSqueezeTradePlanRespectsPolicyRR(t *testing.T) {
+	engine := NewPlaybookQuantEngineUsecase()
+	data := buildQuantEngineTestMarketData()
+	policy := MarketPolicy{
+		AllowLong:    true,
+		AllowShort:   true,
+		MinRRExecute: 2.0,
+	}
+
+	res := engine.RunEngine(CROWDED_POSITIONING_SQUEEZE, LONG, data, policy)
+	risk := res.TriggerPrice - res.StopLoss
+	reward := res.TakeProfit - res.TriggerPrice
+	rr := reward / risk
+
+	if math.Abs(rr-2.1) > 0.01 {
+		t.Fatalf("expected CROWDED_POSITIONING_SQUEEZE RR to target policy minimum + buffer (2.1), got %.4f", rr)
+	}
 }

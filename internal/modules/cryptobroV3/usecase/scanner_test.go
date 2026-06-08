@@ -661,6 +661,7 @@ func TestScannerUsecase_Run_AIWait_And_AIReject(t *testing.T) {
 	)
 
 	t.Run("Scanner AI_WAIT becomes FINAL_WATCH and appears in watchlist", func(t *testing.T) {
+		t.Setenv("MONITORING_MAX_HOLD_MINUTES", "90")
 		ctx := context.Background()
 		_, err := uc.Run(ctx, dto.ScanRequest{TriggerTime: time.Now()})
 		if err != nil {
@@ -704,6 +705,57 @@ func TestScannerUsecase_Run_AIWait_And_AIReject(t *testing.T) {
 		}
 		if latest.ExecuteSignals == nil {
 			t.Errorf("expected ExecuteSignals to not be nil")
+		}
+		if len(latest.FunnelStageSummary) == 0 {
+			t.Fatalf("expected FunnelStageSummary to be populated")
+		}
+		if len(latest.TopFunnelBlockers) == 0 {
+			t.Fatalf("expected TopFunnelBlockers to be populated")
+		}
+		if len(latest.PlaybookBlockerSummary) == 0 {
+			t.Fatalf("expected PlaybookBlockerSummary to be populated")
+		}
+		foundAIWait := false
+		foundFinalWatch := false
+		foundSweepSummary := false
+		for _, stage := range latest.FunnelStageSummary {
+			if stage.Stage == funnelStageAIWait {
+				foundAIWait = true
+				if stage.Total != 1 {
+					t.Fatalf("expected ai_wait total 1, got %d", stage.Total)
+				}
+			}
+			if stage.Stage == funnelStageFinalWatch {
+				foundFinalWatch = true
+				if stage.Total != 1 {
+					t.Fatalf("expected final_watch total 1, got %d", stage.Total)
+				}
+			}
+		}
+		if !foundAIWait {
+			t.Fatalf("expected ai_wait stage summary")
+		}
+		if !foundFinalWatch {
+			t.Fatalf("expected final_watch stage summary")
+		}
+		for _, summary := range latest.PlaybookBlockerSummary {
+			if summary.Playbook == string(LIQUIDITY_SWEEP_REVERSAL) {
+				foundSweepSummary = true
+			}
+		}
+		if !foundSweepSummary {
+			t.Fatalf("expected sweep playbook blocker summary")
+		}
+
+		watchJournal, err := storageUC.LoadWatchJournal()
+		if err != nil {
+			t.Fatalf("failed to load watch journal: %v", err)
+		}
+		if len(watchJournal) != 1 {
+			t.Fatalf("expected 1 watch journal entry, got %d", len(watchJournal))
+		}
+		if got := watchJournal[0].ExpiresAt.Sub(watchJournal[0].CreatedAt); got != 90*time.Minute {
+			t.Fatalf("expected watch expiry to follow MONITORING_MAX_HOLD_MINUTES=90, got %s", got)
 		}
 	})
 

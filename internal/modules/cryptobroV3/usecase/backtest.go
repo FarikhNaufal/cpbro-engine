@@ -259,6 +259,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 	// Simulated running list of positions
 	var activePositions []*SimulatedPositionLog
 	var activeWatches []*SimulatedWatchLog
+	maxHoldDuration := getMonitoringMaxHoldDuration()
 
 	// Time progression: step by step 15m intervals
 	currentTick := req.StartTime.Truncate(15 * time.Minute)
@@ -767,7 +768,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 					AIConfidence:            fd.AIConfidence,
 					MarketRegime:            policy.Reason,
 					CreatedAt:               currentTick,
-					ExpiresAt:               currentTick.Add(120 * time.Minute),
+					ExpiresAt:               currentTick.Add(maxHoldDuration),
 					Status:                  MONITORING,
 					MFE:                     0.0,
 					MAE:                     0.0,
@@ -797,7 +798,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 					Status:                  fd.Status,
 					Reason:                  fd.Reason,
 					CreatedAt:               currentTick,
-					ExpiresAt:               currentTick.Add(120 * time.Minute),
+					ExpiresAt:               currentTick.Add(maxHoldDuration),
 					MissedOpportunityResult: "NOT_FILLED",
 				}
 

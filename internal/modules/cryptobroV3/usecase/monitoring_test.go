@@ -374,7 +374,7 @@ func TestMonitoring_MonitorVirtualPositions_ExpiredAfterTP1KeepsPartialPnL(t *te
 	if item.Status != usecase.TP1_HIT {
 		t.Fatalf("expected TP1_HIT status to remain for partial completion, got %s", item.Status)
 	}
-	if item.OutcomeReason != "Monitoring period expired (120 minutes elapsed) with TP1 success" {
+	if item.OutcomeReason != "Monitoring period expired (120m elapsed) with TP1 success" {
 		t.Fatalf("unexpected outcome reason: %s", item.OutcomeReason)
 	}
 	if item.PnlPercentage != 4.5 {

@@ -342,6 +342,15 @@ func (uc *LocalGateUsecase) Evaluate(quant QuantResult, policy MarketPolicy, m15
 			}
 		}
 	}
+	if profile.MinWickRatio > 0 && (quant.Playbook == LIQUIDITY_SWEEP_REVERSAL || quant.Playbook == RANGE_EDGE_REVERSAL) {
+		if wickRatio, ok := calculateDirectionalWickRatio(m15, quant.Direction); ok && wickRatio < profile.MinWickRatio {
+			return LocalGateResult{
+				Passed: false,
+				Status: LOCAL_REJECT,
+				Reason: fmt.Sprintf("%s wick ratio %0.2f is below minimum threshold %0.2f", quant.Playbook, wickRatio, profile.MinWickRatio),
+			}
+		}
+	}
 
 	// Confirmation requirement check
 	if profile.RequireConfirmation {
@@ -362,6 +371,27 @@ func (uc *LocalGateUsecase) Evaluate(quant QuantResult, policy MarketPolicy, m15
 				Passed: false,
 				Status: LOCAL_WATCH,
 				Reason: "WAIT_RETEST_OR_BREAKOUT_FIRST_CANDLE",
+			}
+		}
+	}
+	if profile.MinRetestQuality > 0 && quant.Playbook == COMPRESSION_BREAKOUT_RETEST {
+		retestQuality := calculateRetestQuality(quant.TechnicalSnapshot.IndicatorValues)
+		if retestQuality < profile.MinRetestQuality {
+			return LocalGateResult{
+				Passed: false,
+				Status: LOCAL_WATCH,
+				Reason: fmt.Sprintf("%s retest quality %0.2f is below minimum threshold %0.2f", quant.Playbook, retestQuality, profile.MinRetestQuality),
+			}
+		}
+	}
+
+	if profile.MinRangeClarity > 0 && quant.Playbook == RANGE_EDGE_REVERSAL {
+		rangeClarity := calculateRangeClarity(quant.StructureSnapshot)
+		if rangeClarity < profile.MinRangeClarity {
+			return LocalGateResult{
+				Passed: false,
+				Status: LOCAL_REJECT,
+				Reason: fmt.Sprintf("%s range clarity %0.2f is below minimum threshold %0.2f", quant.Playbook, rangeClarity, profile.MinRangeClarity),
 			}
 		}
 	}

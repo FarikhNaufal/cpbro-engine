@@ -121,6 +121,51 @@ func NormalizeLatestResultForFrontend(res *entity.LatestResult) dto.LatestResult
 		out.ThresholdProfileSummary[k] = v
 	}
 
+	out.FunnelStageSummary = make([]dto.FunnelStageSummary, 0)
+	for _, stage := range res.FunnelStageSummary {
+		stageOut := dto.FunnelStageSummary{
+			Stage:   stage.Stage,
+			Total:   stage.Total,
+			Reasons: make([]dto.FunnelReasonCount, 0),
+		}
+		for _, reason := range stage.Reasons {
+			stageOut.Reasons = append(stageOut.Reasons, dto.FunnelReasonCount{
+				Reason: reason.Reason,
+				Count:  reason.Count,
+			})
+		}
+		out.FunnelStageSummary = append(out.FunnelStageSummary, stageOut)
+	}
+	out.TopFunnelBlockers = make([]string, 0)
+	for _, item := range res.TopFunnelBlockers {
+		if item != "" {
+			out.TopFunnelBlockers = append(out.TopFunnelBlockers, item)
+		}
+	}
+	out.PlaybookBlockerSummary = make([]dto.PlaybookBlockerSummary, 0)
+	for _, playbook := range res.PlaybookBlockerSummary {
+		playbookOut := dto.PlaybookBlockerSummary{
+			Playbook: playbook.Playbook,
+			Total:    playbook.Total,
+			Stages:   make([]dto.FunnelStageSummary, 0),
+		}
+		for _, stage := range playbook.Stages {
+			stageOut := dto.FunnelStageSummary{
+				Stage:   stage.Stage,
+				Total:   stage.Total,
+				Reasons: make([]dto.FunnelReasonCount, 0),
+			}
+			for _, reason := range stage.Reasons {
+				stageOut.Reasons = append(stageOut.Reasons, dto.FunnelReasonCount{
+					Reason: reason.Reason,
+					Count:  reason.Count,
+				})
+			}
+			playbookOut.Stages = append(playbookOut.Stages, stageOut)
+		}
+		out.PlaybookBlockerSummary = append(out.PlaybookBlockerSummary, playbookOut)
+	}
+
 	out.EvaluationDataCompletenessHint = res.EvaluationDataCompletenessHint
 
 	// Normalize ArbiterSelectedDetails

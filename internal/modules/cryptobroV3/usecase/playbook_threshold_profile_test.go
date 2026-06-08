@@ -134,6 +134,32 @@ func TestPlaybookThresholdProfile_Scenarios(t *testing.T) {
 		}
 	})
 
+	// 6b. Liquidity Sweep enforces minimum wick ratio when candle structure is available
+	t.Run("Liquidity Sweep enforces minimum wick ratio", func(t *testing.T) {
+		q := baseQuant
+		q.Playbook = LIQUIDITY_SWEEP_REVERSAL
+		q.TechnicalSnapshot.IndicatorValues["wick_rejection"] = 1.0
+
+		m15WeakLowerWick := []dto.Candle{
+			{Open: 100, High: 100.5, Low: 99.5, Close: 100.2, Vol: 10},
+			{Open: 100, High: 100.5, Low: 99.5, Close: 100.2, Vol: 10},
+			{Open: 100, High: 100.5, Low: 99.5, Close: 100.2, Vol: 10},
+			{Open: 100, High: 100.5, Low: 99.5, Close: 100.2, Vol: 10},
+			{Open: 100, High: 100.5, Low: 99.5, Close: 100.2, Vol: 10},
+			{Open: 100, High: 100.5, Low: 99.5, Close: 100.2, Vol: 10},
+			{Open: 100, High: 100.5, Low: 99.5, Close: 100.2, Vol: 10},
+			{Open: 100, High: 100.5, Low: 99.5, Close: 100.2, Vol: 10},
+			{Open: 100, High: 100.5, Low: 99.5, Close: 100.2, Vol: 10},
+			{Open: 100, High: 100.5, Low: 99.5, Close: 100.2, Vol: 10},
+			{Open: 100, High: 101.0, Low: 99.8, Close: 100.9, Vol: 50},
+		}
+
+		res := gate.Evaluate(q, policyNormal, m15WeakLowerWick)
+		if res.Passed || res.Status != LOCAL_REJECT {
+			t.Errorf("Expected LOCAL_REJECT for Liquidity Sweep with weak wick ratio, got Passed=%v, Status=%s, Reason=%s", res.Passed, res.Status, res.Reason)
+		}
+	})
+
 	// 7. Crowded Squeeze butuh crowding evidence
 	t.Run("Crowded Squeeze needs crowding evidence", func(t *testing.T) {
 		q := baseQuant
@@ -144,6 +170,55 @@ func TestPlaybookThresholdProfile_Scenarios(t *testing.T) {
 		res := gate.Evaluate(q, policyNormal, m15NoVolumeSpike)
 		if res.Passed || res.Status != LOCAL_REJECT {
 			t.Errorf("Expected LOCAL_REJECT for Crowded Squeeze without crowding evidence, got Passed=%v, Status=%s", res.Passed, res.Status)
+		}
+	})
+
+	// 7b. Compression Breakout Retest respects retest quality threshold when configured stricter
+	t.Run("Compression Breakout Retest respects retest quality threshold", func(t *testing.T) {
+		oldReg := GetGlobalConfigRegistry()
+		reg := NewDefaultConfigRegistry()
+		profile := reg.profiles[COMPRESSION_BREAKOUT_RETEST]
+		profile.MinRetestQuality = 0.75
+		reg.profiles[COMPRESSION_BREAKOUT_RETEST] = profile
+		SetGlobalConfigRegistry(reg)
+		defer SetGlobalConfigRegistry(oldReg)
+
+		q := baseQuant
+		q.Playbook = COMPRESSION_BREAKOUT_RETEST
+		q.SetupType = "BREAKOUT_RETEST"
+		q.TechnicalSnapshot.IndicatorValues[IndicatorRetestHold] = 1.0
+		q.TechnicalSnapshot.IndicatorValues[IndicatorRetestTouches] = 1.0
+
+		res := gate.Evaluate(q, policyNormal, m15VolumeSpike)
+		if res.Passed || res.Status != LOCAL_WATCH {
+			t.Errorf("Expected LOCAL_WATCH for weak retest quality, got Passed=%v, Status=%s, Reason=%s", res.Passed, res.Status, res.Reason)
+		}
+	})
+
+	// 7c. Range Edge Reversal respects range clarity threshold when configured stricter
+	t.Run("Range Edge Reversal respects range clarity threshold", func(t *testing.T) {
+		oldReg := GetGlobalConfigRegistry()
+		reg := NewDefaultConfigRegistry()
+		profile := reg.profiles[RANGE_EDGE_REVERSAL]
+		profile.MinRangeClarity = 0.75
+		reg.profiles[RANGE_EDGE_REVERSAL] = profile
+		SetGlobalConfigRegistry(reg)
+		defer SetGlobalConfigRegistry(oldReg)
+
+		q := baseQuant
+		q.Playbook = RANGE_EDGE_REVERSAL
+		q.TechnicalSnapshot.IndicatorValues["adx"] = 20.0
+		q.TechnicalSnapshot.IndicatorValues["wick_rejection"] = 1.0
+		q.StructureSnapshot = StructureSnapshot{
+			Highs:       []float64{105.0},
+			Lows:        []float64{95.0},
+			SessionHigh: 106.0,
+			SessionLow:  94.0,
+		}
+
+		res := gate.Evaluate(q, policyNormal, m15NoVolumeSpike)
+		if res.Passed || res.Status != LOCAL_REJECT {
+			t.Errorf("Expected LOCAL_REJECT for weak range clarity, got Passed=%v, Status=%s, Reason=%s", res.Passed, res.Status, res.Reason)
 		}
 	})
 

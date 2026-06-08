@@ -66,6 +66,9 @@ func TestLatest_NilArraysInFile_NormalizedToEmptySlices(t *testing.T) {
   "signals": null,
   "rejected_summary": null,
   "policy_rejected_summary": null,
+  "funnel_stage_summary": null,
+  "top_funnel_blockers": null,
+  "playbook_blocker_summary": null,
   "selected_threshold_profile_summary": null,
   "arbiter_selected_details": null
 }`)
@@ -90,7 +93,7 @@ func TestLatest_NilArraysInFile_NormalizedToEmptySlices(t *testing.T) {
 	var latest map[string]any
 	_ = json.Unmarshal(dataBytes, &latest)
 
-	for _, k := range []string{"execute_signals", "watchlist", "signals", "rejected_summary", "policy_rejected_summary", "arbiter_selected_details"} {
+	for _, k := range []string{"execute_signals", "watchlist", "signals", "rejected_summary", "policy_rejected_summary", "funnel_stage_summary", "top_funnel_blockers", "playbook_blocker_summary", "arbiter_selected_details"} {
 		v, ok := latest[k]
 		if !ok {
 			t.Fatalf("missing key %s", k)

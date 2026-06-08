@@ -138,6 +138,16 @@ func TestAPIResponse_Contract_Constraints(t *testing.T) {
 		if res.PolicyRejectedSummary == nil || len(res.PolicyRejectedSummary) != 0 {
 			t.Errorf("expected PolicyRejectedSummary to be empty slice [], got nil or length > 0")
 		}
+
+		if res.FunnelStageSummary == nil || len(res.FunnelStageSummary) != 0 {
+			t.Errorf("expected FunnelStageSummary to be empty slice [], got nil or length > 0")
+		}
+		if res.TopFunnelBlockers == nil || len(res.TopFunnelBlockers) != 0 {
+			t.Errorf("expected TopFunnelBlockers to be empty slice [], got nil or length > 0")
+		}
+		if res.PlaybookBlockerSummary == nil || len(res.PlaybookBlockerSummary) != 0 {
+			t.Errorf("expected PlaybookBlockerSummary to be empty slice [], got nil or length > 0")
+		}
 	})
 
 	// Test 3: threshold_profile_summary nil menjadi {}

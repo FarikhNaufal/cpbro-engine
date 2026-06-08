@@ -44,38 +44,44 @@ type monitoringStatusProfile struct {
 	ExpiredAfterTP1   string
 }
 
-var executeMonitoringProfile = monitoringStatusProfile{
-	Monitoring:        MONITORING,
-	TP1Hit:            TP1_HIT,
-	TP2Hit:            TP2_HIT,
-	SLHit:             SL_HIT,
-	Expired:           EXPIRED,
-	CandleSLReason:    "Stop Loss hit during candle evaluation",
-	CandleTP1Reason:   "TP1 hit during candle evaluation",
-	CandleTP2Reason:   "TP2 hit during candle evaluation",
-	LiveSLReason:      "Stop Loss hit live",
-	LiveTP1Reason:     "TP1 hit live",
-	LiveTP2Reason:     "TP2 hit live",
-	LiveSLAfterTP1:    "SL hit live after TP1 (partial success)",
-	ExpiredMonitoring: "Monitoring period expired (120 minutes elapsed) without hitting SL or TP1",
-	ExpiredAfterTP1:   "Monitoring period expired (120 minutes elapsed) with TP1 success",
+func executeMonitoringProfile() monitoringStatusProfile {
+	holdLabel := getMonitoringMaxHoldLabel()
+	return monitoringStatusProfile{
+		Monitoring:        MONITORING,
+		TP1Hit:            TP1_HIT,
+		TP2Hit:            TP2_HIT,
+		SLHit:             SL_HIT,
+		Expired:           EXPIRED,
+		CandleSLReason:    "Stop Loss hit during candle evaluation",
+		CandleTP1Reason:   "TP1 hit during candle evaluation",
+		CandleTP2Reason:   "TP2 hit during candle evaluation",
+		LiveSLReason:      "Stop Loss hit live",
+		LiveTP1Reason:     "TP1 hit live",
+		LiveTP2Reason:     "TP2 hit live",
+		LiveSLAfterTP1:    "SL hit live after TP1 (partial success)",
+		ExpiredMonitoring: "Monitoring period expired (" + holdLabel + " elapsed) without hitting SL or TP1",
+		ExpiredAfterTP1:   "Monitoring period expired (" + holdLabel + " elapsed) with TP1 success",
+	}
 }
 
-var watchMonitoringProfile = monitoringStatusProfile{
-	Monitoring:        WATCH_MONITORING,
-	TP1Hit:            VIRTUAL_TP1_HIT,
-	TP2Hit:            VIRTUAL_TP2_HIT,
-	SLHit:             VIRTUAL_SL_HIT,
-	Expired:           VIRTUAL_EXPIRED,
-	CandleSLReason:    "Virtual Stop Loss hit during candle evaluation",
-	CandleTP1Reason:   "Virtual TP1 hit during candle evaluation",
-	CandleTP2Reason:   "Virtual TP2 hit during candle evaluation",
-	LiveSLReason:      "Virtual Stop Loss hit live",
-	LiveTP1Reason:     "Virtual TP1 hit live",
-	LiveTP2Reason:     "Virtual TP2 hit live",
-	LiveSLAfterTP1:    "Virtual SL hit live after virtual TP1 (partial success)",
-	ExpiredMonitoring: "Virtual monitoring period expired (120 minutes elapsed) without hitting virtual SL or TP1",
-	ExpiredAfterTP1:   "Virtual monitoring period expired (120 minutes elapsed) with virtual TP1 success",
+func watchMonitoringProfile() monitoringStatusProfile {
+	holdLabel := getMonitoringMaxHoldLabel()
+	return monitoringStatusProfile{
+		Monitoring:        WATCH_MONITORING,
+		TP1Hit:            VIRTUAL_TP1_HIT,
+		TP2Hit:            VIRTUAL_TP2_HIT,
+		SLHit:             VIRTUAL_SL_HIT,
+		Expired:           VIRTUAL_EXPIRED,
+		CandleSLReason:    "Virtual Stop Loss hit during candle evaluation",
+		CandleTP1Reason:   "Virtual TP1 hit during candle evaluation",
+		CandleTP2Reason:   "Virtual TP2 hit during candle evaluation",
+		LiveSLReason:      "Virtual Stop Loss hit live",
+		LiveTP1Reason:     "Virtual TP1 hit live",
+		LiveTP2Reason:     "Virtual TP2 hit live",
+		LiveSLAfterTP1:    "Virtual SL hit live after virtual TP1 (partial success)",
+		ExpiredMonitoring: "Virtual monitoring period expired (" + holdLabel + " elapsed) without hitting virtual SL or TP1",
+		ExpiredAfterTP1:   "Virtual monitoring period expired (" + holdLabel + " elapsed) with virtual TP1 success",
+	}
 }
 
 func NewMonitoringUsecase(provider MarketDataProvider, storage *StorageUsecase) *MonitoringUsecase {
@@ -182,7 +188,7 @@ func (uc *MonitoringUsecase) monitorSignalJournal(ctx context.Context, journal [
 	}
 
 	now := time.Now()
-	_, changedEntries := monitorJournalEntries(ctx, uc, uc.marketDataProvider, uc.latestPriceFeed, journal, now, executeMonitoringProfile)
+	_, changedEntries := monitorJournalEntries(ctx, uc, uc.marketDataProvider, uc.latestPriceFeed, journal, now, executeMonitoringProfile())
 	if len(changedEntries) == 0 {
 		return nil
 	}
@@ -196,7 +202,7 @@ func (uc *MonitoringUsecase) monitorWatchJournal(ctx context.Context, journal []
 	}
 
 	now := time.Now()
-	_, changedEntries := monitorJournalEntries(ctx, uc, uc.marketDataProvider, uc.latestPriceFeed, journal, now, watchMonitoringProfile)
+	_, changedEntries := monitorJournalEntries(ctx, uc, uc.marketDataProvider, uc.latestPriceFeed, journal, now, watchMonitoringProfile())
 	if len(changedEntries) == 0 {
 		return nil
 	}

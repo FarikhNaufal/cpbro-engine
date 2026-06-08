@@ -106,6 +106,8 @@ func (uc *FinalGateUsecase) Evaluate(
 	// Keep track of check failures
 	var rejectReasons []string
 	var watchReasons []string
+	requiredAIConfidence := effectiveRequiredAIConfidence(policy, profile)
+	requireFreshEntry := effectiveRequireFreshEntry(policy)
 
 	// Detect AI Error Policy
 	isAIError := strings.Contains(strings.ToUpper(aiAudit.Reasoning), "AI_ERROR") ||
@@ -132,13 +134,10 @@ func (uc *FinalGateUsecase) Evaluate(
 	}
 
 	// 3. AI Confidence check
-	if aiAudit.Confidence == "LOW" {
+	if strings.ToUpper(aiAudit.Confidence) == string(AIConfidenceLow) {
 		rejectReasons = append(rejectReasons, "AI confidence is LOW")
-	} else if aiAudit.Confidence == "MEDIUM" {
-		watchReasons = append(watchReasons, "AI confidence is MEDIUM")
-	} else if aiAudit.Confidence != "HIGH" {
-		// Untuk MVP, semua FINAL_EXECUTE tetap wajib AI HIGH
-		watchReasons = append(watchReasons, fmt.Sprintf("AI confidence %s is not HIGH", aiAudit.Confidence))
+	} else if !meetsRequiredAIConfidence(aiAudit.Confidence, requiredAIConfidence) {
+		watchReasons = append(watchReasons, fmt.Sprintf("AI confidence %s is below required %s", aiAudit.Confidence, requiredAIConfidence))
 	}
 
 	// 4. AI conflict_with_bot check
@@ -168,10 +167,12 @@ func (uc *FinalGateUsecase) Evaluate(
 
 	// 7. Staleness check
 	if staleness.Status == LATE {
-		watchReasons = append(watchReasons, "Staleness status is LATE")
+		if requireFreshEntry {
+			watchReasons = append(watchReasons, "Staleness status is LATE")
+		}
 	} else if staleness.Status == MISSED {
 		rejectReasons = append(rejectReasons, "Staleness status is MISSED")
-	} else if staleness.Status != FRESH {
+	} else if requireFreshEntry && staleness.Status != FRESH {
 		rejectReasons = append(rejectReasons, fmt.Sprintf("Staleness status %s is not FRESH", staleness.Status))
 	}
 

@@ -70,15 +70,18 @@ func (uc *SignalNotificationUsecase) SendV3Signals(
 	for _, req := range reqs {
 		dec := req.Decision
 		audit := req.AuditResponse
+		profile := GetPlaybookThresholdProfile(dec.Playbook, policy, dec.Tier)
+		requiredAIConfidence := effectiveRequiredAIConfidence(policy, profile)
+		requireFreshEntry := effectiveRequireFreshEntry(policy)
 
 		// Strict execution-only gate for SIGNAL channel.
 		if dec.Status != FINAL_EXECUTE || !dec.IsExecutable {
 			continue
 		}
-		if strings.ToUpper(dec.StalenessStatus) != "FRESH" {
+		if requireFreshEntry && strings.ToUpper(dec.StalenessStatus) != string(FRESH) {
 			continue
 		}
-		if strings.ToUpper(dec.AIConfidence) != "HIGH" {
+		if !meetsRequiredAIConfidence(dec.AIConfidence, requiredAIConfidence) {
 			continue
 		}
 		if dec.Reason == "" {
@@ -133,6 +136,7 @@ func (uc *SignalNotificationUsecase) SendV3Signals(
 		escapedPolicySummary := html.EscapeString(dec.PolicySummary)
 		escapedThresholdProfileSummary := html.EscapeString(dec.ThresholdProfileSummary)
 		escapedSentiment := html.EscapeString(audit.Sentiment)
+		escapedAIConfidence := html.EscapeString(strings.ToUpper(dec.AIConfidence))
 		escapedStaleness := html.EscapeString(dec.StalenessStatus)
 		escapedTime := html.EscapeString(FormatNotificationTime(summary.StartTime))
 
@@ -162,7 +166,7 @@ func (uc *SignalNotificationUsecase) SendV3Signals(
 					"Grade/Score : %s / %s (Req: %s)\n"+
 					"Regime      : %s\n"+
 					"Staleness   : %s\n"+
-					"AI          : %s (HIGH)\n\n"+
+					"AI          : %s (%s)\n\n"+
 					"Entry       : %s\n"+
 					"SL          : %s\n"+
 					"TP1         : %s\n"+
@@ -184,6 +188,7 @@ func (uc *SignalNotificationUsecase) SendV3Signals(
 				escapedRegime,
 				escapedStaleness,
 				escapedSentiment,
+				escapedAIConfidence,
 				entryStr,
 				slStr,
 				tp1Str,

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -26,6 +27,20 @@ type preparedQuantContext struct {
 
 func NewPlaybookQuantEngineUsecase() *PlaybookQuantEngineUsecase {
 	return &PlaybookQuantEngineUsecase{}
+}
+
+func quantTargetRR(policy MarketPolicy, playbook Playbook) float64 {
+	profile := GetPlaybookThresholdProfile(playbook, policy, "")
+	targetRR := math.Max(policy.MinRRExecute, profile.MinRR)
+	return targetRR + 0.1
+}
+
+func directionalATRTradePlan(triggerPrice, atr float64, direction Direction, stopATR, targetRR float64) (stopLoss float64, takeProfit float64) {
+	rewardATR := stopATR * targetRR
+	if direction == LONG {
+		return triggerPrice - (stopATR * atr), triggerPrice + (rewardATR * atr)
+	}
+	return triggerPrice + (stopATR * atr), triggerPrice - (rewardATR * atr)
 }
 
 // Run is kept for simple backwards compatibility checks.
@@ -134,13 +149,7 @@ func (uc *PlaybookQuantEngineUsecase) RunEngineWithPreparedContext(
 	switch playbook {
 	case TREND_PULLBACK:
 		res.SetupType = "PULLBACK"
-		if direction == LONG {
-			res.StopLoss = triggerPrice - (1.5 * atr)
-			res.TakeProfit = triggerPrice + (2.0 * atr)
-		} else if direction == SHORT {
-			res.StopLoss = triggerPrice + (1.5 * atr)
-			res.TakeProfit = triggerPrice - (2.0 * atr)
-		}
+		res.StopLoss, res.TakeProfit = directionalATRTradePlan(triggerPrice, atr, direction, 1.5, quantTargetRR(policy, playbook))
 
 	case LIQUIDITY_SWEEP_REVERSAL:
 		res.SetupType = "SWEEP"
@@ -276,15 +285,10 @@ func (uc *PlaybookQuantEngineUsecase) RunEngineWithPreparedContext(
 
 	case CROWDED_POSITIONING_SQUEEZE:
 		res.SetupType = "SQUEEZE"
+		res.StopLoss, res.TakeProfit = directionalATRTradePlan(triggerPrice, atr, direction, 1.5, quantTargetRR(policy, playbook))
 		if direction == LONG {
-			// Short squeeze: price fails breakdown, reclaim support
-			res.StopLoss = triggerPrice - (1.5 * atr)
-			res.TakeProfit = triggerPrice + (2.0 * atr)
 			res.Reason = "LONG short-squeeze trade plan"
 		} else { // SHORT
-			// Long squeeze: price fails breakout, reject resistance
-			res.StopLoss = triggerPrice + (1.5 * atr)
-			res.TakeProfit = triggerPrice - (2.0 * atr)
 			res.Reason = "SHORT long-squeeze trade plan"
 		}
 	}

@@ -104,6 +104,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	scanID := scanBoundary.Format("20060102150405")
 
 	slog.Info("Starting AnalyzeMarketV3 Scan", "scan_id", scanID)
+	maxHoldDuration := getMonitoringMaxHoldDuration()
 
 	finalSignals := []dto.SignalResponse{}
 
@@ -238,8 +239,11 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	slog.Info("Dynamic universe candidates filtered", "scan_id", scanID, "passed", universePassCount, "rejected", len(rejectedCandidatesList))
 
 	rejectedSummary := []string{}
+	funnelSummary := newFunnelSummaryAccumulator()
+	playbookBlockers := newPlaybookBlockerAccumulator()
 	for _, rej := range rejectedCandidatesList {
 		rejectedSummary = append(rejectedSummary, fmt.Sprintf("%s: %s", rej.Symbol, rej.Reason))
+		funnelSummary.Add(funnelStageUniverseReject, rej.Reason)
 	}
 
 	metrics := GetGlobalMetrics()
@@ -265,6 +269,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	if prefetchLimit > 0 && prefetchLimit < len(candidates) {
 		for _, deferred := range candidates[prefetchLimit:] {
 			prefetchDeferredSummary = append(prefetchDeferredSummary, fmt.Sprintf("%s: deferred by market data prefetch limit", deferred.Symbol))
+			funnelSummary.Add(funnelStagePipelineDrop, "deferred by market data prefetch limit")
 		}
 		prefetchCandidates = candidates[:prefetchLimit]
 	}
@@ -453,6 +458,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	for _, result := range pipelineResults {
 		if result.policyRejectReason != "" {
 			policyRejectedSummary = append(policyRejectedSummary, result.policyRejectReason)
+			funnelSummary.Add(funnelStagePipelineDrop, result.policyRejectReason)
 			continue
 		}
 		totalStrategySelected += result.strategySelected
@@ -498,6 +504,11 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		}
 
 		policyRejectedSummary = append(policyRejectedSummary, fmt.Sprintf("%s (%s %s): %s", key.Symbol, key.StrategyName, dirStr, key.Reason))
+		funnelSummary.Add(funnelStageEligibilityReject, key.Reason)
+		switch key.StrategyName {
+		case string(TREND_PULLBACK), string(LIQUIDITY_SWEEP_REVERSAL), string(COMPRESSION_BREAKOUT_RETEST), string(RANGE_EDGE_REVERSAL), string(CROWDED_POSITIONING_SQUEEZE):
+			playbookBlockers.Add(Playbook(key.StrategyName), funnelStageEligibilityReject, key.Reason)
+		}
 	}
 
 	// Run Candidate Arbiter
@@ -518,6 +529,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		if reason == "" {
 			reason = "failed arbiter filter"
 		}
+		funnelSummary.Add(funnelStageArbiterReject, reason)
+		playbookBlockers.Add(rej.Playbook, funnelStageArbiterReject, reason)
 		entry := fmt.Sprintf("%s (%s %s): arbiter rejected - score=%0.1f reason=%s", rej.Symbol, rej.Playbook, rej.Direction, rej.Score, reason)
 		if !seenArbiterRejections[entry] {
 			seenArbiterRejections[entry] = true
@@ -536,6 +549,12 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		localGateMap[pair] = lgRes
 		if lgRes.Passed {
 			localCandidates = append(localCandidates, qResult)
+		} else if lgRes.Status == LOCAL_WATCH {
+			funnelSummary.Add(funnelStageLocalWatch, lgRes.Reason)
+			playbookBlockers.Add(qResult.Playbook, funnelStageLocalWatch, lgRes.Reason)
+		} else {
+			funnelSummary.Add(funnelStageLocalReject, lgRes.Reason)
+			playbookBlockers.Add(qResult.Playbook, funnelStageLocalReject, lgRes.Reason)
 		}
 	}
 	slog.Info("Local quality gates evaluation completed", "scan_id", scanID, "passed", len(localCandidates), "failed_or_watch", len(selectedCandidates)-len(localCandidates))
@@ -683,6 +702,19 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			resp, audited := aiAuditsMap[pair]
 			if audited {
 				auditResponse = resp
+				if strings.Contains(strings.ToUpper(auditResponse.Reason), "AI_ERROR") || strings.Contains(strings.ToUpper(auditResponse.Reasoning), "AI_ERROR") {
+					reason := firstNonEmpty(auditResponse.Reason, auditResponse.Decision, "AI_ERROR")
+					funnelSummary.Add(funnelStageAIError, reason)
+					playbookBlockers.Add(qResult.Playbook, funnelStageAIError, reason)
+				} else if auditResponse.Decision == "WAIT" {
+					reason := firstNonEmpty(auditResponse.Reason, auditResponse.Decision)
+					funnelSummary.Add(funnelStageAIWait, reason)
+					playbookBlockers.Add(qResult.Playbook, funnelStageAIWait, reason)
+				} else if auditResponse.Decision == "REJECT" {
+					reason := firstNonEmpty(auditResponse.Reason, auditResponse.Decision)
+					funnelSummary.Add(funnelStageAIReject, reason)
+					playbookBlockers.Add(qResult.Playbook, funnelStageAIReject, reason)
+				}
 			} else {
 				aiSkipped = true
 				auditResponse = dto.AIAuditResponse{
@@ -693,6 +725,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 					Reasoning:  "AI_SKIPPED: Exceeded policy MaxAICandidates quota limit",
 					Reason:     "AI_SKIPPED",
 				}
+				funnelSummary.Add(funnelStageAIWait, auditResponse.Reason)
+				playbookBlockers.Add(qResult.Playbook, funnelStageAIWait, auditResponse.Reason)
 			}
 		}
 
@@ -900,7 +934,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				RetestHold:              candCtx.quantResult.TechnicalSnapshot.IndicatorValues[IndicatorRetestHold] == 1.0,
 				HasDerivativesEvidence:  candCtx.quantResult.TechnicalSnapshot.IndicatorValues[IndicatorHasCrowdingEvidence] == 1.0,
 				CreatedAt:               now,
-				ExpiresAt:               now.Add(120 * time.Minute),
+				ExpiresAt:               now.Add(maxHoldDuration),
 				Status:                  MONITORING,
 				MFE:                     0.0,
 				MAE:                     0.0,
@@ -919,6 +953,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			})
 		} else if finalDecision.Status == FINAL_WATCH {
 			totalFinalWatch++
+			reason := firstNonEmpty(finalDecision.WatchReason, finalDecision.Reason)
+			funnelSummary.Add(funnelStageFinalWatch, reason)
+			playbookBlockers.Add(finalDecision.Playbook, funnelStageFinalWatch, reason)
 			now := time.Now()
 			watchlistSignals = append(watchlistSignals, dto.SignalResponse{
 				Symbol:         pair,
@@ -955,7 +992,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				RetestHold:              candCtx.quantResult.TechnicalSnapshot.IndicatorValues[IndicatorRetestHold] == 1.0,
 				HasDerivativesEvidence:  candCtx.quantResult.TechnicalSnapshot.IndicatorValues[IndicatorHasCrowdingEvidence] == 1.0,
 				CreatedAt:               now,
-				ExpiresAt:               now.Add(120 * time.Minute),
+				ExpiresAt:               now.Add(maxHoldDuration),
 				Status:                  WATCH_MONITORING,
 				MFE:                     0.0,
 				MAE:                     0.0,
@@ -975,6 +1012,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			})
 		} else {
 			totalFinalReject++
+			reason := firstNonEmpty(finalDecision.RejectReason, finalDecision.Reason)
+			funnelSummary.Add(funnelStageFinalReject, reason)
+			playbookBlockers.Add(finalDecision.Playbook, funnelStageFinalReject, reason)
 		}
 	}
 
@@ -988,6 +1028,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	for _, fd := range resolvedDecisions {
 		thresholdProfileSummary[string(fd.Playbook)] = fd.ThresholdProfileSummary
 	}
+	funnelStageSummary := funnelSummary.Build()
+	topFunnelBlockers := buildTopFunnelBlockers(funnelStageSummary, 5)
+	playbookBlockerSummary := playbookBlockers.Build()
 
 	// Dispatch V3 Notifications
 	summary := ScannerSummaryV3{
@@ -1017,6 +1060,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		RejectedSummary:                 rejectedSummary,
 		PolicyRejectedSummary:           policyRejectedSummary,
 		SelectedThresholdProfileSummary: thresholdProfileSummary,
+		FunnelStageSummary:              funnelStageSummary,
+		TopFunnelBlockers:               topFunnelBlockers,
+		PlaybookBlockerSummary:          playbookBlockerSummary,
 		EvaluationDataCompletenessHint:  "has_decision_audit: true",
 	}
 
@@ -1103,6 +1149,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		RejectedSummary:                 rejectedSummary,
 		PolicyRejectedSummary:           policyRejectedSummary,
 		SelectedThresholdProfileSummary: thresholdProfileSummary,
+		FunnelStageSummary:              funnelStageSummary,
+		TopFunnelBlockers:               topFunnelBlockers,
+		PlaybookBlockerSummary:          playbookBlockerSummary,
 		EvaluationDataCompletenessHint:  "has_decision_audit: true",
 		ArbiterSelectedDetails:          arbiterDetails,
 
@@ -1141,6 +1190,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		"ai_batch_ms", aiBatchDuration.Milliseconds(),
 		"final_gate_ms", finalGateDuration.Milliseconds(),
 		"total_ms", duration.Milliseconds(),
+		"funnel_summary", formatFunnelLogSummary(funnelStageSummary, 5),
+		"top_funnel_blockers", topFunnelBlockers,
 	)
 	if estimatedRequestWeight >= maxInt(1, int(float64(requestGuard.Budget)*0.9)) {
 		slog.Warn("AnalyzeMarketV3 estimated request weight is elevated",
