@@ -119,6 +119,24 @@ func mergeWatchJournal(existing, incoming WatchJournal, now time.Time) (WatchJou
 			changed = true
 		}
 	}
+	assignHotBool := func(dst *bool, next bool) {
+		if *dst != next {
+			*dst = next
+			changed = true
+		}
+	}
+	assignHotFloat := func(dst *float64, next float64) {
+		if math.Abs(*dst-next) > 1e-9 {
+			*dst = next
+			changed = true
+		}
+	}
+	assignHotInt := func(dst *int, next int) {
+		if *dst != next {
+			*dst = next
+			changed = true
+		}
+	}
 
 	assignPlanFloat(&merged.EntryPrice, incoming.EntryPrice)
 	assignPlanFloat(&merged.StopLoss, incoming.StopLoss)
@@ -143,6 +161,15 @@ func mergeWatchJournal(existing, incoming WatchJournal, now time.Time) (WatchJou
 	assignBool(&merged.RetestHold, incoming.RetestHold)
 	assignBool(&merged.HasDerivativesEvidence, incoming.HasDerivativesEvidence)
 	assignTier(&merged.Tier, incoming.Tier)
+	if incoming.IsHot || merged.IsHot {
+		assignHotBool(&merged.IsHot, incoming.IsHot || merged.IsHot)
+		if incoming.IsHot {
+			assignHotFloat(&merged.HotScore, incoming.HotScore)
+			assignString(&merged.HotSource, incoming.HotSource)
+			assignHotInt(&merged.HotRankType, incoming.HotRankType)
+		}
+		assignHotBool(&merged.HotOverlaySelected, incoming.HotOverlaySelected || merged.HotOverlaySelected)
+	}
 
 	if merged.Direction != incoming.Direction && incoming.Direction != "" {
 		merged.Direction = incoming.Direction

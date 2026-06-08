@@ -359,10 +359,18 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		// Combine
 		selected := append(takenHot, takenCore...)
 		var debugCand, debugHot, debugCore, debugSel []string
-		for _, c := range candidates { debugCand = append(debugCand, fmt.Sprintf("%s(IsHot:%v)", c.Symbol, c.IsHot)) }
-		for _, c := range hotCandidates { debugHot = append(debugHot, c.Symbol) }
-		for _, c := range coreCandidates { debugCore = append(debugCore, c.Symbol) }
-		for _, c := range selected { debugSel = append(debugSel, c.Symbol) }
+		for _, c := range candidates {
+			debugCand = append(debugCand, fmt.Sprintf("%s(IsHot:%v)", c.Symbol, c.IsHot))
+		}
+		for _, c := range hotCandidates {
+			debugHot = append(debugHot, c.Symbol)
+		}
+		for _, c := range coreCandidates {
+			debugCore = append(debugCore, c.Symbol)
+		}
+		for _, c := range selected {
+			debugSel = append(debugSel, c.Symbol)
+		}
 		slog.Info("PREFETCH DEBUG", "limit", prefetchLimit, "rSlots", rSlots, "candidates", debugCand, "hot", debugHot, "core", debugCore, "selected", debugSel)
 
 		// If we still have slots left, add remaining hot candidates
@@ -1040,6 +1048,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				IsFinalExecute:     true,
 				ReconciledTime:     now,
 				Status:             string(FINAL_EXECUTE),
+				FinalReason:        finalDecision.Reason,
 				IsHot:              candidateMap[pair].IsHot,
 				HotScore:           candidateMap[pair].HotScore,
 				HotSource:          candidateMap[pair].HotSource,
@@ -1112,6 +1121,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				IsFinalExecute:     false,
 				ReconciledTime:     now,
 				Status:             string(FINAL_WATCH),
+				Reason:             reason,
+				FinalReason:        finalDecision.Reason,
 				IsHot:              candidateMap[pair].IsHot,
 				HotScore:           candidateMap[pair].HotScore,
 				HotSource:          candidateMap[pair].HotSource,

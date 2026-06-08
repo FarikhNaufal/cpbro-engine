@@ -329,3 +329,77 @@ func TestSaveWatchToJournal_UsesTargetedCandidateLookupWhenAvailable(t *testing.
 		t.Fatalf("expected full watch journal load to be skipped, got %d", repo.loadCount)
 	}
 }
+
+func TestSaveWatchToJournal_UpdatesHotMetadataOnDedupMerge(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &watchDedupRepo{
+		watchJournal: []WatchJournal{{
+			ID:                 "watch_1",
+			Symbol:             "SOLUSDT",
+			Direction:          LONG,
+			Playbook:           LIQUIDITY_SWEEP_REVERSAL,
+			EntryPrice:         100,
+			StopLoss:           98,
+			TP2:                105,
+			Status:             WATCH_MONITORING,
+			CreatedAt:          now.Add(-10 * time.Minute),
+			ExpiresAt:          now.Add(110 * time.Minute),
+			UpdatedAt:          now.Add(-5 * time.Minute),
+			Reason:             "wait retest",
+			IsHot:              false,
+			HotScore:           0,
+			HotSource:          "",
+			HotRankType:        0,
+			HotOverlaySelected: false,
+		}},
+	}
+
+	storage := NewStorageUsecase(repo)
+	err := storage.SaveWatchToJournal(WatchJournal{
+		ID:                 "watch_new",
+		Symbol:             "SOLUSDT",
+		Direction:          LONG,
+		Playbook:           LIQUIDITY_SWEEP_REVERSAL,
+		EntryPrice:         100.01,
+		StopLoss:           98.01,
+		TP2:                105.02,
+		Status:             WATCH_MONITORING,
+		CreatedAt:          now,
+		ExpiresAt:          now.Add(2 * time.Hour),
+		Reason:             "wait retest",
+		IsHot:              true,
+		HotScore:           82,
+		HotSource:          "Trending, Social Hype",
+		HotRankType:        30,
+		HotOverlaySelected: true,
+	})
+	if err != nil {
+		t.Fatalf("SaveWatchToJournal: %v", err)
+	}
+
+	if repo.appendCount != 0 {
+		t.Fatalf("expected no append for merged watch, got %d", repo.appendCount)
+	}
+	if repo.upsertCount != 1 {
+		t.Fatalf("expected one upsert when hot metadata changes, got %d", repo.upsertCount)
+	}
+	if len(repo.watchJournal) != 1 {
+		t.Fatalf("expected single merged watch row, got %d", len(repo.watchJournal))
+	}
+	merged := repo.watchJournal[0]
+	if !merged.IsHot {
+		t.Fatalf("expected merged watch to be marked hot")
+	}
+	if merged.HotScore != 82 {
+		t.Fatalf("expected hot score to be updated, got %v", merged.HotScore)
+	}
+	if merged.HotSource != "Trending, Social Hype" {
+		t.Fatalf("expected hot source to be updated, got %q", merged.HotSource)
+	}
+	if merged.HotRankType != 30 {
+		t.Fatalf("expected hot rank type to be updated, got %d", merged.HotRankType)
+	}
+	if !merged.HotOverlaySelected {
+		t.Fatalf("expected hot overlay flag to be updated")
+	}
+}

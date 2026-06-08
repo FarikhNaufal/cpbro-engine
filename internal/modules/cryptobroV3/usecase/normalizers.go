@@ -15,18 +15,23 @@ func NormalizeSignalForFrontend(sig dto.SignalResponse) dto.Signal {
 		tStr = sig.ReconciledTime.Format(time.RFC3339)
 	}
 	return dto.Signal{
-		Symbol:         sig.Symbol,
-		Direction:      sig.Direction,
-		Timeframe:      sig.Timeframe,
-		TriggerPrice:   sig.TriggerPrice,
-		StopLoss:       sig.StopLoss,
-		TakeProfit:     sig.TakeProfit,
-		Score:          sig.Score,
-		Strategy:       sig.Strategy,
-		AISentiment:    sig.AISentiment,
-		IsFinalExecute: sig.IsFinalExecute,
-		ReconciledTime: tStr,
-		Status:         sig.Status,
+		Symbol:             sig.Symbol,
+		Direction:          sig.Direction,
+		Timeframe:          sig.Timeframe,
+		TriggerPrice:       sig.TriggerPrice,
+		StopLoss:           sig.StopLoss,
+		TakeProfit:         sig.TakeProfit,
+		Score:              sig.Score,
+		Strategy:           sig.Strategy,
+		AISentiment:        sig.AISentiment,
+		IsFinalExecute:     sig.IsFinalExecute,
+		ReconciledTime:     tStr,
+		Status:             sig.Status,
+		IsHot:              sig.IsHot,
+		HotScore:           sig.HotScore,
+		HotSource:          sig.HotSource,
+		HotRankType:        sig.HotRankType,
+		HotOverlaySelected: sig.HotOverlaySelected,
 	}
 }
 
@@ -36,18 +41,25 @@ func NormalizeWatchSignalForFrontend(sig dto.SignalResponse) dto.WatchSignal {
 		tStr = sig.ReconciledTime.Format(time.RFC3339)
 	}
 	return dto.WatchSignal{
-		Symbol:         sig.Symbol,
-		Direction:      sig.Direction,
-		Timeframe:      sig.Timeframe,
-		TriggerPrice:   sig.TriggerPrice,
-		StopLoss:       sig.StopLoss,
-		TakeProfit:     sig.TakeProfit,
-		Score:          sig.Score,
-		Strategy:       sig.Strategy,
-		AISentiment:    sig.AISentiment,
-		IsFinalExecute: sig.IsFinalExecute,
-		ReconciledTime: tStr,
-		Status:         sig.Status,
+		Symbol:             sig.Symbol,
+		Direction:          sig.Direction,
+		Timeframe:          sig.Timeframe,
+		TriggerPrice:       sig.TriggerPrice,
+		StopLoss:           sig.StopLoss,
+		TakeProfit:         sig.TakeProfit,
+		Score:              sig.Score,
+		Strategy:           sig.Strategy,
+		AISentiment:        sig.AISentiment,
+		IsFinalExecute:     sig.IsFinalExecute,
+		ReconciledTime:     tStr,
+		Status:             sig.Status,
+		Reason:             sig.Reason,
+		FinalReason:        sig.FinalReason,
+		IsHot:              sig.IsHot,
+		HotScore:           sig.HotScore,
+		HotSource:          sig.HotSource,
+		HotRankType:        sig.HotRankType,
+		HotOverlaySelected: sig.HotOverlaySelected,
 	}
 }
 
