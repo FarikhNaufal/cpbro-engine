@@ -541,7 +541,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 		totalScansEvaluated++
 
 		// Perform Universe filter
-		candidates, _ := uc.universeUsecase.FilterUniverse(tickers, fundingRates, policy)
+		candidates, _ := uc.universeUsecase.FilterUniverse(tickers, fundingRates, policy, nil)
 		if len(candidates) == 0 {
 			currentTick = currentTick.Add(15 * time.Minute)
 			continue

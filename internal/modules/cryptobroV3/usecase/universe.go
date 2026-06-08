@@ -34,6 +34,7 @@ func (uc *UniverseUsecase) FilterUniverse(
 	tickers []dto.Ticker24h,
 	fundingRates map[string]float64,
 	policy MarketPolicy,
+	hotSymbols map[string]HotSymbol,
 ) ([]UniverseCandidate, []UniverseRejected) {
 	var candidates []UniverseCandidate
 	var rejected []UniverseRejected
@@ -136,22 +137,62 @@ func (uc *UniverseUsecase) FilterUniverse(
 		}
 
 		// Passed all base universe filters
+		isHot := false
+		var hotScore float64
+		var hotSource string
+		var hotRankType int
+		baseSym := NormalizeBaseSymbol(sym)
+		if h, ok := hotSymbols[baseSym]; ok {
+			isHot = true
+			hotScore = h.Score
+			hotSource = h.Source
+			hotRankType = h.RankType
+		}
+
 		candidates = append(candidates, UniverseCandidate{
-			Symbol: sym,
-			Tier:   tier,
-			Status: UNIVERSE_PASS,
-			Notes:  "passed universe criteria",
+			Symbol:             sym,
+			Tier:               tier,
+			Status:             UNIVERSE_PASS,
+			Notes:              "passed universe criteria",
+			IsHot:              isHot,
+			HotScore:           hotScore,
+			HotSource:          hotSource,
+			HotRankType:        hotRankType,
+			HotOverlaySelected: false,
 		})
 	}
 
-	// 9. Sort candidates by volume descending
+	// 9. Sort candidates by composite score (volume + hot boost) descending
 	volumeMap := make(map[string]float64)
 	for _, t := range tickers {
 		volumeMap[t.Symbol] = t.QuoteVolume
 	}
 
+	maxBoost := policy.HotMaxBoost
+	if maxBoost <= 0 {
+		maxBoost = 1.25
+	}
+
+	compositeScoreMap := make(map[string]float64)
+	for _, c := range candidates {
+		volume := volumeMap[c.Symbol]
+		if c.IsHot {
+			scoreFactor := c.HotScore / 100.0
+			if scoreFactor > 1.0 {
+				scoreFactor = 1.0
+			}
+			if scoreFactor < 0.0 {
+				scoreFactor = 0.0
+			}
+			boost := 1.0 + (maxBoost - 1.0)*scoreFactor
+			compositeScoreMap[c.Symbol] = volume * boost
+		} else {
+			compositeScoreMap[c.Symbol] = volume
+		}
+	}
+
 	sort.Slice(candidates, func(i, j int) bool {
-		return volumeMap[candidates[i].Symbol] > volumeMap[candidates[j].Symbol]
+		return compositeScoreMap[candidates[i].Symbol] > compositeScoreMap[candidates[j].Symbol]
 	})
 
 	// 10. Limit candidates to policy.MaxSymbols

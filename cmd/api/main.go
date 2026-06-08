@@ -230,6 +230,8 @@ func main() {
 		feedbackUC,
 		storageUC,
 	)
+	hotRankService := service.NewBinanceHotRankService()
+	scannerUC.SetHotSymbolProvider(hotRankService)
 
 	backtestUC := usecase.NewBacktestEngineUsecase(
 		binanceService,

@@ -38,6 +38,11 @@ type ScannerUsecase struct {
 	monitoringUsecase          *MonitoringUsecase
 	feedbackUsecase            *FeedbackUsecase
 	storageUsecase             *StorageUsecase
+	hotSymbolProvider          HotSymbolProvider
+}
+
+func (uc *ScannerUsecase) SetHotSymbolProvider(provider HotSymbolProvider) {
+	uc.hotSymbolProvider = provider
 }
 
 type scanRequestGuardProfile struct {
@@ -120,13 +125,22 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	var (
 		tickers      []dto.Ticker24h
 		fundingRates map[string]float64
+		hotSymbols   []HotSymbol
 		tickersErr   error
 		fundingErr   error
+		hotErr       error
 		tickersMeta  bootstrapFetchMeta
 		fundingMeta  bootstrapFetchMeta
 		macroWG      sync.WaitGroup
 	)
 	macroWG.Add(2)
+	if uc.hotSymbolProvider != nil {
+		macroWG.Add(1)
+		go func() {
+			defer macroWG.Done()
+			hotSymbols, hotErr = uc.hotSymbolProvider.FetchHotSymbols(context.Background())
+		}()
+	}
 	go func() {
 		defer macroWG.Done()
 		// Use context.Background() (detached from scanCtx) so that BINANCE_MAX_RETRY
@@ -139,6 +153,34 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		fundingRates, fundingMeta, fundingErr = uc.marketDataUsecase.FetchPremiumFundingRatesWithMeta(context.Background())
 	}()
 	macroWG.Wait()
+
+	hotSymbolMap := make(map[string]HotSymbol)
+	if hotErr == nil && len(hotSymbols) > 0 {
+		for _, hs := range hotSymbols {
+			symbolUpper := strings.ToUpper(strings.TrimSpace(hs.Symbol))
+			if symbolUpper == "" {
+				continue
+			}
+			baseSym := NormalizeBaseSymbol(symbolUpper)
+			if baseSym == "" {
+				continue
+			}
+			if existing, ok := hotSymbolMap[baseSym]; ok {
+				if !strings.Contains(existing.Source, hs.Source) {
+					existing.Source = existing.Source + ", " + hs.Source
+				}
+				if hs.Score > existing.Score {
+					existing.Score = hs.Score
+				}
+				hotSymbolMap[baseSym] = existing
+			} else {
+				hotSymbolMap[baseSym] = hs
+			}
+		}
+		slog.Info("Hot symbols bootstrapped for universe re-ranking", "scan_id", scanID, "hot_count", len(hotSymbolMap))
+	} else if hotErr != nil {
+		slog.Warn("Failed to bootstrap hot symbols, proceeding without overlay", "scan_id", scanID, "error", hotErr)
+	}
 
 	if tickersErr == nil {
 		attrs := []any{"scan_id", scanID, "source", string(tickersMeta.Source), "count", len(tickers)}
@@ -234,9 +276,14 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 	// Filter dynamic universe candidates
 	slog.Info("Filtering dynamic universe candidates...", "scan_id", scanID, "total_tickers", len(tickers))
-	candidates, rejectedCandidatesList := uc.universeUsecase.FilterUniverse(tickers, fundingRates, policy)
+	candidates, rejectedCandidatesList := uc.universeUsecase.FilterUniverse(tickers, fundingRates, policy, hotSymbolMap)
 	universePassCount := len(candidates)
 	slog.Info("Dynamic universe candidates filtered", "scan_id", scanID, "passed", universePassCount, "rejected", len(rejectedCandidatesList))
+
+	candidateMap := make(map[string]UniverseCandidate)
+	for _, c := range candidates {
+		candidateMap[c.Symbol] = c
+	}
 
 	rejectedSummary := []string{}
 	funnelSummary := newFunnelSummaryAccumulator()
@@ -267,11 +314,96 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	prefetchLimit = requestGuard.PrefetchLimit
 	concurrencyLimit = requestGuard.MarketDataConcurrency
 	if prefetchLimit > 0 && prefetchLimit < len(candidates) {
-		for _, deferred := range candidates[prefetchLimit:] {
-			prefetchDeferredSummary = append(prefetchDeferredSummary, fmt.Sprintf("%s: deferred by market data prefetch limit", deferred.Symbol))
-			funnelSummary.Add(funnelStagePipelineDrop, "deferred by market data prefetch limit")
+		// 1. Separate candidates into hot and core
+		var hotCandidates []UniverseCandidate
+		var coreCandidates []UniverseCandidate
+		for _, c := range candidates {
+			if c.IsHot {
+				hotCandidates = append(hotCandidates, c)
+			} else {
+				coreCandidates = append(coreCandidates, c)
+			}
 		}
-		prefetchCandidates = candidates[:prefetchLimit]
+
+		// 2. Reserve slots for hot symbols based on policy HotPrefetchSlotRatio
+		ratio := policy.HotPrefetchSlotRatio
+		if ratio <= 0 {
+			ratio = 0.25
+		}
+		rSlots := int(math.Round(float64(prefetchLimit) * ratio))
+		if rSlots < 1 && len(hotCandidates) > 0 && prefetchLimit >= 3 {
+			rSlots = 1
+		}
+		if rSlots > len(hotCandidates) {
+			rSlots = len(hotCandidates)
+		}
+
+		// 3. Take the top hot candidates
+		var takenHot []UniverseCandidate
+		if rSlots > 0 {
+			takenHot = hotCandidates[:rSlots]
+			for i := range takenHot {
+				takenHot[i].HotOverlaySelected = true
+			}
+		}
+
+		// 4. Fill the remaining slots with core candidates
+		neededCore := prefetchLimit - len(takenHot)
+		var takenCore []UniverseCandidate
+		if neededCore > len(coreCandidates) {
+			takenCore = coreCandidates
+		} else if neededCore > 0 {
+			takenCore = coreCandidates[:neededCore]
+		}
+
+		// Combine
+		selected := append(takenHot, takenCore...)
+		var debugCand, debugHot, debugCore, debugSel []string
+		for _, c := range candidates { debugCand = append(debugCand, fmt.Sprintf("%s(IsHot:%v)", c.Symbol, c.IsHot)) }
+		for _, c := range hotCandidates { debugHot = append(debugHot, c.Symbol) }
+		for _, c := range coreCandidates { debugCore = append(debugCore, c.Symbol) }
+		for _, c := range selected { debugSel = append(debugSel, c.Symbol) }
+		slog.Info("PREFETCH DEBUG", "limit", prefetchLimit, "rSlots", rSlots, "candidates", debugCand, "hot", debugHot, "core", debugCore, "selected", debugSel)
+
+		// If we still have slots left, add remaining hot candidates
+		if len(selected) < prefetchLimit && len(hotCandidates) > rSlots {
+			remHot := hotCandidates[rSlots:]
+			neededRem := prefetchLimit - len(selected)
+			if neededRem > len(remHot) {
+				selected = append(selected, remHot...)
+			} else {
+				selected = append(selected, remHot[:neededRem]...)
+			}
+		}
+
+		// Make a map of selected symbols
+		selectedMap := make(map[string]bool)
+		for _, s := range selected {
+			selectedMap[s.Symbol] = true
+			if s.HotOverlaySelected {
+				info := candidateMap[s.Symbol]
+				info.HotOverlaySelected = true
+				candidateMap[s.Symbol] = info
+			}
+		}
+
+		// Handle deferred candidates
+		for _, deferred := range candidates {
+			if !selectedMap[deferred.Symbol] {
+				prefetchDeferredSummary = append(prefetchDeferredSummary, fmt.Sprintf("%s: deferred by market data prefetch limit", deferred.Symbol))
+				funnelSummary.Add(funnelStagePipelineDrop, "deferred by market data prefetch limit")
+			}
+		}
+		prefetchCandidates = selected
+	} else {
+		for i := range prefetchCandidates {
+			if prefetchCandidates[i].IsHot {
+				prefetchCandidates[i].HotOverlaySelected = true
+				info := candidateMap[prefetchCandidates[i].Symbol]
+				info.HotOverlaySelected = true
+				candidateMap[prefetchCandidates[i].Symbol] = info
+			}
+		}
 	}
 
 	slog.Info("Prefetching market data for passed candidates...", "scan_id", scanID, "candidates_count", len(prefetchCandidates), "concurrency_limit", concurrencyLimit)
@@ -896,18 +1028,23 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			totalFinalExecute++
 			now := time.Now()
 			sigRes := dto.SignalResponse{
-				Symbol:         pair,
-				Direction:      string(finalDecision.Direction),
-				Timeframe:      "M15",
-				TriggerPrice:   finalDecision.EntryPrice,
-				StopLoss:       finalDecision.StopLoss,
-				TakeProfit:     finalDecision.TakeProfit,
-				Score:          finalDecision.Score,
-				Strategy:       string(finalDecision.Playbook),
-				AISentiment:    candCtx.auditResponse.Sentiment,
-				IsFinalExecute: true,
-				ReconciledTime: now,
-				Status:         string(FINAL_EXECUTE),
+				Symbol:             pair,
+				Direction:          string(finalDecision.Direction),
+				Timeframe:          "M15",
+				TriggerPrice:       finalDecision.EntryPrice,
+				StopLoss:           finalDecision.StopLoss,
+				TakeProfit:         finalDecision.TakeProfit,
+				Score:              finalDecision.Score,
+				Strategy:           string(finalDecision.Playbook),
+				AISentiment:        candCtx.auditResponse.Sentiment,
+				IsFinalExecute:     true,
+				ReconciledTime:     now,
+				Status:             string(FINAL_EXECUTE),
+				IsHot:              candidateMap[pair].IsHot,
+				HotScore:           candidateMap[pair].HotScore,
+				HotSource:          candidateMap[pair].HotSource,
+				HotRankType:        candidateMap[pair].HotRankType,
+				HotOverlaySelected: candidateMap[pair].HotOverlaySelected,
 			}
 			executeSignals = append(executeSignals, sigRes)
 			finalSignals = append(finalSignals, sigRes)
@@ -950,6 +1087,11 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				AISentiment:             candCtx.auditResponse.Sentiment,
 				AIReasoning:             candCtx.auditResponse.Reasoning,
 				UpdatedAt:               now,
+				IsHot:                   candidateMap[pair].IsHot,
+				HotScore:                candidateMap[pair].HotScore,
+				HotSource:               candidateMap[pair].HotSource,
+				HotRankType:             candidateMap[pair].HotRankType,
+				HotOverlaySelected:      candidateMap[pair].HotOverlaySelected,
 			})
 		} else if finalDecision.Status == FINAL_WATCH {
 			totalFinalWatch++
@@ -958,18 +1100,23 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			playbookBlockers.Add(finalDecision.Playbook, funnelStageFinalWatch, reason)
 			now := time.Now()
 			watchlistSignals = append(watchlistSignals, dto.SignalResponse{
-				Symbol:         pair,
-				Direction:      string(finalDecision.Direction),
-				Timeframe:      "M15",
-				TriggerPrice:   finalDecision.EntryPrice,
-				StopLoss:       finalDecision.StopLoss,
-				TakeProfit:     finalDecision.TakeProfit,
-				Score:          finalDecision.Score,
-				Strategy:       string(finalDecision.Playbook),
-				AISentiment:    candCtx.auditResponse.Sentiment,
-				IsFinalExecute: false,
-				ReconciledTime: now,
-				Status:         string(FINAL_WATCH),
+				Symbol:             pair,
+				Direction:          string(finalDecision.Direction),
+				Timeframe:          "M15",
+				TriggerPrice:       finalDecision.EntryPrice,
+				StopLoss:           finalDecision.StopLoss,
+				TakeProfit:         finalDecision.TakeProfit,
+				Score:              finalDecision.Score,
+				Strategy:           string(finalDecision.Playbook),
+				AISentiment:        candCtx.auditResponse.Sentiment,
+				IsFinalExecute:     false,
+				ReconciledTime:     now,
+				Status:             string(FINAL_WATCH),
+				IsHot:              candidateMap[pair].IsHot,
+				HotScore:           candidateMap[pair].HotScore,
+				HotSource:          candidateMap[pair].HotSource,
+				HotRankType:        candidateMap[pair].HotRankType,
+				HotOverlaySelected: candidateMap[pair].HotOverlaySelected,
 			})
 			_ = uc.storageUsecase.SaveWatchToJournal(WatchJournal{
 				ID:                      "watch_" + now.Format("20060102150405") + "_" + pair,
@@ -1009,6 +1156,11 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				AIReasoning:             candCtx.auditResponse.Reasoning,
 				UpdatedAt:               now,
 				Reason:                  finalDecision.Reason,
+				IsHot:                   candidateMap[pair].IsHot,
+				HotScore:                candidateMap[pair].HotScore,
+				HotSource:               candidateMap[pair].HotSource,
+				HotRankType:             candidateMap[pair].HotRankType,
+				HotOverlaySelected:      candidateMap[pair].HotOverlaySelected,
 			})
 		} else {
 			totalFinalReject++

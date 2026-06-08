@@ -969,6 +969,17 @@ func encodeSignalJournal(e usecase.SignalJournal) map[string]any {
 		"notification_status":       e.NotificationStatus,
 		"notification_error":        e.NotificationError,
 	}
+	if e.IsHot {
+		out["hot_info"] = map[string]any{
+			"is_hot":               true,
+			"hot_score":            e.HotScore,
+			"hot_source":           e.HotSource,
+			"hot_rank_type":        e.HotRankType,
+			"hot_overlay_selected": e.HotOverlaySelected,
+		}
+	} else {
+		out["hot_info"] = nil
+	}
 	// Remove empty string fields for cleanliness (PB accepts empty, but keep payload small).
 	for k, v := range out {
 		if s, ok := v.(string); ok && strings.TrimSpace(s) == "" {
@@ -1031,6 +1042,32 @@ func decodeSignalJournal(m map[string]any) (usecase.SignalJournal, error) {
 	out.Reason, _ = m["reason"].(string)
 	out.NotificationStatus, _ = m["notification_status"].(string)
 	out.NotificationError, _ = m["notification_error"].(string)
+
+	if hotVal, ok := m["hot_info"]; ok && hotVal != nil {
+		switch v := hotVal.(type) {
+		case map[string]any:
+			out.IsHot, _ = v["is_hot"].(bool)
+			out.HotScore = toFloat(v["hot_score"])
+			out.HotSource, _ = v["hot_source"].(string)
+			if rt, ok := v["hot_rank_type"].(float64); ok {
+				out.HotRankType = int(rt)
+			}
+			out.HotOverlaySelected, _ = v["hot_overlay_selected"].(bool)
+		case string:
+			if strings.TrimSpace(v) != "" {
+				var m2 map[string]any
+				if err := json.Unmarshal([]byte(v), &m2); err == nil {
+					out.IsHot, _ = m2["is_hot"].(bool)
+					out.HotScore = toFloat(m2["hot_score"])
+					out.HotSource, _ = m2["hot_source"].(string)
+					if rt, ok := m2["hot_rank_type"].(float64); ok {
+						out.HotRankType = int(rt)
+					}
+					out.HotOverlaySelected, _ = m2["hot_overlay_selected"].(bool)
+				}
+			}
+		}
+	}
 
 	if strings.TrimSpace(out.ID) == "" || strings.TrimSpace(out.Symbol) == "" {
 		return usecase.SignalJournal{}, errors.New("missing required journal fields")

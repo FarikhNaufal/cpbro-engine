@@ -35,6 +35,11 @@ type Signal struct {
 	IsFinalExecute bool    `json:"is_final_execute"`
 	ReconciledTime string  `json:"reconciled_time"`
 	Status         string  `json:"status"`
+	IsHot              bool    `json:"is_hot,omitempty"`
+	HotScore           float64 `json:"hot_score,omitempty"`
+	HotSource          string  `json:"hot_source,omitempty"`
+	HotRankType        int     `json:"hot_rank_type,omitempty"`
+	HotOverlaySelected bool    `json:"hot_overlay_selected,omitempty"`
 }
 
 type WatchSignal struct {
@@ -52,6 +57,11 @@ type WatchSignal struct {
 	Status         string  `json:"status"`
 	Reason         string  `json:"reason,omitempty"`
 	FinalReason    string  `json:"final_reason,omitempty"`
+	IsHot              bool    `json:"is_hot,omitempty"`
+	HotScore           float64 `json:"hot_score,omitempty"`
+	HotSource          string  `json:"hot_source,omitempty"`
+	HotRankType        int     `json:"hot_rank_type,omitempty"`
+	HotOverlaySelected bool    `json:"hot_overlay_selected,omitempty"`
 }
 
 type ArbiterSelectedDetail struct {

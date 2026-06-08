@@ -155,6 +155,8 @@ type MarketPolicy struct {
 	BtcScore               float64      `json:"btc_score"`
 	BtcChaos               float64      `json:"btc_chaos"`
 	Reason                 string       `json:"reason"`
+	HotMaxBoost            float64      `json:"hot_max_boost"`
+	HotPrefetchSlotRatio   float64      `json:"hot_prefetch_slot_ratio"`
 }
 
 // EffectiveRegime returns a stable regime value for downstream logic.
@@ -188,10 +190,15 @@ func (p MarketPolicy) EffectiveRegime() MarketRegime {
 }
 
 type UniverseCandidate struct {
-	Symbol string `json:"symbol"`
-	Tier   Tier   `json:"tier"`
-	Status Status `json:"status"`
-	Notes  string `json:"notes"`
+	Symbol             string `json:"symbol"`
+	Tier               Tier   `json:"tier"`
+	Status             Status `json:"status"`
+	Notes              string `json:"notes"`
+	IsHot              bool   `json:"is_hot"`
+	HotScore           float64 `json:"hot_score"`
+	HotSource          string `json:"hot_source"`
+	HotRankType        int    `json:"hot_rank_type"`
+	HotOverlaySelected bool   `json:"hot_overlay_selected"`
 }
 
 type UniverseRejected struct {
@@ -404,7 +411,12 @@ type SignalJournal struct {
 	TimeToSL                string    `json:"time_to_sl"`
 	OutcomeReason           string    `json:"outcome_reason"`
 	EntryTiming             string    `json:"entry_timing"`
-	Tier                    Tier      `json:"tier"`
+	Tier               Tier      `json:"tier"`
+	IsHot              bool      `json:"is_hot,omitempty"`
+	HotScore           float64   `json:"hot_score,omitempty"`
+	HotSource          string    `json:"hot_source,omitempty"`
+	HotRankType        int       `json:"hot_rank_type,omitempty"`
+	HotOverlaySelected bool      `json:"hot_overlay_selected,omitempty"`
 
 	// Keep existing fields for backward compatibility
 	Timeframe          string    `json:"timeframe,omitempty"`
@@ -621,6 +633,25 @@ type ScannerSummaryV3 struct {
 type SignalNotificationRequest struct {
 	Decision      FinalDecision
 	AuditResponse dto.AIAuditResponse
+}
+
+type HotSymbol struct {
+	Symbol   string  `json:"symbol"`
+	Score    float64 `json:"score"`
+	Source   string  `json:"source"`
+	RankType int     `json:"rank_type"`
+}
+
+type HotInfo struct {
+	IsHot              bool    `json:"is_hot"`
+	HotScore           float64 `json:"hot_score"`
+	HotSource          string  `json:"hot_source"`
+	HotRankType        int     `json:"hot_rank_type"`
+	HotOverlaySelected bool    `json:"hot_overlay_selected"`
+}
+
+type HotSymbolProvider interface {
+	FetchHotSymbols(ctx context.Context) ([]HotSymbol, error)
 }
 
 // Interfaces

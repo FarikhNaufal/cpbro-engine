@@ -3,6 +3,7 @@ package usecase
 import (
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
@@ -707,4 +708,29 @@ func CalculateBollingerBands(candles []dto.Candle, period int, multiplier float6
 		lower[i] = sma - multiplier*stdDev
 	}
 	return basis, upper, lower
+}
+
+var symbolExceptions = map[string]string{
+	// "API_SYMBOL": "FUTURES_SYMBOL" (manual overrides if any mismatch occurs)
+}
+
+// NormalizeBaseSymbol converts a symbol (e.g. 1000PEPEUSDT, BONK, 1000000BABYDOGEUSDT)
+// to its base clean symbol name (e.g. PEPE, BONK, BABYDOGE) to support contract aliasing.
+func NormalizeBaseSymbol(sym string) string {
+	sym = strings.ToUpper(strings.TrimSpace(sym))
+
+	// Strip trailing USDT and USD
+	sym = strings.TrimSuffix(sym, "USDT")
+	sym = strings.TrimSuffix(sym, "USD")
+
+	// Strip leading digits (e.g., 1000, 1000000)
+	for len(sym) > 0 && sym[0] >= '0' && sym[0] <= '9' {
+		sym = sym[1:]
+	}
+
+	// Check manual exceptions override
+	if exc, ok := symbolExceptions[sym]; ok {
+		return exc
+	}
+	return sym
 }

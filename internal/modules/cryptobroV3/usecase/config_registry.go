@@ -178,6 +178,14 @@ func validateAndClampPolicy(name string, policy MarketPolicy) MarketPolicy {
 		policy.MaxFinalExecute = 1
 	}
 
+	// Hot symbol config validation & defaults
+	if policy.HotMaxBoost <= 0 {
+		policy.HotMaxBoost = 1.25
+	}
+	if policy.HotPrefetchSlotRatio <= 0 {
+		policy.HotPrefetchSlotRatio = 0.25
+	}
+
 	// Specific checks for chaos mode to ensure safety
 	if name == "BTC_CHAOS" {
 		policy.AllowedTiers = []Tier{TierA, TierB}
@@ -321,6 +329,8 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			StalenessATRMultiplier: 1.5,
 			CooldownMinutes:        15,
 			Reason:                 "Default normal policy",
+			HotMaxBoost:            1.25,
+			HotPrefetchSlotRatio:   0.25,
 		},
 		"BTC_CHAOS": {
 			Regime:       BTC_CHAOS,

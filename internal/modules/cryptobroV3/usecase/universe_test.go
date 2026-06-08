@@ -39,7 +39,7 @@ func TestFilterUniverse(t *testing.T) {
 		"HIGHFUNDUSDT": 0.015, // > MaxFundingAbs (0.01)
 	}
 
-	candidates, rejected := uc.FilterUniverse(tickers, fundingRates, policy)
+	candidates, rejected := uc.FilterUniverse(tickers, fundingRates, policy, nil)
 
 	// Verify Candidates
 	// Expected candidates passed: ETHUSDT, SOLUSDT, XRPUSDT, DOGEUSDT, HIGHFUNDUSDT (sorted by volume).
@@ -117,7 +117,7 @@ func TestFilterUniverseDynamicThresholds(t *testing.T) {
 		}
 		fundingRates := map[string]float64{"FUNDEDUSDT": 0.015}
 
-		candidates, rejected := uc.FilterUniverse(tickers, fundingRates, policy)
+		candidates, rejected := uc.FilterUniverse(tickers, fundingRates, policy, nil)
 		if len(candidates) != 1 || candidates[0].Symbol != "LIQUIDUSDT" {
 			t.Fatalf("expected only LIQUIDUSDT to pass chaos universe guardrails, got %+v", candidates)
 		}
@@ -147,7 +147,7 @@ func TestFilterUniverseDynamicThresholds(t *testing.T) {
 			{Symbol: "SOLUSDT", QuoteVolume: 120000000.0, PriceChangePercent: -16.0},
 		}
 
-		candidates, _ := uc.FilterUniverse(tickers, nil, policy)
+		candidates, _ := uc.FilterUniverse(tickers, nil, policy, nil)
 		if len(candidates) != 1 || candidates[0].Symbol != "SOLUSDT" {
 			t.Fatalf("expected liquid risk-off mover to pass coarse universe filter, got %+v", candidates)
 		}
@@ -172,7 +172,7 @@ func TestFilterUniverseTiers(t *testing.T) {
 		{Symbol: "XRPUSDT", QuoteVolume: 20000000.0, PriceChangePercent: 4.0},  // Tier C
 	}
 
-	candidates, rejected := uc.FilterUniverse(tickers, nil, policy)
+	candidates, rejected := uc.FilterUniverse(tickers, nil, policy, nil)
 
 	// XRPUSDT (Tier C) should be rejected due to Tier policy
 	if len(candidates) != 2 {
@@ -206,5 +206,102 @@ func TestFilterUniverseAbnormal(t *testing.T) {
 		if !isAbnormal(sym) {
 			t.Errorf("Expected %s to be abnormal", sym)
 		}
+	}
+}
+
+func TestFilterUniverse_HotReRankingAndBoost(t *testing.T) {
+	uc := NewUniverseUsecase()
+
+	policy := MarketPolicy{
+		AllowedTiers:    []Tier{TierA, TierB, TierC},
+		MaxSymbols:      10,
+		MinVolume:       1000000.0,
+		MaxFundingAbs:   0.01,
+		MaxPriceMove24h: 0.20,
+	}
+
+	tickers := []dto.Ticker24h{
+		{Symbol: "COREHIGHUSDT", QuoteVolume: 60000000.0, PriceChangePercent: 1.0},
+		{Symbol: "HOTMEDIUMUSDT", QuoteVolume: 55000000.0, PriceChangePercent: 1.0},
+	}
+
+	hotSymbols := map[string]HotSymbol{
+		"HOTMEDIUM": {Symbol: "HOTMEDIUM", Score: 100, Source: "Trending", RankType: 10},
+	}
+
+	candidates, _ := uc.FilterUniverse(tickers, nil, policy, hotSymbols)
+
+	if len(candidates) != 2 {
+		t.Fatalf("Expected 2 candidates, got %d", len(candidates))
+	}
+
+	if candidates[0].Symbol != "HOTMEDIUMUSDT" {
+		t.Errorf("Expected HOTMEDIUMUSDT to be sorted first due to hot boost, got %s", candidates[0].Symbol)
+	}
+	if !candidates[0].IsHot {
+		t.Errorf("Expected HOTMEDIUMUSDT to be marked as hot")
+	}
+	if candidates[0].HotSource != "Trending" {
+		t.Errorf("Expected hot source 'Trending', got %q", candidates[0].HotSource)
+	}
+}
+
+func TestFilterUniverse_SymbolNormalization(t *testing.T) {
+	testCases := []struct {
+		input    string
+		expected string
+	}{
+		{"1000PEPEUSDT", "PEPE"},
+		{"1000BONKUSDT", "BONK"},
+		{"1000000BABYDOGEUSDT", "BABYDOGE"},
+		{"SATS", "SATS"},
+		{"1000SATS", "SATS"},
+		{"BTCUSDT", "BTC"},
+		{"ETHUSD", "ETH"},
+	}
+
+	for _, tc := range testCases {
+		got := NormalizeBaseSymbol(tc.input)
+		if got != tc.expected {
+			t.Errorf("NormalizeBaseSymbol(%q) = %q; want %q", tc.input, got, tc.expected)
+		}
+	}
+}
+
+func TestFilterUniverse_ScoreWeightedBoost(t *testing.T) {
+	uc := NewUniverseUsecase()
+
+	policy := MarketPolicy{
+		AllowedTiers:    []Tier{TierA, TierB, TierC},
+		MaxSymbols:      10,
+		MinVolume:       1000000.0,
+		MaxFundingAbs:   0.01,
+		MaxPriceMove24h: 0.20,
+		HotMaxBoost:     1.50,
+	}
+
+	tickers := []dto.Ticker24h{
+		{Symbol: "1000PEPEUSDT", QuoteVolume: 40000000.0, PriceChangePercent: 1.0},
+		{Symbol: "1000BONKUSDT", QuoteVolume: 50000000.0, PriceChangePercent: 1.0},
+	}
+
+	hotSymbols := map[string]HotSymbol{
+		"PEPE": {Symbol: "PEPE", Score: 100, Source: "Trending", RankType: 10},
+		"BONK": {Symbol: "BONK", Score: 10, Source: "Top Search", RankType: 11},
+	}
+
+	candidates, _ := uc.FilterUniverse(tickers, nil, policy, hotSymbols)
+
+	if len(candidates) != 2 {
+		t.Fatalf("Expected 2 candidates, got %d", len(candidates))
+	}
+
+	// 1000PEPEUSDT should be sorted first due to its larger dynamic boost (composite: 40M * 1.5 = 60M)
+	// 1000BONKUSDT sorted second (composite: 50M * 1.05 = 52.5M)
+	if candidates[0].Symbol != "1000PEPEUSDT" {
+		t.Errorf("Expected 1000PEPEUSDT sorted first (composite: 60M), got %s", candidates[0].Symbol)
+	}
+	if candidates[1].Symbol != "1000BONKUSDT" {
+		t.Errorf("Expected 1000BONKUSDT sorted second (composite: 52.5M), got %s", candidates[1].Symbol)
 	}
 }

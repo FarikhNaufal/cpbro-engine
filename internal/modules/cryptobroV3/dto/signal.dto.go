@@ -14,5 +14,10 @@ type SignalResponse struct {
 	AISentiment    string    `json:"ai_sentiment"`
 	IsFinalExecute bool      `json:"is_final_execute"`
 	ReconciledTime time.Time `json:"reconciled_time"`
-	Status         string    `json:"status"` // PENDING, ACTIVE, COMPLETED, CANCELLED
+	Status             string    `json:"status"` // PENDING, ACTIVE, COMPLETED, CANCELLED
+	IsHot              bool      `json:"is_hot,omitempty"`
+	HotScore           float64   `json:"hot_score,omitempty"`
+	HotSource          string    `json:"hot_source,omitempty"`
+	HotRankType        int       `json:"hot_rank_type,omitempty"`
+	HotOverlaySelected bool      `json:"hot_overlay_selected,omitempty"`
 }

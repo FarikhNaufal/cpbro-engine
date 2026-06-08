@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1034,5 +1035,187 @@ func TestResolveAdaptiveScanRequestGuard_BTCChaosTightensConcurrency(t *testing.
 	}
 	if guard.PipelineConcurrency != 2 {
 		t.Fatalf("expected BTC_CHAOS pipeline concurrency 2, got %d", guard.PipelineConcurrency)
+	}
+}
+
+type mockHotSymbolProvider struct {
+	symbols []HotSymbol
+	err     error
+}
+
+func (m *mockHotSymbolProvider) FetchHotSymbols(ctx context.Context) ([]HotSymbol, error) {
+	return m.symbols, m.err
+}
+
+func TestScanner_PrefetchSlotReservation(t *testing.T) {
+	t.Setenv("MAX_MARKETDATA_PREFETCH_SYMBOLS", "4")
+	t.Setenv("SCAN_REQUEST_WEIGHT_BUDGET", "500")
+
+	policy := MarketPolicy{
+		AllowedTiers:         []Tier{TierA, TierB, TierC},
+		MaxSymbols:           10,
+		MinVolume:            1000000.0,
+		MaxFundingAbs:        0.01,
+		MaxPriceMove24h:      0.20,
+		HotMaxBoost:          1.25,
+		HotPrefetchSlotRatio: 0.50,
+	}
+
+	tickers := []dto.Ticker24h{
+		{Symbol: "SOLUSDT", QuoteVolume: 90000000.0, LastPrice: 100.0},
+		{Symbol: "ADAUSDT", QuoteVolume: 70000000.0, LastPrice: 1.0},
+		{Symbol: "DOGEUSDT", QuoteVolume: 60000000.0, LastPrice: 0.1},
+		{Symbol: "ETHUSDT", QuoteVolume: 120000000.0, LastPrice: 3000.0},
+		{Symbol: "XRPUSDT", QuoteVolume: 110000000.0, LastPrice: 0.5},
+		{Symbol: "LTCUSDT", QuoteVolume: 55000000.0, LastPrice: 80.0},
+		{Symbol: "BTCUSDT", QuoteVolume: 1000000000.0, LastPrice: 50000.0, PriceChangePercent: 0.0},
+	}
+
+	fundingRates := map[string]float64{
+		"SOLUSDT": 0.0001, "ADAUSDT": 0.0001, "DOGEUSDT": 0.0001,
+		"ETHUSDT": 0.0001, "XRPUSDT": 0.0001, "LTCUSDT": 0.0001,
+		"BTCUSDT": 0.0001,
+	}
+
+	freshM15 := generateFreshCandles(100.0)
+	freshH1 := generateFreshCandles(100.0)
+	freshH4 := generateFreshCandles(100.0)
+
+	m15Candles := map[string][]dto.Candle{
+		"SOLUSDT": freshM15, "ADAUSDT": freshM15, "DOGEUSDT": freshM15,
+		"ETHUSDT": freshM15, "XRPUSDT": freshM15, "LTCUSDT": freshM15,
+		"BTCUSDT": freshM15,
+	}
+	h1Candles := map[string][]dto.Candle{
+		"SOLUSDT": freshH1, "ADAUSDT": freshH1, "DOGEUSDT": freshH1,
+		"ETHUSDT": freshH1, "XRPUSDT": freshH1, "LTCUSDT": freshH1,
+		"BTCUSDT": freshH1,
+	}
+	h4Candles := map[string][]dto.Candle{
+		"SOLUSDT": freshH4, "ADAUSDT": freshH4, "DOGEUSDT": freshH4,
+		"ETHUSDT": freshH4, "XRPUSDT": freshH4, "LTCUSDT": freshH4,
+		"BTCUSDT": freshH4,
+	}
+
+	prices := map[string]float64{
+		"SOLUSDT": 100.0, "ADAUSDT": 1.0, "DOGEUSDT": 0.1,
+		"ETHUSDT": 3000.0, "XRPUSDT": 0.5, "LTCUSDT": 80.0,
+		"BTCUSDT": 50000.0,
+	}
+
+	mockProvider := &mockMarketDataProvider{
+		tickers:      tickers,
+		fundingRates: fundingRates,
+		m15Candles:   m15Candles,
+		h1Candles:    h1Candles,
+		h4Candles:    h4Candles,
+		prices:       prices,
+	}
+
+	mockHotProvider := &mockHotSymbolProvider{
+		symbols: []HotSymbol{
+			{Symbol: "SOL", Score: 100, Source: "Trending"},
+			{Symbol: "ADA", Score: 80, Source: "Top Search"},
+			{Symbol: "DOGE", Score: 50, Source: "Social Hype"},
+		},
+	}
+
+	mockNotify := &mockNotification{}
+	mockStorage := &mockStorageRepo{
+		journal: []SignalJournal{},
+		audits:  []DecisionAudit{},
+	}
+
+	storageUC := NewStorageUsecase(mockStorage)
+	marketDataUC := NewMarketDataUsecase(mockProvider)
+
+	reg := NewDefaultConfigRegistry()
+	reg.policies["DEFAULT"] = policy
+	riskOffPolicy := policy
+	riskOffPolicy.Regime = RISK_OFF
+	riskOffPolicy.LongMode = REVERSAL_ONLY
+	riskOffPolicy.ShortMode = NORMAL
+	reg.policies["RISK_OFF"] = riskOffPolicy
+	SetGlobalConfigRegistry(reg)
+	defer SetGlobalConfigRegistry(NewDefaultConfigRegistry())
+
+	marketPolicyUC := NewMarketPolicyUsecase()
+	universeUC := NewUniverseUsecase()
+	strategySelectorUC := NewStrategySelectorUsecase()
+	playbookEligibilityUC := NewPlaybookEligibilityUsecase()
+	playbookQuantEngineUC := NewPlaybookQuantEngineUsecase()
+	scoringUC := NewScoringUsecase()
+	candidateArbiterUC := NewCandidateArbiterUsecase()
+	localGateUC := NewLocalGateUsecase()
+	aiCandidateSelectorUC := NewAICandidateSelectorUsecase(60.0)
+	mockAI := &mockAIAuditor{response: dto.AIAuditResponse{Decision: "WAIT"}}
+	aiAuditorUC := NewAIAuditorUsecase(mockAI, storageUC)
+	planReconciliationUC := NewPlanReconciliationUsecase()
+	stalenessUC := NewStalenessUsecase(30 * time.Minute)
+	stalenessUC.SetFallbackProvider(mockProvider)
+	finalGateUC := NewFinalGateUsecase()
+	conflictResolverUC := NewConflictResolverUsecase()
+	signalNotificationUC := NewSignalNotificationUsecase(mockNotify, storageUC)
+	opsNotificationUC := NewOpsNotificationUsecase(mockNotify)
+	monitoringUC := NewMonitoringUsecase(mockProvider, storageUC)
+	feedbackUC := NewFeedbackUsecase(storageUC)
+
+	uc := NewScannerUsecase(
+		marketDataUC,
+		marketPolicyUC,
+		universeUC,
+		strategySelectorUC,
+		playbookEligibilityUC,
+		playbookQuantEngineUC,
+		scoringUC,
+		candidateArbiterUC,
+		localGateUC,
+		aiCandidateSelectorUC,
+		aiAuditorUC,
+		planReconciliationUC,
+		stalenessUC,
+		finalGateUC,
+		conflictResolverUC,
+		signalNotificationUC,
+		opsNotificationUC,
+		monitoringUC,
+		feedbackUC,
+		storageUC,
+	)
+	uc.SetHotSymbolProvider(mockHotProvider)
+
+	ctx := context.Background()
+	_, err := uc.Run(ctx, dto.ScanRequest{TriggerTime: time.Now()})
+	if err != nil {
+		t.Fatalf("scanner run failed: %v", err)
+	}
+
+	latest, err := storageUC.LoadLatestResult()
+	if err != nil {
+		t.Fatalf("failed to load latest result: %v", err)
+	}
+
+	deferred := make(map[string]bool)
+	t.Logf("All PolicyRejectedSummary: %+v", latest.PolicyRejectedSummary)
+	for _, p := range latest.PolicyRejectedSummary {
+		if strings.Contains(p, "deferred by market data prefetch limit") {
+			parts := strings.Split(p, ":")
+			deferred[strings.TrimSpace(parts[0])] = true
+		}
+	}
+	t.Logf("Parsed deferred symbols: %+v", deferred)
+
+	expectedSelected := []string{"SOLUSDT", "ADAUSDT", "ETHUSDT", "XRPUSDT"}
+	expectedDeferred := []string{"DOGEUSDT", "LTCUSDT"}
+
+	for _, sym := range expectedSelected {
+		if deferred[sym] {
+			t.Errorf("Expected %s to be selected, but it was deferred", sym)
+		}
+	}
+	for _, sym := range expectedDeferred {
+		if !deferred[sym] {
+			t.Errorf("Expected %s to be deferred, but it was selected", sym)
+		}
 	}
 }
