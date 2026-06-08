@@ -220,17 +220,20 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 
 		// 3. Retest quality (Max 25)
 		retestHold := tech.IndicatorValues[IndicatorRetestHold]
-		retestScore := 5.0
-		if retestHold == 1.0 {
-			retestScore = 25.0
-		}
+		retestQuality := calculateRetestQuality(tech.IndicatorValues)
+		retestScore := 25.0 * retestQuality
 		rawScore += retestScore
-		notes = append(notes, fmt.Sprintf("RetestQual: +%0.1f", retestScore))
+		notes = append(notes, fmt.Sprintf("RetestQual: +%0.1f (quality=%0.2f)", retestScore, retestQuality))
 
 		// 4. Volume/OI support (Max 15)
 		supportScore := 5.0
-		if volumeSpike == 1.0 || extremeOI == 1.0 {
+		hasVolumeSupport := volumeSpike == 1.0
+		hasDerivativeSupport := extremeOI == 1.0 || tech.IndicatorValues[IndicatorOIChange] > 0
+		switch {
+		case hasVolumeSupport && hasDerivativeSupport:
 			supportScore = 15.0
+		case hasVolumeSupport || hasDerivativeSupport:
+			supportScore = 10.0
 		}
 		rawScore += supportScore
 		notes = append(notes, fmt.Sprintf("VolOISupport: +%0.1f", supportScore))

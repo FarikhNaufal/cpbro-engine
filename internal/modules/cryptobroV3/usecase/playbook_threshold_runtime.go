@@ -36,6 +36,9 @@ func calculateRetestQuality(indicators map[string]float64) float64 {
 		return 0.0
 	}
 	touches := math.Max(0, GetIndicator(indicators, IndicatorRetestTouches))
+	if touches == 0 {
+		touches = 1
+	}
 	return math.Min(1.0, 0.25+math.Min(touches, 3.0)*0.25)
 }
 

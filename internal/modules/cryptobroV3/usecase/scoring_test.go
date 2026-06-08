@@ -76,9 +76,10 @@ func TestScoring_PlaybookCalculations(t *testing.T) {
 			TechnicalSnapshot: TechnicalSnapshot{
 				RSI: 50.0,
 				IndicatorValues: map[string]float64{
-					"contraction":       1.0,
-					"volume_spike":      1.0,
-					IndicatorRetestHold: 1.0,
+					"contraction":          1.0,
+					"volume_spike":         1.0,
+					IndicatorRetestHold:    1.0,
+					IndicatorRetestTouches: 1.0,
 				},
 			},
 		}
@@ -106,9 +107,10 @@ func TestScoring_PlaybookCalculations(t *testing.T) {
 			TechnicalSnapshot: TechnicalSnapshot{
 				RSI: 50.0,
 				IndicatorValues: map[string]float64{
-					"contraction":       1.0,
-					"volume_spike":      1.0,
-					IndicatorRetestHold: 1.0,
+					"contraction":          1.0,
+					"volume_spike":         1.0,
+					IndicatorRetestHold:    1.0,
+					IndicatorRetestTouches: 1.0,
 				},
 			},
 		}
@@ -345,9 +347,10 @@ func TestScoring_Penalties(t *testing.T) {
 			TechnicalSnapshot: TechnicalSnapshot{
 				RSI: 50.0,
 				IndicatorValues: map[string]float64{
-					"contraction":       1.0,
-					"volume_spike":      1.0,
-					IndicatorRetestHold: 1.0,
+					"contraction":          1.0,
+					"volume_spike":         1.0,
+					IndicatorRetestHold:    1.0,
+					IndicatorRetestTouches: 1.0,
 				},
 			},
 		}
@@ -362,9 +365,10 @@ func TestScoring_Penalties(t *testing.T) {
 			TechnicalSnapshot: TechnicalSnapshot{
 				RSI: 50.0,
 				IndicatorValues: map[string]float64{
-					"contraction":       1.0,
-					"volume_spike":      1.0,
-					IndicatorRetestHold: 1.0,
+					"contraction":          1.0,
+					"volume_spike":         1.0,
+					IndicatorRetestHold:    1.0,
+					IndicatorRetestTouches: 1.0,
 				},
 			},
 		}
@@ -372,6 +376,98 @@ func TestScoring_Penalties(t *testing.T) {
 		scoreLoose := uc.Calculate(quantLoose, LONG, policyLoose)
 		scoreStrict := uc.Calculate(quantStrict, LONG, policyStrict)
 		assert.True(t, scoreStrict >= scoreLoose, "Strict fresh-entry policy should not invert retest quality scoring when evidence exists")
+	})
+
+	t.Run("COMPRESSION_BREAKOUT_RETEST rewards stronger retest quality", func(t *testing.T) {
+		policy := MarketPolicy{AllowLong: true, AllowShort: true, LongMode: NORMAL, ShortMode: NORMAL}
+
+		singleTouch := &QuantResult{
+			Playbook:     COMPRESSION_BREAKOUT_RETEST,
+			Direction:    LONG,
+			IndicatorMet: true,
+			TriggerPrice: 100.0,
+			StopLoss:     98.0,
+			TakeProfit:   105.0,
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI: 50.0,
+				IndicatorValues: map[string]float64{
+					IndicatorContraction:   1.0,
+					IndicatorVolumeSpike:   1.0,
+					IndicatorRetestHold:    1.0,
+					IndicatorRetestTouches: 1.0,
+				},
+			},
+		}
+		multiTouch := &QuantResult{
+			Playbook:     COMPRESSION_BREAKOUT_RETEST,
+			Direction:    LONG,
+			IndicatorMet: true,
+			TriggerPrice: 100.0,
+			StopLoss:     98.0,
+			TakeProfit:   105.0,
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI: 50.0,
+				IndicatorValues: map[string]float64{
+					IndicatorContraction:   1.0,
+					IndicatorVolumeSpike:   1.0,
+					IndicatorRetestHold:    1.0,
+					IndicatorRetestTouches: 3.0,
+				},
+			},
+		}
+
+		scoreSingle := uc.Calculate(singleTouch, LONG, policy)
+		scoreMulti := uc.Calculate(multiTouch, LONG, policy)
+
+		assert.True(t, scoreMulti > scoreSingle, "multi-touch retests should score higher than single-touch retests")
+		assert.Contains(t, singleTouch.Reason, "quality=0.50")
+		assert.Contains(t, multiTouch.Reason, "quality=1.00")
+	})
+
+	t.Run("COMPRESSION_BREAKOUT_RETEST distinguishes volume and derivatives support", func(t *testing.T) {
+		policy := MarketPolicy{AllowLong: true, AllowShort: true, LongMode: NORMAL, ShortMode: NORMAL}
+
+		volumeOnly := &QuantResult{
+			Playbook:     COMPRESSION_BREAKOUT_RETEST,
+			Direction:    LONG,
+			IndicatorMet: true,
+			TriggerPrice: 100.0,
+			StopLoss:     98.0,
+			TakeProfit:   105.0,
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI: 50.0,
+				IndicatorValues: map[string]float64{
+					IndicatorContraction:   1.0,
+					IndicatorVolumeSpike:   1.0,
+					IndicatorRetestHold:    1.0,
+					IndicatorRetestTouches: 1.0,
+				},
+			},
+		}
+		volumeAndDerivatives := &QuantResult{
+			Playbook:     COMPRESSION_BREAKOUT_RETEST,
+			Direction:    LONG,
+			IndicatorMet: true,
+			TriggerPrice: 100.0,
+			StopLoss:     98.0,
+			TakeProfit:   105.0,
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI: 50.0,
+				IndicatorValues: map[string]float64{
+					IndicatorContraction:   1.0,
+					IndicatorVolumeSpike:   1.0,
+					IndicatorExtremeOI:     1.0,
+					IndicatorOIChange:      0.02,
+					IndicatorRetestHold:    1.0,
+					IndicatorRetestTouches: 1.0,
+				},
+			},
+		}
+
+		scoreVolumeOnly := uc.Calculate(volumeOnly, LONG, policy)
+		scoreVolumeAndDerivatives := uc.Calculate(volumeAndDerivatives, LONG, policy)
+
+		assert.True(t, scoreVolumeAndDerivatives > scoreVolumeOnly, "compression setup with both volume and derivatives support should score higher")
 	})
 
 	t.Run("Funding penalty is sign aware for normal playbooks", func(t *testing.T) {
