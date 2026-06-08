@@ -53,10 +53,12 @@ func (rt *hotRankRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 		resp = map[string]any{
 			"code":    "000000",
 			"success": true,
-			"data": []map[string]any{
-				{
-					"metaInfo":       map[string]any{"symbol": "PEPE"},
-					"socialHypeInfo": map[string]any{"socialHype": 91.0},
+			"data": map[string]any{
+				"leaderBoardList": []map[string]any{
+					{
+						"metaInfo":       map[string]any{"symbol": "PEPE"},
+						"socialHypeInfo": map[string]any{"socialHype": 91.0},
+					},
 				},
 			},
 		}

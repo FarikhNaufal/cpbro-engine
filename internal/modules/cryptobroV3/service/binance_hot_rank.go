@@ -224,9 +224,13 @@ type socialHypeItem struct {
 }
 
 type socialHypeResponse struct {
-	Code    string           `json:"code"`
-	Success bool             `json:"success"`
-	Data    []socialHypeItem `json:"data"`
+	Code    string               `json:"code"`
+	Success bool                 `json:"success"`
+	Data    socialHypeDataBundle `json:"data"`
+}
+
+type socialHypeDataBundle struct {
+	LeaderBoardList []socialHypeItem `json:"leaderBoardList"`
 }
 
 type smartMoneyItem struct {
@@ -276,7 +280,7 @@ func (s *BinanceHotRankService) fetchSocialHype(ctx context.Context, chainID str
 	}
 
 	var list []usecase.HotSymbol
-	for i, item := range res.Data {
+	for i, item := range res.Data.LeaderBoardList {
 		sym := strings.ToUpper(strings.TrimSpace(item.MetaInfo.Symbol))
 		if sym == "" {
 			continue
@@ -354,4 +358,3 @@ func (s *BinanceHotRankService) fetchSmartMoneyInflow(ctx context.Context, chain
 
 	return list, nil
 }
-
