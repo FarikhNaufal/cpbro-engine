@@ -198,6 +198,55 @@ func TestAIAuditor_ConflictRejection(t *testing.T) {
 	if res.Decision != "REJECT" || res.SuggestedAction != "REJECT" {
 		t.Errorf("Expected Decision and SuggestedAction to be REJECT, got Decision=%s Action=%s", res.Decision, res.SuggestedAction)
 	}
+	if res.Sentiment != "NEUTRAL" {
+		t.Errorf("Expected Sentiment NEUTRAL for rejected conflict response, got %s", res.Sentiment)
+	}
+}
+
+func TestAIAuditor_NormalizesConfirmWatchOnlyToWait(t *testing.T) {
+	mockResponse := &dto.AIAuditResponse{
+		Decision:         "CONFIRM",
+		Confidence:       "HIGH",
+		CandleNarrative:  "REJECTION",
+		Last5CandlesBias: "BULLISH",
+		HasRejection:     false,
+		HasConfirmation:  true,
+		EntryTiming:      "FRESH",
+		ConflictWithBot:  false,
+		SuggestedAction:  "WATCH_ONLY",
+		PlanFeedback:     "Wait for confirmation candle after sweep.",
+		Reason:           "Sweep is valid but confirmation is incomplete.",
+		Risk:             "Early reversal risk remains high.",
+	}
+
+	mockService := &mockAIAuditorService{response: mockResponse}
+	storage := NewStorageUsecase(&mockStorageRepository{})
+	auditor := NewAIAuditorUsecase(mockService, storage)
+
+	quant := QuantResult{
+		Symbol:    "SOXLUSDT",
+		Direction: LONG,
+		Playbook:  LIQUIDITY_SWEEP_REVERSAL,
+		Score:     8.2,
+	}
+
+	res, err := auditor.Audit(context.Background(), quant, MarketPolicy{Reason: "Normal"}, []dto.Candle{{Vol: 100}}, nil, nil)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if res.Decision != "WAIT" {
+		t.Fatalf("expected Decision WAIT after normalization, got %s", res.Decision)
+	}
+	if res.SuggestedAction != "WATCH_ONLY" {
+		t.Fatalf("expected SuggestedAction WATCH_ONLY to remain intact, got %s", res.SuggestedAction)
+	}
+	if res.IsApproved {
+		t.Fatalf("expected IsApproved=false after normalization")
+	}
+	if res.Sentiment != "NEUTRAL" {
+		t.Fatalf("expected neutral sentiment for non-executable watch response, got %s", res.Sentiment)
+	}
 }
 
 func TestAIAuditor_UsesStructuredH1ContextInPayload(t *testing.T) {

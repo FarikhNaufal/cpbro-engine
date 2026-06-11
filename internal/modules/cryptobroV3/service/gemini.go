@@ -225,6 +225,7 @@ Schema:
 Consistency rules (must hold):
 - If decision=REJECT => suggested_action=REJECT
 - If decision=WAIT => suggested_action is WAIT_RETEST or WATCH_ONLY
+- If suggested_action=WAIT_RETEST or WATCH_ONLY => decision=WAIT
 - suggested_action=EXECUTE_IF_NOT_STALE ONLY IF ALL true:
   - decision=CONFIRM, confidence=HIGH, conflict_with_bot=false
   - entry_timing is FRESH or ACCEPTABLE

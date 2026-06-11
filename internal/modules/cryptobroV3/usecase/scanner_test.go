@@ -760,9 +760,53 @@ func TestScannerUsecase_Run_AIWait_And_AIReject(t *testing.T) {
 		}
 	})
 
+	t.Run("Scanner CONFIRM plus WATCH_ONLY is normalized into FINAL_WATCH", func(t *testing.T) {
+		mockAI.response.Decision = "CONFIRM"
+		mockAI.response.Confidence = "HIGH"
+		mockAI.response.IsApproved = true
+		mockAI.response.HasRejection = false
+		mockAI.response.HasConfirmation = true
+		mockAI.response.SuggestedAction = "WATCH_ONLY"
+		mockAI.response.EntryTiming = "FRESH"
+		mockAI.response.Reason = "Wait for a follow-up candle to confirm the reversal."
+		mockAI.response.Risk = "Reversal confirmation is incomplete."
+		mockAI.response.CandleNarrative = "REJECTION"
+		mockStorage.auditCache = nil
+		mockStorage.watchJournal = nil
+		mockStorage.latestResult = nil
+
+		ctx := context.Background()
+		_, err := uc.Run(ctx, dto.ScanRequest{TriggerTime: time.Now()})
+		if err != nil {
+			t.Fatalf("scanner run failed: %v", err)
+		}
+
+		latest, err := storageUC.LoadLatestResult()
+		if err != nil {
+			t.Fatalf("failed to load latest result: %v", err)
+		}
+
+		if latest.TotalAIWait != 1 {
+			t.Fatalf("expected normalized AI wait count = 1, got %d", latest.TotalAIWait)
+		}
+		if latest.TotalFinalWatch != 1 {
+			t.Fatalf("expected TotalFinalWatch = 1 after WATCH_ONLY normalization, got %d", latest.TotalFinalWatch)
+		}
+		if latest.TotalFinalReject != 0 {
+			t.Fatalf("expected TotalFinalReject = 0 after WATCH_ONLY normalization, got %d", latest.TotalFinalReject)
+		}
+		if len(latest.Watchlist) != 1 {
+			t.Fatalf("expected one watchlist entry, got %d", len(latest.Watchlist))
+		}
+		if !strings.Contains(latest.Watchlist[0].Reason, "Reversal playbook lacks rejection or confirmation") {
+			t.Fatalf("expected watch reason to preserve need-retest context, got %q", latest.Watchlist[0].Reason)
+		}
+	})
+
 	t.Run("Scanner AI_REJECT becomes FINAL_REJECT and does not appear in watchlist", func(t *testing.T) {
 		// Set AI decision to REJECT
 		mockAI.response.Decision = "REJECT"
+		mockAI.response.SuggestedAction = "REJECT"
 		mockAI.response.CandleNarrative = "Overextended trend."
 		mockAI.response.EntryTiming = "REJECT"
 		mockStorage.auditCache = nil
