@@ -181,9 +181,13 @@ func validateAndClampPolicy(name string, policy MarketPolicy) MarketPolicy {
 	// Hot symbol config validation & defaults
 	if policy.HotMaxBoost <= 0 {
 		policy.HotMaxBoost = 1.25
+	} else if policy.HotMaxBoost < 1.0 {
+		policy.HotMaxBoost = 1.0
 	}
 	if policy.HotPrefetchSlotRatio <= 0 {
 		policy.HotPrefetchSlotRatio = 0.25
+	} else if policy.HotPrefetchSlotRatio > 1.0 {
+		policy.HotPrefetchSlotRatio = 1.0
 	}
 
 	// Specific checks for chaos mode to ensure safety
@@ -358,6 +362,8 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			StalenessATRMultiplier: 0.5,
 			CooldownMinutes:        15,
 			Reason:                 "BTC_CHAOS active - strict restrictions applied",
+			HotMaxBoost:            1.10,
+			HotPrefetchSlotRatio:   0.15,
 		},
 		"BTC_DOMINANCE": {
 			Regime:                 BTC_DOMINANCE,
@@ -384,6 +390,8 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			StalenessATRMultiplier: 1.5,
 			CooldownMinutes:        15,
 			Reason:                 "BTC_DOMINANCE active - altcoins restricted",
+			HotMaxBoost:            1.20,
+			HotPrefetchSlotRatio:   0.20,
 		},
 		"ALT_SUPPORTIVE": {
 			Regime:                 ALT_SUPPORTIVE,
@@ -410,6 +418,8 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			StalenessATRMultiplier: 1.5,
 			CooldownMinutes:        15,
 			Reason:                 "ALT_SUPPORTIVE + BTC Bullish active - favorable conditions",
+			HotMaxBoost:            1.35,
+			HotPrefetchSlotRatio:   0.30,
 		},
 		"RISK_OFF": {
 			Regime:                 RISK_OFF,
@@ -436,6 +446,8 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			StalenessATRMultiplier: 1.5,
 			CooldownMinutes:        15,
 			Reason:                 "RISK_OFF + BTC Bearish active - short bias",
+			HotMaxBoost:            1.15,
+			HotPrefetchSlotRatio:   0.20,
 		},
 		"CHOP_RANGE": {
 			Regime:                 CHOP_RANGE,
@@ -460,6 +472,8 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			StalenessATRMultiplier: 1.5,
 			CooldownMinutes:        15,
 			Reason:                 "CHOP_RANGE active - mean reversion only",
+			HotMaxBoost:            1.20,
+			HotPrefetchSlotRatio:   0.25,
 		},
 		"COMPRESSION": {
 			Regime:                 COMPRESSION,
@@ -484,6 +498,8 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			StalenessATRMultiplier: 1.5,
 			CooldownMinutes:        15,
 			Reason:                 "COMPRESSION active - awaiting breakout retest confirmation",
+			HotMaxBoost:            1.25,
+			HotPrefetchSlotRatio:   0.25,
 		},
 	}
 }

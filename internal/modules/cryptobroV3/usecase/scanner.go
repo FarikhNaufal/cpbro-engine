@@ -341,7 +341,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		// 3. Take the top hot candidates
 		var takenHot []UniverseCandidate
 		if rSlots > 0 {
-			takenHot = hotCandidates[:rSlots]
+			takenHot = make([]UniverseCandidate, rSlots)
+			copy(takenHot, hotCandidates[:rSlots])
 			for i := range takenHot {
 				takenHot[i].HotOverlaySelected = true
 			}
@@ -457,14 +458,22 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		Direction    string
 		Reason       string
 	}
+	type quantFailure struct {
+		Symbol       string
+		StrategyName string
+		Direction    string
+		Reason       string
+	}
 	type candidatePipelineResult struct {
 		policyRejectReason  string
 		strategySelected    int
 		playbookEligible    int
 		eligibilityFailures []eligibilityFailure
+		quantFailures       []quantFailure
 		quantResults        []QuantResult
 	}
 	var eligibilityFailures []eligibilityFailure
+	var quantFailures []quantFailure
 
 	tickerLastPrice := make(map[string]float64, len(tickers))
 	for _, t := range tickers {
@@ -578,6 +587,16 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				quantResult.Tier = candidate.Tier
 				quantResult.RawKlines = fullData.M15Candles
 
+				if !isArbiterReadyQuantResult(quantResult) {
+					result.quantFailures = append(result.quantFailures, quantFailure{
+						Symbol:       pair,
+						StrategyName: string(playbook),
+						Direction:    string(sel.Direction),
+						Reason:       quantFailureReason(quantResult),
+					})
+					continue
+				}
+
 				reconciliationDir := uc.conflictResolverUsecase.Resolve(quantResult.Direction, "NEUTRAL")
 				_ = uc.scoringUsecase.Calculate(&quantResult, reconciliationDir, policy)
 
@@ -604,6 +623,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		totalStrategySelected += result.strategySelected
 		totalPlaybookEligible += result.playbookEligible
 		eligibilityFailures = append(eligibilityFailures, result.eligibilityFailures...)
+		quantFailures = append(quantFailures, result.quantFailures...)
 		allCandidates = append(allCandidates, result.quantResults...)
 	}
 
@@ -648,6 +668,44 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		switch key.StrategyName {
 		case string(TREND_PULLBACK), string(LIQUIDITY_SWEEP_REVERSAL), string(COMPRESSION_BREAKOUT_RETEST), string(RANGE_EDGE_REVERSAL), string(CROWDED_POSITIONING_SQUEEZE):
 			playbookBlockers.Add(Playbook(key.StrategyName), funnelStageEligibilityReject, key.Reason)
+		}
+	}
+
+	quantRejectGroups := make(map[rejectKey][]string)
+	var quantRejectKeys []rejectKey
+	for _, f := range quantFailures {
+		key := rejectKey{Symbol: f.Symbol, StrategyName: f.StrategyName, Reason: f.Reason}
+		if _, ok := quantRejectGroups[key]; !ok {
+			quantRejectKeys = append(quantRejectKeys, key)
+		}
+		quantRejectGroups[key] = append(quantRejectGroups[key], f.Direction)
+	}
+
+	for _, key := range quantRejectKeys {
+		dirs := quantRejectGroups[key]
+		var dirStr string
+		isLong := false
+		isShort := false
+		for _, d := range dirs {
+			if d == "LONG" {
+				isLong = true
+			} else if d == "SHORT" {
+				isShort = true
+			}
+		}
+		if isLong && isShort {
+			dirStr = "LONG/SHORT"
+		} else if isLong {
+			dirStr = "LONG"
+		} else if isShort {
+			dirStr = "SHORT"
+		}
+
+		policyRejectedSummary = append(policyRejectedSummary, fmt.Sprintf("%s (%s %s): %s", key.Symbol, key.StrategyName, dirStr, key.Reason))
+		funnelSummary.Add(funnelStageQuantReject, key.Reason)
+		switch key.StrategyName {
+		case string(TREND_PULLBACK), string(LIQUIDITY_SWEEP_REVERSAL), string(COMPRESSION_BREAKOUT_RETEST), string(RANGE_EDGE_REVERSAL), string(CROWDED_POSITIONING_SQUEEZE):
+			playbookBlockers.Add(Playbook(key.StrategyName), funnelStageQuantReject, key.Reason)
 		}
 	}
 

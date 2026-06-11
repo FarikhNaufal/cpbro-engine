@@ -12,6 +12,7 @@ const (
 	funnelStageUniverseReject    = "universe_reject"
 	funnelStagePipelineDrop      = "pipeline_drop"
 	funnelStageEligibilityReject = "eligibility_reject"
+	funnelStageQuantReject       = "quant_reject"
 	funnelStageArbiterReject     = "arbiter_reject"
 	funnelStageLocalWatch        = "local_watch"
 	funnelStageLocalReject       = "local_reject"
@@ -26,6 +27,7 @@ var funnelStageOrder = []string{
 	funnelStageUniverseReject,
 	funnelStagePipelineDrop,
 	funnelStageEligibilityReject,
+	funnelStageQuantReject,
 	funnelStageArbiterReject,
 	funnelStageLocalWatch,
 	funnelStageLocalReject,
@@ -182,6 +184,8 @@ func normalizeFunnelReason(stage string, raw string) string {
 		return normalizePipelineDropReason(reason)
 	case funnelStageEligibilityReject:
 		return normalizeEligibilityReason(reason)
+	case funnelStageQuantReject:
+		return normalizeQuantReason(reason)
 	case funnelStageArbiterReject:
 		return normalizeArbiterReason(reason)
 	case funnelStageLocalWatch, funnelStageLocalReject:
@@ -190,6 +194,41 @@ func normalizeFunnelReason(stage string, raw string) string {
 		return normalizeAIReason(reason)
 	case funnelStageFinalWatch, funnelStageFinalReject:
 		return normalizeFinalGateReason(reason)
+	default:
+		return reason
+	}
+}
+
+func normalizeQuantReason(reason string) string {
+	switch {
+	case strings.Contains(reason, "Liquidity sweep lacks volume spike confirmation"):
+		return "Liquidity sweep lacks volume spike confirmation"
+	case strings.Contains(reason, "No sweep low confirmation detected"):
+		return "No sweep low confirmation detected"
+	case strings.Contains(reason, "No sweep high confirmation detected"):
+		return "No sweep high confirmation detected"
+	case strings.Contains(reason, "Insufficient candles for sweep high/low calculations"):
+		return "Insufficient candles for sweep high/low calculations"
+	case strings.Contains(reason, "Insufficient candles for range calculation"):
+		return "Insufficient candles for range calculation"
+	case strings.Contains(reason, "SHORT direction rejected by short path policy validation"):
+		return "SHORT direction rejected by short path policy validation"
+	case strings.Contains(reason, "SHORT direction rejected by BTC bullish safety helper rules"):
+		return "SHORT direction rejected by BTC bullish safety helper rules"
+	case strings.Contains(reason, "Invalid TradePlan SL or TP values generated"):
+		return "Invalid TradePlan SL or TP values generated"
+	case strings.Contains(reason, "TradePlan SL must be below trigger price for LONG setups"):
+		return "TradePlan SL must be below trigger price for LONG setups"
+	case strings.Contains(reason, "TradePlan TP must be above trigger price for LONG setups"):
+		return "TradePlan TP must be above trigger price for LONG setups"
+	case strings.Contains(reason, "TradePlan SL must be above trigger price for SHORT setups"):
+		return "TradePlan SL must be above trigger price for SHORT setups"
+	case strings.Contains(reason, "TradePlan TP must be below trigger price for SHORT setups"):
+		return "TradePlan TP must be below trigger price for SHORT setups"
+	case strings.Contains(reason, "Invalid direction returned by quant engine"):
+		return "Invalid direction returned by quant engine"
+	case strings.Contains(reason, "Quant engine rejected candidate"):
+		return "Quant engine rejected candidate"
 	default:
 		return reason
 	}

@@ -45,6 +45,30 @@ func TestNormalizeFinalGateReason_CanonicalizesDynamicText(t *testing.T) {
 	}
 }
 
+func TestNormalizeQuantReason_CanonicalizesQuantFailures(t *testing.T) {
+	got := normalizeFunnelReason(funnelStageQuantReject, "Liquidity sweep lacks volume spike confirmation on latest candle")
+	if got != "Liquidity sweep lacks volume spike confirmation" {
+		t.Fatalf("unexpected normalization: %s", got)
+	}
+}
+
+func TestFunnelSummaryAccumulator_PlacesQuantRejectBeforeArbiterReject(t *testing.T) {
+	acc := newFunnelSummaryAccumulator()
+	acc.Add(funnelStageArbiterReject, "Invalid direction in quant result")
+	acc.Add(funnelStageQuantReject, "Liquidity sweep lacks volume spike confirmation")
+
+	got := acc.Build()
+	if len(got) != 2 {
+		t.Fatalf("expected 2 stages, got %d", len(got))
+	}
+	if got[0].Stage != funnelStageQuantReject {
+		t.Fatalf("expected first stage %s, got %s", funnelStageQuantReject, got[0].Stage)
+	}
+	if got[1].Stage != funnelStageArbiterReject {
+		t.Fatalf("expected second stage %s, got %s", funnelStageArbiterReject, got[1].Stage)
+	}
+}
+
 func TestBuildTopFunnelBlockersAndLogSummary(t *testing.T) {
 	stages := []entity.FunnelStageSummary{
 		{
