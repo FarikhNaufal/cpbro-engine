@@ -305,3 +305,43 @@ func TestFilterUniverse_ScoreWeightedBoost(t *testing.T) {
 		t.Errorf("Expected 1000BONKUSDT sorted second (composite: 52.5M), got %s", candidates[1].Symbol)
 	}
 }
+
+func TestFilterUniverse_LiquidActivityRankingPrefersActiveHotButKeepsLiquidityDiscipline(t *testing.T) {
+	uc := NewUniverseUsecase()
+
+	policy := MarketPolicy{
+		Regime:          DEFAULT,
+		AllowedTiers:    []Tier{TierA, TierB, TierC},
+		MaxSymbols:      10,
+		MinVolume:       1000000.0,
+		MaxFundingAbs:   0.01,
+		MaxPriceMove24h: 0.20,
+		HotMaxBoost:     1.25,
+	}
+
+	tickers := []dto.Ticker24h{
+		{Symbol: "MEGACAPUSDT", QuoteVolume: 120000000.0, PriceChangePercent: 1.0},
+		{Symbol: "HOTACTIVEUSDT", QuoteVolume: 70000000.0, PriceChangePercent: 10.0},
+		{Symbol: "THINHOTUSDT", QuoteVolume: 20000000.0, PriceChangePercent: 10.0},
+	}
+
+	hotSymbols := map[string]HotSymbol{
+		"HOTACTIVE": {Symbol: "HOTACTIVE", Score: 80, Source: "Trending", RankType: 10},
+		"THINHOT":   {Symbol: "THINHOT", Score: 100, Source: "Top Search", RankType: 11},
+	}
+
+	candidates, _ := uc.FilterUniverse(tickers, nil, policy, hotSymbols)
+	if len(candidates) != 3 {
+		t.Fatalf("expected 3 candidates, got %d", len(candidates))
+	}
+
+	if candidates[0].Symbol != "HOTACTIVEUSDT" {
+		t.Fatalf("expected HOTACTIVEUSDT to outrank static megacap due to liquid activity score, got %s", candidates[0].Symbol)
+	}
+	if candidates[2].Symbol != "THINHOTUSDT" {
+		t.Fatalf("expected THINHOTUSDT to remain behind liquid names despite being hot, got order %+v", candidates)
+	}
+	if candidates[0].CompositeScore <= candidates[1].CompositeScore {
+		t.Fatalf("expected active hot candidate composite score to exceed MEGACAPUSDT")
+	}
+}

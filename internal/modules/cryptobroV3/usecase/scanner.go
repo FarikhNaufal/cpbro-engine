@@ -314,81 +314,25 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	prefetchLimit = requestGuard.PrefetchLimit
 	concurrencyLimit = requestGuard.MarketDataConcurrency
 	if prefetchLimit > 0 && prefetchLimit < len(candidates) {
-		// 1. Separate candidates into hot and core
-		var hotCandidates []UniverseCandidate
-		var coreCandidates []UniverseCandidate
+		selected, deferred, selectionDebug := selectPrefetchCandidates(candidates, prefetchLimit, policy)
+		var debugCand, debugHot, debugRotation, debugSel []string
+		for _, c := range candidates {
+			debugCand = append(debugCand, fmt.Sprintf("%s(IsHot:%v,Act:%0.2f,Liq:%0.2f,Comp:%0.2f)", c.Symbol, c.IsHot, c.ActivityScore, c.LiquidityScore, c.CompositeScore))
+		}
 		for _, c := range candidates {
 			if c.IsHot {
-				hotCandidates = append(hotCandidates, c)
-			} else {
-				coreCandidates = append(coreCandidates, c)
+				debugHot = append(debugHot, c.Symbol)
 			}
-		}
-
-		// 2. Reserve slots for hot symbols based on policy HotPrefetchSlotRatio
-		ratio := policy.HotPrefetchSlotRatio
-		if ratio <= 0 {
-			ratio = 0.25
-		}
-		rSlots := int(math.Round(float64(prefetchLimit) * ratio))
-		if rSlots < 1 && len(hotCandidates) > 0 && prefetchLimit >= 3 {
-			rSlots = 1
-		}
-		if rSlots > len(hotCandidates) {
-			rSlots = len(hotCandidates)
-		}
-
-		// 3. Take the top hot candidates
-		var takenHot []UniverseCandidate
-		if rSlots > 0 {
-			takenHot = make([]UniverseCandidate, rSlots)
-			copy(takenHot, hotCandidates[:rSlots])
-			for i := range takenHot {
-				takenHot[i].HotOverlaySelected = true
+			if !c.IsHot && c.ActivityScore >= resolveRotationActivityThreshold(policy) {
+				debugRotation = append(debugRotation, c.Symbol)
 			}
-		}
-
-		// 4. Fill the remaining slots with core candidates
-		neededCore := prefetchLimit - len(takenHot)
-		var takenCore []UniverseCandidate
-		if neededCore > len(coreCandidates) {
-			takenCore = coreCandidates
-		} else if neededCore > 0 {
-			takenCore = coreCandidates[:neededCore]
-		}
-
-		// Combine
-		selected := append(takenHot, takenCore...)
-		var debugCand, debugHot, debugCore, debugSel []string
-		for _, c := range candidates {
-			debugCand = append(debugCand, fmt.Sprintf("%s(IsHot:%v)", c.Symbol, c.IsHot))
-		}
-		for _, c := range hotCandidates {
-			debugHot = append(debugHot, c.Symbol)
-		}
-		for _, c := range coreCandidates {
-			debugCore = append(debugCore, c.Symbol)
 		}
 		for _, c := range selected {
 			debugSel = append(debugSel, c.Symbol)
 		}
-		slog.Info("PREFETCH DEBUG", "limit", prefetchLimit, "rSlots", rSlots, "candidates", debugCand, "hot", debugHot, "core", debugCore, "selected", debugSel)
+		slog.Info("PREFETCH DEBUG", "limit", prefetchLimit, "hot_slots", selectionDebug.HotSlots, "rotation_slots", selectionDebug.RotationSlots, "candidates", debugCand, "hot_pool", debugHot, "rotation_pool", debugRotation, "selected", debugSel)
 
-		// If we still have slots left, add remaining hot candidates
-		if len(selected) < prefetchLimit && len(hotCandidates) > rSlots {
-			remHot := hotCandidates[rSlots:]
-			neededRem := prefetchLimit - len(selected)
-			if neededRem > len(remHot) {
-				selected = append(selected, remHot...)
-			} else {
-				selected = append(selected, remHot[:neededRem]...)
-			}
-		}
-
-		// Make a map of selected symbols
-		selectedMap := make(map[string]bool)
 		for _, s := range selected {
-			selectedMap[s.Symbol] = true
 			if s.HotOverlaySelected {
 				info := candidateMap[s.Symbol]
 				info.HotOverlaySelected = true
@@ -397,11 +341,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		}
 
 		// Handle deferred candidates
-		for _, deferred := range candidates {
-			if !selectedMap[deferred.Symbol] {
-				prefetchDeferredSummary = append(prefetchDeferredSummary, fmt.Sprintf("%s: deferred by market data prefetch limit", deferred.Symbol))
-				funnelSummary.Add(funnelStagePipelineDrop, "deferred by market data prefetch limit")
-			}
+		for _, deferredCandidate := range deferred {
+			prefetchDeferredSummary = append(prefetchDeferredSummary, fmt.Sprintf("%s: deferred by market data prefetch limit", deferredCandidate.Symbol))
+			funnelSummary.Add(funnelStagePipelineDrop, "deferred by market data prefetch limit")
 		}
 		prefetchCandidates = selected
 	} else {

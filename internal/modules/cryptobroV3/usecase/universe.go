@@ -38,9 +38,12 @@ func (uc *UniverseUsecase) FilterUniverse(
 ) ([]UniverseCandidate, []UniverseRejected) {
 	var candidates []UniverseCandidate
 	var rejected []UniverseRejected
+	volumeMap := make(map[string]float64, len(tickers))
+	liquidityCeiling := 0.0
 
 	for _, t := range tickers {
 		sym := t.Symbol
+		volumeMap[sym] = t.QuoteVolume
 
 		// 1. Only USDT pairs
 		if !strings.HasSuffix(sym, "USDT") {
@@ -148,8 +151,9 @@ func (uc *UniverseUsecase) FilterUniverse(
 			hotSource = h.Source
 			hotRankType = h.RankType
 		}
+		activityScore := normalizeUniverseActivityScore(t.PriceChangePercent, thresholds)
 
-		candidates = append(candidates, UniverseCandidate{
+		candidate := UniverseCandidate{
 			Symbol:             sym,
 			Tier:               tier,
 			Status:             UNIVERSE_PASS,
@@ -159,40 +163,32 @@ func (uc *UniverseUsecase) FilterUniverse(
 			HotSource:          hotSource,
 			HotRankType:        hotRankType,
 			HotOverlaySelected: false,
-		})
-	}
-
-	// 9. Sort candidates by composite score (volume + hot boost) descending
-	volumeMap := make(map[string]float64)
-	for _, t := range tickers {
-		volumeMap[t.Symbol] = t.QuoteVolume
-	}
-
-	maxBoost := policy.HotMaxBoost
-	if maxBoost <= 0 {
-		maxBoost = 1.25
-	}
-
-	compositeScoreMap := make(map[string]float64)
-	for _, c := range candidates {
-		volume := volumeMap[c.Symbol]
-		if c.IsHot {
-			scoreFactor := c.HotScore / 100.0
-			if scoreFactor > 1.0 {
-				scoreFactor = 1.0
-			}
-			if scoreFactor < 0.0 {
-				scoreFactor = 0.0
-			}
-			boost := 1.0 + (maxBoost - 1.0)*scoreFactor
-			compositeScoreMap[c.Symbol] = volume * boost
-		} else {
-			compositeScoreMap[c.Symbol] = volume
+			ActivityScore:      activityScore,
+		}
+		candidates = append(candidates, candidate)
+		if t.QuoteVolume > liquidityCeiling {
+			liquidityCeiling = t.QuoteVolume
 		}
 	}
 
+	// 9. Rank candidates by liquidity-first composite score.
+	if liquidityCeiling <= 0 {
+		liquidityCeiling = policy.MinVolume
+	}
+	for i := range candidates {
+		volume := volumeMap[candidates[i].Symbol]
+		candidates[i].LiquidityScore = normalizeUniverseLiquidityScore(volume, policy.MinVolume, liquidityCeiling)
+		candidates[i].CompositeScore = calculateUniverseCompositeScore(policy, candidates[i])
+	}
+
 	sort.Slice(candidates, func(i, j int) bool {
-		return compositeScoreMap[candidates[i].Symbol] > compositeScoreMap[candidates[j].Symbol]
+		if math.Abs(candidates[i].CompositeScore-candidates[j].CompositeScore) > 0.0001 {
+			return candidates[i].CompositeScore > candidates[j].CompositeScore
+		}
+		if math.Abs(candidates[i].LiquidityScore-candidates[j].LiquidityScore) > 0.0001 {
+			return candidates[i].LiquidityScore > candidates[j].LiquidityScore
+		}
+		return volumeMap[candidates[i].Symbol] > volumeMap[candidates[j].Symbol]
 	})
 
 	// 10. Limit candidates to policy.MaxSymbols
@@ -213,6 +209,89 @@ func (uc *UniverseUsecase) FilterUniverse(
 	}
 
 	return candidates, rejected
+}
+
+func normalizeUniverseLiquidityScore(volume, floor, ceiling float64) float64 {
+	if volume <= 0 {
+		return 0
+	}
+	if floor <= 0 {
+		floor = 1000000.0
+	}
+	if ceiling <= floor {
+		return 1
+	}
+	logVolume := math.Log10(math.Max(volume, floor))
+	logFloor := math.Log10(floor)
+	logCeiling := math.Log10(ceiling)
+	if logCeiling <= logFloor {
+		return 1
+	}
+	return clampUniverseUnit((logVolume - logFloor) / (logCeiling - logFloor))
+}
+
+func normalizeUniverseActivityScore(priceChangePercent float64, thresholds UniverseThresholds) float64 {
+	maxMove := thresholds.MaxPriceMove24h
+	if maxMove <= 0 {
+		return 0
+	}
+	activity := math.Abs(priceChangePercent/100.0) / maxMove
+	return clampUniverseUnit(activity)
+}
+
+func calculateUniverseCompositeScore(policy MarketPolicy, candidate UniverseCandidate) float64 {
+	liquidityWeight, activityWeight, hotWeight := getUniverseRankingWeights(policy)
+	liquidityGatedActivity := candidate.ActivityScore * candidate.LiquidityScore
+	hotScore := 0.0
+	if candidate.IsHot {
+		hotScore = clampUniverseUnit(candidate.HotScore/100.0) * clampUniverseHotBoost(policy.HotMaxBoost) * candidate.LiquidityScore
+	}
+
+	return (candidate.LiquidityScore * liquidityWeight) +
+		(liquidityGatedActivity * activityWeight) +
+		(hotScore * hotWeight)
+}
+
+func getUniverseRankingWeights(policy MarketPolicy) (liquidity float64, activity float64, hot float64) {
+	switch policy.EffectiveRegime() {
+	case ALT_SUPPORTIVE:
+		return 0.55, 0.25, 0.20
+	case COMPRESSION:
+		return 0.60, 0.25, 0.15
+	case RISK_OFF:
+		return 0.75, 0.15, 0.10
+	case BTC_CHAOS, HIGH_VOL:
+		return 0.80, 0.15, 0.05
+	case LOW_VOL, CHOP_RANGE:
+		return 0.70, 0.15, 0.15
+	case BTC_DOMINANCE:
+		return 0.72, 0.13, 0.15
+	default:
+		return 0.65, 0.20, 0.15
+	}
+}
+
+func clampUniverseHotBoost(boost float64) float64 {
+	if boost <= 0 {
+		boost = 1.25
+	}
+	if boost < 1.0 {
+		boost = 1.0
+	}
+	if boost > 1.5 {
+		boost = 1.5
+	}
+	return boost
+}
+
+func clampUniverseUnit(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
 }
 
 func classifyUniverseTier(quoteVolume float64) Tier {

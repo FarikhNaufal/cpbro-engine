@@ -190,15 +190,18 @@ func (p MarketPolicy) EffectiveRegime() MarketRegime {
 }
 
 type UniverseCandidate struct {
-	Symbol             string `json:"symbol"`
-	Tier               Tier   `json:"tier"`
-	Status             Status `json:"status"`
-	Notes              string `json:"notes"`
-	IsHot              bool   `json:"is_hot"`
+	Symbol             string  `json:"symbol"`
+	Tier               Tier    `json:"tier"`
+	Status             Status  `json:"status"`
+	Notes              string  `json:"notes"`
+	IsHot              bool    `json:"is_hot"`
 	HotScore           float64 `json:"hot_score"`
-	HotSource          string `json:"hot_source"`
-	HotRankType        int    `json:"hot_rank_type"`
-	HotOverlaySelected bool   `json:"hot_overlay_selected"`
+	HotSource          string  `json:"hot_source"`
+	HotRankType        int     `json:"hot_rank_type"`
+	HotOverlaySelected bool    `json:"hot_overlay_selected"`
+	LiquidityScore     float64 `json:"liquidity_score,omitempty"`
+	ActivityScore      float64 `json:"activity_score,omitempty"`
+	CompositeScore     float64 `json:"composite_score,omitempty"`
 }
 
 type UniverseRejected struct {
@@ -411,12 +414,12 @@ type SignalJournal struct {
 	TimeToSL                string    `json:"time_to_sl"`
 	OutcomeReason           string    `json:"outcome_reason"`
 	EntryTiming             string    `json:"entry_timing"`
-	Tier               Tier      `json:"tier"`
-	IsHot              bool      `json:"is_hot,omitempty"`
-	HotScore           float64   `json:"hot_score,omitempty"`
-	HotSource          string    `json:"hot_source,omitempty"`
-	HotRankType        int       `json:"hot_rank_type,omitempty"`
-	HotOverlaySelected bool      `json:"hot_overlay_selected,omitempty"`
+	Tier                    Tier      `json:"tier"`
+	IsHot                   bool      `json:"is_hot,omitempty"`
+	HotScore                float64   `json:"hot_score,omitempty"`
+	HotSource               string    `json:"hot_source,omitempty"`
+	HotRankType             int       `json:"hot_rank_type,omitempty"`
+	HotOverlaySelected      bool      `json:"hot_overlay_selected,omitempty"`
 
 	// Keep existing fields for backward compatibility
 	Timeframe          string    `json:"timeframe,omitempty"`
