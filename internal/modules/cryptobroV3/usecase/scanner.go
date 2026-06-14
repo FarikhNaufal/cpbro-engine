@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math"
 	"os"
 	"runtime"
 	"strconv"
@@ -115,6 +114,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 	// Load active signals (signal journal) and history signals for final gate evaluation
 	activeSignals, _ := uc.storageUsecase.LoadSignalJournal()
+	previousLatest, _ := uc.storageUsecase.LoadLatestResult()
 	var historySignals []dto.SignalResponse
 	if hist, err := uc.storageUsecase.LoadSignalHistory(); err == nil && hist != nil {
 		historySignals = hist.Signals
@@ -212,67 +212,51 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 	// Map tickers for quick access
 	tickerMap := make(map[string]dto.Ticker24h)
-	advancing := 0
 	totalTickers := 0
-	var btcTicker *dto.Ticker24h
 	var ethTicker *dto.Ticker24h
 
 	for i := range tickers {
 		t := tickers[i]
 		tickerMap[t.Symbol] = t
-		if t.PriceChangePercent > 0 {
-			advancing++
-		}
 		totalTickers++
-		if t.Symbol == "BTCUSDT" {
-			btcTicker = &tickers[i]
-		}
 		if t.Symbol == "ETHUSDT" {
 			ethTicker = &tickers[i]
 		}
 	}
 
-	breadth := 0.5
-	if totalTickers > 0 {
-		breadth = float64(advancing) / float64(totalTickers)
-	}
+	macroState := deriveMacroMarketState(tickers)
+	breadth := macroState.Breadth
 
 	ethBtcPerf := 0.0
-	if btcTicker != nil && ethTicker != nil {
+	if btcTicker, ok := tickerMap["BTCUSDT"]; ok && ethTicker != nil {
 		ethBtcPerf = (ethTicker.PriceChangePercent - btcTicker.PriceChangePercent) / 100.0
 	}
 
-	btcTrend := "SIDEWAYS"
-	btcScore := 50.0
-	btcChaos := 0.2
-	volatility := "NORMAL"
-
-	if btcTicker != nil {
-		if btcTicker.PriceChangePercent > 1.5 {
-			btcTrend = "BULLISH"
-		} else if btcTicker.PriceChangePercent < -1.5 {
-			btcTrend = "BEARISH"
-		}
-		btcScore = 50.0 + (btcTicker.PriceChangePercent * 5.0)
-		if btcScore > 100.0 {
-			btcScore = 100.0
-		} else if btcScore < 0.0 {
-			btcScore = 0.0
-		}
-
-		absChange := math.Abs(btcTicker.PriceChangePercent)
-		if absChange > 5.0 {
-			volatility = "HIGH"
-			btcChaos = 0.85
-		} else if absChange < 0.5 {
-			volatility = "LOW"
-			btcChaos = 0.1
-		}
-	}
-
 	// Evaluate global Policy
-	policy := uc.marketPolicyUsecase.EvaluatePolicy(ctx, btcTrend, btcScore, ethBtcPerf, btcChaos, volatility, breadth)
-	slog.Info("Market policy evaluated", "scan_id", scanID, "regime", policy.Regime, "long_mode", policy.LongMode, "short_mode", policy.ShortMode)
+	policy := uc.marketPolicyUsecase.EvaluatePolicy(ctx, macroState.BTCTrend, macroState.BTCScore, ethBtcPerf, macroState.BTCChaos, macroState.Volatility, breadth)
+	compressionMacroActive := isCompressionMacroActive(macroState)
+	compressionFallbackActive := shouldFallbackCompressionToLowVol(previousLatest, compressionMacroActive)
+	if compressionFallbackActive {
+		policy = normalizeLowVolPolicy(policy, macroState.BTCTrend, "LOW_VOL fallback active - prior compression scans produced zero eligible setups")
+	}
+	previousCompressionZeroStreak := 0
+	if previousLatest != nil {
+		previousCompressionZeroStreak = previousLatest.CompressionZeroEligibleStreak
+	}
+	slog.Info(
+		"Market policy evaluated",
+		"scan_id", scanID,
+		"regime", policy.Regime,
+		"long_mode", policy.LongMode,
+		"short_mode", policy.ShortMode,
+		"macro_volatility", macroState.Volatility,
+		"breadth", RoundToDecimalPlaces(macroState.Breadth, 4),
+		"median_abs_move_24h", RoundToDecimalPlaces(macroState.MedianAbsMove24h, 4),
+		"active_move_share", RoundToDecimalPlaces(macroState.ActiveMoveShare, 4),
+		"compression_macro_active", compressionMacroActive,
+		"compression_zero_streak_prev", previousCompressionZeroStreak,
+		"compression_low_vol_fallback", compressionFallbackActive,
+	)
 
 	// Filter dynamic universe candidates
 	slog.Info("Filtering dynamic universe candidates...", "scan_id", scanID, "total_tickers", len(tickers))
@@ -1202,7 +1186,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		StartTime:                       scanStart,
 		Duration:                        time.Since(scanStart).String(),
 		ActiveRegime:                    string(policy.Regime),
-		BtcTrend:                        btcTrend,
+		BtcTrend:                        macroState.BTCTrend,
 		TotalTickers:                    totalTickers,
 		TotalUniversePass:               universePassCount,
 		TotalUniverseRejected:           totalTickers - universePassCount,
@@ -1292,6 +1276,11 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		ScanID:                          scanID,
 		MarketPolicy:                    policy.Reason,
 		MarketRegime:                    string(policy.Regime),
+		MacroVolatility:                 macroState.Volatility,
+		MarketBreadth:                   macroState.Breadth,
+		MedianAbsMove24h:                macroState.MedianAbsMove24h,
+		ActiveMoveShare:                 macroState.ActiveMoveShare,
+		QuietMoveShare:                  macroState.QuietMoveShare,
 		TotalTickers:                    totalTickers,
 		TotalUniversePass:               universePassCount,
 		TotalUniverseRejected:           totalTickers - universePassCount,
@@ -1316,6 +1305,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		TopFunnelBlockers:               topFunnelBlockers,
 		PlaybookBlockerSummary:          playbookBlockerSummary,
 		EvaluationDataCompletenessHint:  "has_decision_audit: true",
+		CompressionZeroEligibleStreak:   nextCompressionZeroEligibleStreak(previousLatest, compressionMacroActive, totalPlaybookEligible),
+		CompressionLowVolFallbackActive: compressionFallbackActive,
 		ArbiterSelectedDetails:          arbiterDetails,
 
 		LastScanTime: scanStart,

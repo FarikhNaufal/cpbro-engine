@@ -123,15 +123,17 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 
 	// 2. COMPRESSION regime
 	if regime == COMPRESSION {
-		// Priority compression breakout retest. No reversal unless sweep/rejection is extremely strong.
-		if isPlaybookAllowed(COMPRESSION_BREAKOUT_RETEST) {
+		compressionEvidence := tech != nil && hasCompressionEvidence(tech.IndicatorValues)
+		// Prefer breakout retests only when the symbol itself is actually compressed.
+		// Otherwise fall back to low-volatility reversal playbooks so the regime does not deadlock the pipeline.
+		if compressionEvidence && isPlaybookAllowed(COMPRESSION_BREAKOUT_RETEST) {
 			if policy.AllowLong {
 				selections = append(selections, StrategySelection{
 					Symbol:        candidate.Symbol,
 					StrategyName:  string(COMPRESSION_BREAKOUT_RETEST),
 					Direction:     LONG,
 					Priority:      1,
-					Reason:        "LONG compression breakout retest prioritized during COMPRESSION",
+					Reason:        "LONG compression breakout retest prioritized during COMPRESSION with live contraction evidence",
 					PolicyContext: policyCtx,
 					Tier:          candidate.Tier,
 					Status:        STRATEGY_SELECTED,
@@ -143,11 +145,65 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 					StrategyName:  string(COMPRESSION_BREAKOUT_RETEST),
 					Direction:     SHORT,
 					Priority:      1,
-					Reason:        "SHORT compression breakout retest prioritized during COMPRESSION",
+					Reason:        "SHORT compression breakout retest prioritized during COMPRESSION with live contraction evidence",
 					PolicyContext: policyCtx,
 					Tier:          candidate.Tier,
 					Status:        STRATEGY_SELECTED,
 				})
+			}
+		}
+		if !compressionEvidence {
+			if policy.AllowLong {
+				if isPlaybookAllowed(LIQUIDITY_SWEEP_REVERSAL) {
+					selections = append(selections, StrategySelection{
+						Symbol:        candidate.Symbol,
+						StrategyName:  string(LIQUIDITY_SWEEP_REVERSAL),
+						Direction:     LONG,
+						Priority:      2,
+						Reason:        "LONG sweep reversal fallback allowed while macro regime is COMPRESSION but symbol lacks contraction evidence",
+						PolicyContext: policyCtx,
+						Tier:          candidate.Tier,
+						Status:        STRATEGY_SELECTED,
+					})
+				}
+				if isPlaybookAllowed(RANGE_EDGE_REVERSAL) {
+					selections = append(selections, StrategySelection{
+						Symbol:        candidate.Symbol,
+						StrategyName:  string(RANGE_EDGE_REVERSAL),
+						Direction:     LONG,
+						Priority:      3,
+						Reason:        "LONG range reversal fallback allowed while macro regime is COMPRESSION but symbol lacks contraction evidence",
+						PolicyContext: policyCtx,
+						Tier:          candidate.Tier,
+						Status:        STRATEGY_SELECTED,
+					})
+				}
+			}
+			if policy.AllowShort {
+				if isPlaybookAllowed(LIQUIDITY_SWEEP_REVERSAL) {
+					selections = append(selections, StrategySelection{
+						Symbol:        candidate.Symbol,
+						StrategyName:  string(LIQUIDITY_SWEEP_REVERSAL),
+						Direction:     SHORT,
+						Priority:      2,
+						Reason:        "SHORT sweep reversal fallback allowed while macro regime is COMPRESSION but symbol lacks contraction evidence",
+						PolicyContext: policyCtx,
+						Tier:          candidate.Tier,
+						Status:        STRATEGY_SELECTED,
+					})
+				}
+				if isPlaybookAllowed(RANGE_EDGE_REVERSAL) {
+					selections = append(selections, StrategySelection{
+						Symbol:        candidate.Symbol,
+						StrategyName:  string(RANGE_EDGE_REVERSAL),
+						Direction:     SHORT,
+						Priority:      3,
+						Reason:        "SHORT range reversal fallback allowed while macro regime is COMPRESSION but symbol lacks contraction evidence",
+						PolicyContext: policyCtx,
+						Tier:          candidate.Tier,
+						Status:        STRATEGY_SELECTED,
+					})
+				}
 			}
 		}
 		return finalizeSelections(selections)

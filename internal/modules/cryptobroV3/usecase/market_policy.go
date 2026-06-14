@@ -12,6 +12,35 @@ func NewMarketPolicyUsecase() *MarketPolicyUsecase {
 	return &MarketPolicyUsecase{}
 }
 
+func normalizeCompressionPolicy(policy MarketPolicy, btcTrend string) MarketPolicy {
+	policy.Regime = COMPRESSION
+	policy.BtcTrend = btcTrend
+	policy.LongMode = NORMAL
+	policy.ShortMode = NORMAL
+	policy.AllowedPlaybooks = []Playbook{COMPRESSION_BREAKOUT_RETEST, LIQUIDITY_SWEEP_REVERSAL, RANGE_EDGE_REVERSAL}
+	policy.RequireFreshEntry = true
+	policy.Reason = "COMPRESSION active - breakout preferred, reversal fallback enabled"
+	return policy
+}
+
+func normalizeLowVolPolicy(policy MarketPolicy, btcTrend string, reason string) MarketPolicy {
+	policy.Regime = LOW_VOL
+	policy.BtcTrend = btcTrend
+	policy.MaxSymbols = 40
+	policy.MaxAICandidates = 2
+	policy.MinVolume = 750000.0
+	policy.AllowedTiers = []Tier{TierA, TierB}
+	policy.RequireFreshEntry = true
+	policy.LongMode = REVERSAL_ONLY
+	policy.ShortMode = REVERSAL_ONLY
+	policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, RANGE_EDGE_REVERSAL}
+	policy.RequireAIConfidence = AIConfidenceHigh
+	policy.MaxPriceMove24hLong = 0.10
+	policy.MaxPriceMove24hShort = 0.10
+	policy.Reason = reason
+	return policy
+}
+
 // EvaluatePolicy generates operating constraints based on macro inputs.
 func (uc *MarketPolicyUsecase) EvaluatePolicy(
 	ctx context.Context,
@@ -170,8 +199,8 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 		policy.MaxAICandidates = 3
 		policy.MinScoreExecute = 7.4
 		policy.MinRRExecute = 1.7
-		policy.MaxFundingAbs = 0.005  // tighter funding check
-		policy.MaxPriceMove24h = 0.18 // allow liquid SHORT continuation while downstream gates restrict LONG reversal
+		policy.MaxFundingAbs = 0.005       // tighter funding check
+		policy.MaxPriceMove24h = 0.18      // allow liquid SHORT continuation while downstream gates restrict LONG reversal
 		policy.MaxPriceMove24hLong = 0.08  // block LONG on symbols dumping >8%
 		policy.MaxPriceMove24hShort = 0.18 // SHORT allowed on heavy dumps
 		policy.Reason = "RISK_OFF + BTC Bearish active - short bias"
@@ -201,43 +230,23 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 	}
 
 	// 6. Check COMPRESSION
-	if volatility == "LOW" && btcScore > 50.0 {
+	// Do not force the whole market into breakout-only behavior just because BTC is quiet.
+	// A low-volatility macro regime should look broadly balanced first; otherwise LOW_VOL reversal mode is safer.
+	if volatility == "LOW" && btcScore > 50.0 && isCompressionMacroContext(breadth) {
 		if reg != nil {
 			if compPolicy, foundComp := reg.GetMarketPolicy("COMPRESSION"); foundComp {
-				compPolicy.Regime = COMPRESSION
-				compPolicy.BtcTrend = btcTrend
-				compPolicy.Reason = "COMPRESSION active - awaiting breakout retest confirmation"
-				return compPolicy
+				return normalizeCompressionPolicy(compPolicy, btcTrend)
 			}
 		}
 		policy.Regime = COMPRESSION
-		policy.LongMode = BREAKOUT_RETEST_ONLY
-		policy.ShortMode = BREAKOUT_RETEST_ONLY
-		policy.AllowedPlaybooks = []Playbook{COMPRESSION_BREAKOUT_RETEST}
-		policy.RequireFreshEntry = true // require retest confirmation, do not entry first breakout candle
-		policy.MaxAICandidates = 3
 		policy.AllowedTiers = []Tier{TierA, TierB, TierC}
-		policy.Reason = "COMPRESSION active - awaiting breakout retest confirmation"
-		return policy
+		policy.MaxAICandidates = 3
+		return normalizeCompressionPolicy(policy, btcTrend)
 	}
 
 	// 7. Modifiers based on Volatility
 	if volatility == "LOW" {
-		policy.Regime = LOW_VOL
-		policy.MaxSymbols = 40
-		policy.MaxAICandidates = 2
-		policy.MinVolume = 750000.0 // slightly looser, but still avoids illiquid flood
-		policy.AllowedTiers = []Tier{TierA, TierB}
-		policy.RequireFreshEntry = true // avoid fake breakouts
-		// Low volatility tends to be mean-reverting unless a true compression breakout retest appears.
-		// Prefer reversal playbooks; do not force trend continuation in low-vol grind.
-		policy.LongMode = REVERSAL_ONLY
-		policy.ShortMode = REVERSAL_ONLY
-		policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, RANGE_EDGE_REVERSAL}
-		policy.RequireAIConfidence = AIConfidenceHigh
-		policy.MaxPriceMove24hLong = 0.10
-		policy.MaxPriceMove24hShort = 0.10
-		policy.Reason = "LOW_VOL active - reversal/watch mode"
+		policy = normalizeLowVolPolicy(policy, btcTrend, "LOW_VOL active - reversal/watch mode")
 	} else if volatility == "HIGH" {
 		policy.Regime = HIGH_VOL
 		policy.MinVolume = 10000000.0              // higher volume limit

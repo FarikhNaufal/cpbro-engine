@@ -367,8 +367,9 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 		}
 
 		// 3. Volume spike confirmation
-		volSpike := tech.IndicatorValues["volume_spike"]
-		if volSpike != 1.0 {
+		m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
+		minVolRatio := resolveConfiguredMinVolumeRatio(playbook, policy, sel.Tier)
+		if !hasVolumeConfirmation(tech, m15Closed, minVolRatio) {
 			return PlaybookEligibilityResult{
 				Playbook: playbook,
 				Eligible: false,
@@ -450,7 +451,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 		// 1. Contraction check
 		contraction := tech.IndicatorValues["contraction"]
 		bbWidth := tech.IndicatorValues["bb_width"]
-		if contraction != 1.0 && bbWidth > 0.10 {
+		if contraction != 1.0 && (bbWidth <= 0 || bbWidth > compressionMaxBBWidth) {
 			return PlaybookEligibilityResult{
 				Playbook: playbook,
 				Eligible: false,
@@ -530,18 +531,9 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 
 		// 4. Volume / OI expansion check
 		volExpand := false
-		if len(m15Closed) >= 20 {
-			lastVol := m15Closed[len(m15Closed)-1].Vol
-			sumVol := 0.0
-			for i := len(m15Closed) - 6; i < len(m15Closed)-1; i++ {
-				sumVol += m15Closed[i].Vol
-			}
-			avgVol := sumVol / 5.0
-			hasOIExpansion := GetIndicator(tech.IndicatorValues, IndicatorExtremeOI) == 1.0
-			if lastVol > avgVol || hasOIExpansion {
-				volExpand = true
-			}
-		}
+		minVolRatio := resolveConfiguredMinVolumeRatio(playbook, policy, sel.Tier)
+		hasOIExpansion := GetIndicator(tech.IndicatorValues, IndicatorExtremeOI) == 1.0 || GetIndicator(tech.IndicatorValues, IndicatorOIChange) > 0
+		volExpand = hasVolumeConfirmation(tech, m15Closed, minVolRatio) || hasOIExpansion
 		if !volExpand {
 			return PlaybookEligibilityResult{
 				Playbook: playbook,

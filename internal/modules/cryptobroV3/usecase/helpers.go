@@ -534,20 +534,25 @@ func populateSnapshotsFromClosedCandles(m15Closed []dto.Candle, h1Closed []dto.C
 			}
 		}
 
-		// Vol spike
-		if ConfirmLiquiditySweep(m15Closed, 20, 1.5) {
+		// Vol spike baseline
+		if hasVolumeConfirmation(tech, m15Closed, defaultSweepVolumeRatio) {
 			tech.IndicatorValues[IndicatorVolumeSpike] = 1.0
 		} else {
 			tech.IndicatorValues[IndicatorVolumeSpike] = -1.0
 		}
 
-		// Compression (Bollinger Band width proxy)
+		// Compression from real Bollinger bandwidth, not ATR proxy.
 		tech.IndicatorValues[IndicatorATR] = atrVal
-		if atrVal > 0 && atrVal < lastCandle.Close*0.008 {
-			tech.IndicatorValues[IndicatorContraction] = 1.0
-			tech.IndicatorValues[IndicatorBBWidth] = 0.05
-		} else {
-			tech.IndicatorValues[IndicatorBBWidth] = 0.12
+		tech.IndicatorValues[IndicatorContraction] = 0.0
+		if basis, upper, lower := CalculateBollingerBands(m15Closed, 20, 2.0); len(basis) > 0 {
+			lastIdx := len(m15Closed) - 1
+			if lastIdx >= 0 && lastIdx < len(basis) && basis[lastIdx] > 0 {
+				bbWidth := (upper[lastIdx] - lower[lastIdx]) / basis[lastIdx]
+				tech.IndicatorValues[IndicatorBBWidth] = bbWidth
+				if bbWidth <= compressionMaxBBWidth {
+					tech.IndicatorValues[IndicatorContraction] = 1.0
+				}
+			}
 		}
 
 		// Funding (OI is optional; do NOT dummy-true).

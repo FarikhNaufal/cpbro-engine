@@ -78,6 +78,11 @@ func NormalizeLatestResultForFrontend(res *entity.LatestResult) dto.LatestResult
 	out.ScanID = res.ScanID
 	out.MarketPolicy = res.MarketPolicy
 	out.MarketRegime = res.MarketRegime
+	out.MacroVolatility = res.MacroVolatility
+	out.MarketBreadth = res.MarketBreadth
+	out.MedianAbsMove24h = res.MedianAbsMove24h
+	out.ActiveMoveShare = res.ActiveMoveShare
+	out.QuietMoveShare = res.QuietMoveShare
 	out.TotalTickers = res.TotalTickers
 	out.TotalUniversePass = res.TotalUniversePass
 	out.TotalUniverseRejected = res.TotalUniverseRejected
@@ -179,6 +184,8 @@ func NormalizeLatestResultForFrontend(res *entity.LatestResult) dto.LatestResult
 	}
 
 	out.EvaluationDataCompletenessHint = res.EvaluationDataCompletenessHint
+	out.CompressionZeroEligibleStreak = res.CompressionZeroEligibleStreak
+	out.CompressionLowVolFallbackActive = res.CompressionLowVolFallbackActive
 
 	// Normalize ArbiterSelectedDetails
 	out.ArbiterSelectedDetails = make([]dto.ArbiterSelectedDetail, 0)
@@ -340,6 +347,23 @@ func NormalizeEvaluationForFrontend(report *EvaluationReport) dto.EvaluationResp
 			WinRate:      s.WinRate,
 		}
 	}
+	toDTOSetupDiagnosticStats := func(s SetupDiagnosticStats) dto.SetupDiagnosticStats {
+		return dto.SetupDiagnosticStats{
+			Direction:          s.Direction,
+			MarketRegime:       s.MarketRegime,
+			Playbook:           s.Playbook,
+			TotalSignals:       s.TotalSignals,
+			WinRate:            s.WinRate,
+			TP1Rate:            s.TP1Rate,
+			TP2Rate:            s.TP2Rate,
+			SLRate:             s.SLRate,
+			ExpiredRate:        s.ExpiredRate,
+			AverageMAE:         s.AverageMAE,
+			AverageMFE:         s.AverageMFE,
+			AverageRR:          s.AverageRR,
+			TotalPnlPercentage: s.TotalPnlPercentage,
+		}
+	}
 
 	toDTORecommendation := func(r ThresholdRecommendation) dto.ThresholdRecommendation {
 		return dto.ThresholdRecommendation{
@@ -365,22 +389,24 @@ func NormalizeEvaluationForFrontend(report *EvaluationReport) dto.EvaluationResp
 	}
 
 	out := dto.EvaluationResponse{
-		GeneratedAt:      "",
-		DataCompleteness: toDTODataCompleteness(report.DataCompleteness),
-		TotalSignals:     report.TotalSignals,
-		Metrics:          map[string]float64{},
-		PlaybookStats:    []dto.NamedPlaybookStats{},
-		RegimeStats:      []dto.NamedRegimeStats{},
-		TierStats:        []dto.NamedTierStats{},
-		DirectionStats:   []dto.NamedDirectionStats{},
-		AIStats:          []dto.NamedAIStats{},
-		StalenessStats:   []dto.NamedStalenessStats{},
-		ConflictStats:    []dto.NamedIntStat{},
-		CooldownStats:    []dto.NamedIntStat{},
-		GateBugFindings:  []dto.GateBugFinding{},
-		Recommendations:  []dto.ThresholdRecommendation{},
-		Notes:            []string{},
-		Status:           "",
+		GeneratedAt:             "",
+		DataCompleteness:        toDTODataCompleteness(report.DataCompleteness),
+		TotalSignals:            report.TotalSignals,
+		Metrics:                 map[string]float64{},
+		PlaybookStats:           []dto.NamedPlaybookStats{},
+		RegimeStats:             []dto.NamedRegimeStats{},
+		TierStats:               []dto.NamedTierStats{},
+		DirectionStats:          []dto.NamedDirectionStats{},
+		AIStats:                 []dto.NamedAIStats{},
+		StalenessStats:          []dto.NamedStalenessStats{},
+		LongRegimePlaybookStats: []dto.SetupDiagnosticStats{},
+		WeakLongSetups:          []dto.SetupDiagnosticStats{},
+		ConflictStats:           []dto.NamedIntStat{},
+		CooldownStats:           []dto.NamedIntStat{},
+		GateBugFindings:         []dto.GateBugFinding{},
+		Recommendations:         []dto.ThresholdRecommendation{},
+		Notes:                   []string{},
+		Status:                  "",
 	}
 
 	if !report.GeneratedAt.IsZero() {
@@ -444,6 +470,12 @@ func NormalizeEvaluationForFrontend(report *EvaluationReport) dto.EvaluationResp
 	sort.Strings(stKeys)
 	for _, k := range stKeys {
 		out.StalenessStats = append(out.StalenessStats, dto.NamedStalenessStats{Key: k, Value: toDTOStalenessStats(report.StalenessStats[k])})
+	}
+	for _, stat := range report.LongRegimePlaybookStats {
+		out.LongRegimePlaybookStats = append(out.LongRegimePlaybookStats, toDTOSetupDiagnosticStats(stat))
+	}
+	for _, stat := range report.WeakLongSetups {
+		out.WeakLongSetups = append(out.WeakLongSetups, toDTOSetupDiagnosticStats(stat))
 	}
 
 	confKeys := make([]string, 0, len(report.ConflictStats))

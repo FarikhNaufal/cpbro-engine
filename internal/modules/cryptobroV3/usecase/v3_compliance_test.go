@@ -181,6 +181,22 @@ func TestMarketPolicyCompliance(t *testing.T) {
 		assert.Equal(t, REVERSAL_ONLY, policy.LongMode)
 		assert.Equal(t, REVERSAL_ONLY, policy.ShortMode)
 	})
+
+	t.Run("LowVol neutral breadth enters compression with reversal fallback", func(t *testing.T) {
+		policy := uc.EvaluatePolicy(context.Background(), "SIDEWAYS", 52.0, 0.0, 0.1, "LOW", 0.5)
+		assert.Equal(t, COMPRESSION, policy.Regime)
+		assert.Equal(t, NORMAL, policy.LongMode)
+		assert.Equal(t, NORMAL, policy.ShortMode)
+		assert.Contains(t, policy.AllowedPlaybooks, LIQUIDITY_SWEEP_REVERSAL)
+		assert.Contains(t, policy.AllowedPlaybooks, RANGE_EDGE_REVERSAL)
+	})
+
+	t.Run("LowVol broad breadth stays in LOW_VOL", func(t *testing.T) {
+		policy := uc.EvaluatePolicy(context.Background(), "SIDEWAYS", 52.0, 0.0, 0.1, "LOW", 0.72)
+		assert.Equal(t, LOW_VOL, policy.Regime)
+		assert.Equal(t, REVERSAL_ONLY, policy.LongMode)
+		assert.Equal(t, REVERSAL_ONLY, policy.ShortMode)
+	})
 }
 
 // 2. TEST PLAYBOOK THRESHOLD PROFILE

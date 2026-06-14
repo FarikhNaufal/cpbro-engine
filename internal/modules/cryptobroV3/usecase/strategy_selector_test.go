@@ -134,16 +134,35 @@ func TestSelectPlaybooksRegimes(t *testing.T) {
 		AllowedPlaybooks: []Playbook{
 			COMPRESSION_BREAKOUT_RETEST,
 			LIQUIDITY_SWEEP_REVERSAL,
+			RANGE_EDGE_REVERSAL,
 		},
-		Reason: "COMPRESSION active - awaiting breakout retest confirmation",
+		Reason: "COMPRESSION active - breakout preferred, reversal fallback enabled",
 	}
-	selectionsCompression := selector.SelectPlaybooks(policyCompression, candidate, prelimData, tech, structure)
-	// Focus on compression breakout retest, no sweep reversal
+	techCompression := &TechnicalSnapshot{
+		IndicatorValues: map[string]float64{
+			IndicatorContraction: 1.0,
+			IndicatorBBWidth:     0.05,
+		},
+	}
+	selectionsCompression := selector.SelectPlaybooks(policyCompression, candidate, prelimData, techCompression, structure)
+	// Focus on compression breakout retest when symbol has contraction evidence.
 	if ok, _ := hasSelection(selectionsCompression, COMPRESSION_BREAKOUT_RETEST, LONG); !ok {
 		t.Errorf("COMPRESSION: Expected COMPRESSION_BREAKOUT_RETEST to be allowed")
 	}
 	if ok, _ := hasSelection(selectionsCompression, LIQUIDITY_SWEEP_REVERSAL, LONG); ok {
-		t.Errorf("COMPRESSION: LIQUIDITY_SWEEP_REVERSAL should be disabled")
+		t.Errorf("COMPRESSION: LIQUIDITY_SWEEP_REVERSAL should be disabled when contraction evidence exists")
+	}
+
+	techNoCompression := &TechnicalSnapshot{IndicatorValues: map[string]float64{}}
+	selectionsCompressionFallback := selector.SelectPlaybooks(policyCompression, candidate, prelimData, techNoCompression, structure)
+	if ok, _ := hasSelection(selectionsCompressionFallback, COMPRESSION_BREAKOUT_RETEST, LONG); ok {
+		t.Errorf("COMPRESSION fallback: breakout retest should not be selected without contraction evidence")
+	}
+	if ok, _ := hasSelection(selectionsCompressionFallback, LIQUIDITY_SWEEP_REVERSAL, LONG); !ok {
+		t.Errorf("COMPRESSION fallback: expected LIQUIDITY_SWEEP_REVERSAL to be allowed")
+	}
+	if ok, _ := hasSelection(selectionsCompressionFallback, RANGE_EDGE_REVERSAL, LONG); !ok {
+		t.Errorf("COMPRESSION fallback: expected RANGE_EDGE_REVERSAL to be allowed")
 	}
 
 	// 5. BTC_CHAOS

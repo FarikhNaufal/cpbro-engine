@@ -23,18 +23,18 @@ type HealthResponse struct {
 }
 
 type Signal struct {
-	Symbol         string  `json:"symbol"`
-	Direction      string  `json:"direction"`
-	Timeframe      string  `json:"timeframe"`
-	TriggerPrice   float64 `json:"trigger_price"`
-	StopLoss       float64 `json:"stop_loss"`
-	TakeProfit     float64 `json:"take_profit"`
-	Score          float64 `json:"score"`
-	Strategy       string  `json:"strategy"`
-	AISentiment    string  `json:"ai_sentiment"`
-	IsFinalExecute bool    `json:"is_final_execute"`
-	ReconciledTime string  `json:"reconciled_time"`
-	Status         string  `json:"status"`
+	Symbol             string  `json:"symbol"`
+	Direction          string  `json:"direction"`
+	Timeframe          string  `json:"timeframe"`
+	TriggerPrice       float64 `json:"trigger_price"`
+	StopLoss           float64 `json:"stop_loss"`
+	TakeProfit         float64 `json:"take_profit"`
+	Score              float64 `json:"score"`
+	Strategy           string  `json:"strategy"`
+	AISentiment        string  `json:"ai_sentiment"`
+	IsFinalExecute     bool    `json:"is_final_execute"`
+	ReconciledTime     string  `json:"reconciled_time"`
+	Status             string  `json:"status"`
 	IsHot              bool    `json:"is_hot,omitempty"`
 	HotScore           float64 `json:"hot_score,omitempty"`
 	HotSource          string  `json:"hot_source,omitempty"`
@@ -43,20 +43,20 @@ type Signal struct {
 }
 
 type WatchSignal struct {
-	Symbol         string  `json:"symbol"`
-	Direction      string  `json:"direction"`
-	Timeframe      string  `json:"timeframe"`
-	TriggerPrice   float64 `json:"trigger_price"`
-	StopLoss       float64 `json:"stop_loss"`
-	TakeProfit     float64 `json:"take_profit"`
-	Score          float64 `json:"score"`
-	Strategy       string  `json:"strategy"`
-	AISentiment    string  `json:"ai_sentiment"`
-	IsFinalExecute bool    `json:"is_final_execute"`
-	ReconciledTime string  `json:"reconciled_time"`
-	Status         string  `json:"status"`
-	Reason         string  `json:"reason,omitempty"`
-	FinalReason    string  `json:"final_reason,omitempty"`
+	Symbol             string  `json:"symbol"`
+	Direction          string  `json:"direction"`
+	Timeframe          string  `json:"timeframe"`
+	TriggerPrice       float64 `json:"trigger_price"`
+	StopLoss           float64 `json:"stop_loss"`
+	TakeProfit         float64 `json:"take_profit"`
+	Score              float64 `json:"score"`
+	Strategy           string  `json:"strategy"`
+	AISentiment        string  `json:"ai_sentiment"`
+	IsFinalExecute     bool    `json:"is_final_execute"`
+	ReconciledTime     string  `json:"reconciled_time"`
+	Status             string  `json:"status"`
+	Reason             string  `json:"reason,omitempty"`
+	FinalReason        string  `json:"final_reason,omitempty"`
 	IsHot              bool    `json:"is_hot,omitempty"`
 	HotScore           float64 `json:"hot_score,omitempty"`
 	HotSource          string  `json:"hot_source,omitempty"`
@@ -94,41 +94,48 @@ type PlaybookBlockerSummary struct {
 }
 
 type LatestResultResponse struct {
-	ConfigVersion                  string                   `json:"config_version"`
-	GeneratedAt                    string                   `json:"generated_at"`
-	ScanID                         string                   `json:"scan_id"`
-	MarketPolicy                   string                   `json:"market_policy"`
-	MarketRegime                   string                   `json:"market_regime"`
-	TotalTickers                   int                      `json:"total_tickers"`
-	TotalUniversePass              int                      `json:"total_universe_pass"`
-	TotalUniverseRejected          int                      `json:"total_universe_rejected"`
-	TotalStrategySelected          int                      `json:"total_strategy_selected"`
-	TotalPlaybookEligible          int                      `json:"total_playbook_eligible"`
-	TotalQuantCandidates           int                      `json:"total_quant_candidates"`
-	TotalArbiterSelected           int                      `json:"total_arbiter_selected"`
-	TotalLocalAICandidate          int                      `json:"total_local_ai_candidate"`
-	TotalAIConfirm                 int                      `json:"total_ai_confirm"`
-	TotalAIWait                    int                      `json:"total_ai_wait"`
-	TotalAIReject                  int                      `json:"total_ai_reject"`
-	TotalAIError                   int                      `json:"total_ai_error"`
-	TotalFinalExecute              int                      `json:"total_final_execute"`
-	TotalFinalWatch                int                      `json:"total_final_watch"`
-	TotalFinalReject               int                      `json:"total_final_reject"`
-	ExecuteSignals                 []Signal                 `json:"execute_signals"`
-	Watchlist                      []WatchSignal            `json:"watchlist"`
-	RejectedSummary                []string                 `json:"rejected_summary"`
-	PolicyRejectedSummary          []string                 `json:"policy_rejected_summary"`
-	ThresholdProfileSummary        map[string]string        `json:"threshold_profile_summary"`
-	FunnelStageSummary             []FunnelStageSummary     `json:"funnel_stage_summary"`
-	TopFunnelBlockers              []string                 `json:"top_funnel_blockers"`
-	PlaybookBlockerSummary         []PlaybookBlockerSummary `json:"playbook_blocker_summary"`
-	EvaluationDataCompletenessHint string                   `json:"evaluation_data_completeness_hint"`
-	ArbiterSelectedDetails         []ArbiterSelectedDetail  `json:"arbiter_selected_details"`
-	LastScanTime                   string                   `json:"last_scan_time"`
-	Duration                       string                   `json:"duration"`
-	Signals                        []Signal                 `json:"signals"`
-	Warnings                       []string                 `json:"warnings"`
-	PartialErrors                  []string                 `json:"partial_errors"`
+	ConfigVersion                   string                   `json:"config_version"`
+	GeneratedAt                     string                   `json:"generated_at"`
+	ScanID                          string                   `json:"scan_id"`
+	MarketPolicy                    string                   `json:"market_policy"`
+	MarketRegime                    string                   `json:"market_regime"`
+	MacroVolatility                 string                   `json:"macro_volatility"`
+	MarketBreadth                   float64                  `json:"market_breadth"`
+	MedianAbsMove24h                float64                  `json:"median_abs_move_24h"`
+	ActiveMoveShare                 float64                  `json:"active_move_share"`
+	QuietMoveShare                  float64                  `json:"quiet_move_share"`
+	TotalTickers                    int                      `json:"total_tickers"`
+	TotalUniversePass               int                      `json:"total_universe_pass"`
+	TotalUniverseRejected           int                      `json:"total_universe_rejected"`
+	TotalStrategySelected           int                      `json:"total_strategy_selected"`
+	TotalPlaybookEligible           int                      `json:"total_playbook_eligible"`
+	TotalQuantCandidates            int                      `json:"total_quant_candidates"`
+	TotalArbiterSelected            int                      `json:"total_arbiter_selected"`
+	TotalLocalAICandidate           int                      `json:"total_local_ai_candidate"`
+	TotalAIConfirm                  int                      `json:"total_ai_confirm"`
+	TotalAIWait                     int                      `json:"total_ai_wait"`
+	TotalAIReject                   int                      `json:"total_ai_reject"`
+	TotalAIError                    int                      `json:"total_ai_error"`
+	TotalFinalExecute               int                      `json:"total_final_execute"`
+	TotalFinalWatch                 int                      `json:"total_final_watch"`
+	TotalFinalReject                int                      `json:"total_final_reject"`
+	ExecuteSignals                  []Signal                 `json:"execute_signals"`
+	Watchlist                       []WatchSignal            `json:"watchlist"`
+	RejectedSummary                 []string                 `json:"rejected_summary"`
+	PolicyRejectedSummary           []string                 `json:"policy_rejected_summary"`
+	ThresholdProfileSummary         map[string]string        `json:"threshold_profile_summary"`
+	FunnelStageSummary              []FunnelStageSummary     `json:"funnel_stage_summary"`
+	TopFunnelBlockers               []string                 `json:"top_funnel_blockers"`
+	PlaybookBlockerSummary          []PlaybookBlockerSummary `json:"playbook_blocker_summary"`
+	EvaluationDataCompletenessHint  string                   `json:"evaluation_data_completeness_hint"`
+	CompressionZeroEligibleStreak   int                      `json:"compression_zero_eligible_streak"`
+	CompressionLowVolFallbackActive bool                     `json:"compression_low_vol_fallback_active"`
+	ArbiterSelectedDetails          []ArbiterSelectedDetail  `json:"arbiter_selected_details"`
+	LastScanTime                    string                   `json:"last_scan_time"`
+	Duration                        string                   `json:"duration"`
+	Signals                         []Signal                 `json:"signals"`
+	Warnings                        []string                 `json:"warnings"`
+	PartialErrors                   []string                 `json:"partial_errors"`
 }
 
 type SignalJournalResponse struct {
@@ -252,6 +259,22 @@ type StalenessStats struct {
 	WinRate      float64 `json:"win_rate"`
 }
 
+type SetupDiagnosticStats struct {
+	Direction          string  `json:"direction"`
+	MarketRegime       string  `json:"market_regime"`
+	Playbook           string  `json:"playbook"`
+	TotalSignals       int     `json:"total_signals"`
+	WinRate            float64 `json:"win_rate"`
+	TP1Rate            float64 `json:"tp1_rate"`
+	TP2Rate            float64 `json:"tp2_rate"`
+	SLRate             float64 `json:"sl_rate"`
+	ExpiredRate        float64 `json:"expired_rate"`
+	AverageMAE         float64 `json:"average_mae"`
+	AverageMFE         float64 `json:"average_mfe"`
+	AverageRR          float64 `json:"average_rr"`
+	TotalPnlPercentage float64 `json:"total_pnl_percentage"`
+}
+
 type GateBugFinding string
 
 type NamedPlaybookStats struct {
@@ -294,6 +317,8 @@ type EvaluationResponse struct {
 	DirectionStats            []NamedDirectionStats     `json:"direction_stats"`
 	AIStats                   []NamedAIStats            `json:"ai_stats"`
 	StalenessStats            []NamedStalenessStats     `json:"staleness_stats"`
+	LongRegimePlaybookStats   []SetupDiagnosticStats    `json:"long_regime_playbook_stats"`
+	WeakLongSetups            []SetupDiagnosticStats    `json:"weak_long_setups"`
 	ConflictStats             []NamedIntStat            `json:"conflict_stats"`
 	CooldownStats             []NamedIntStat            `json:"cooldown_stats"`
 	GateBugFindings           []GateBugFinding          `json:"gate_bug_findings"`

@@ -127,6 +127,7 @@ func TestPlaybookEligibility_LiquiditySweepReversal(t *testing.T) {
 	// Prior 20 low is 95.0.
 	m15Candles[23].Low = 90.0
 	m15Candles[23].Close = 98.0 // Close returned inside (> 95.0)
+	m15Candles[24].Vol = 135.0
 
 	data := MarketData{
 		Symbol:     "BTCUSDT",
@@ -134,7 +135,8 @@ func TestPlaybookEligibility_LiquiditySweepReversal(t *testing.T) {
 	}
 
 	tech := &TechnicalSnapshot{
-		RSI: 50.0,
+		RSI:         50.0,
+		VolumeRatio: 1.35,
 		IndicatorValues: map[string]float64{
 			"sweep_low":      1.0,
 			"wick_rejection": 1.0,
@@ -159,9 +161,44 @@ func TestPlaybookEligibility_LiquiditySweepReversal(t *testing.T) {
 			"volume_spike":   -1.0,
 		},
 	}
-	resNoVol := uc.CheckEligibility(sel, policy, data, techNoVol, structure)
+	dataNoVol := data
+	dataNoVol.M15Candles = make([]dto.Candle, len(data.M15Candles))
+	copy(dataNoVol.M15Candles, data.M15Candles)
+	for i := range dataNoVol.M15Candles {
+		dataNoVol.M15Candles[i].Vol = 100.0
+	}
+	resNoVol := uc.CheckEligibility(sel, policy, dataNoVol, techNoVol, structure)
 	if resNoVol.Eligible {
 		t.Errorf("Expected sweep without volume spike to be rejected, but it passed")
+	}
+
+	// Test 2b: Profile-based volume ratio should pass even if legacy indicator flag is not pre-set.
+	dataProfileVol := data
+	dataProfileVol.M15Candles = make([]dto.Candle, 25)
+	for i := 0; i < 25; i++ {
+		dataProfileVol.M15Candles[i] = dto.Candle{
+			Open:  100.0,
+			Close: 100.0,
+			High:  105.0,
+			Low:   95.0,
+			Vol:   100.0,
+		}
+	}
+	dataProfileVol.M15Candles[23].Low = 90.0
+	dataProfileVol.M15Candles[23].Close = 98.0
+	dataProfileVol.M15Candles[24].Vol = 135.0 // 1.35x avg, above sweep profile min 1.3
+	techProfileVol := &TechnicalSnapshot{
+		RSI:         50.0,
+		VolumeRatio: 1.35,
+		IndicatorValues: map[string]float64{
+			"sweep_low":      1.0,
+			"wick_rejection": 1.0,
+			"volume_spike":   -1.0,
+		},
+	}
+	resProfileVol := uc.CheckEligibility(sel, policy, dataProfileVol, techProfileVol, structure)
+	if !resProfileVol.Eligible {
+		t.Errorf("Expected sweep with profile-based volume ratio to be eligible, but got rejected: %s", resProfileVol.Reason)
 	}
 
 	// Test 3: Close did not return inside range (breakout)
@@ -410,5 +447,29 @@ func TestPlaybookEligibility_CompressionBreakoutRetest(t *testing.T) {
 	resNoExpansion := uc.CheckEligibility(sel, policy, dataNoExpansion, techNoExpansion, structure)
 	if resNoExpansion.Eligible {
 		t.Errorf("Expected Compression Breakout Retest without volume/OI expansion to be rejected, but it passed")
+	}
+
+	// Test 5: Profile-based 1.2x volume ratio should qualify compression expansion.
+	dataProfileExpansion := data
+	dataProfileExpansion.M15Candles = make([]dto.Candle, 25)
+	for i := 0; i < 25; i++ {
+		dataProfileExpansion.M15Candles[i] = dto.Candle{Close: 100.0, Vol: 100.0}
+	}
+	dataProfileExpansion.M15Candles[20].Close = 105.0
+	dataProfileExpansion.M15Candles[24].Close = 101.0
+	dataProfileExpansion.M15Candles[24].Vol = 125.0
+	techProfileExpansion := &TechnicalSnapshot{
+		RSI:         50.0,
+		VolumeRatio: 1.25,
+		IndicatorValues: map[string]float64{
+			IndicatorContraction: 1.0,
+			IndicatorBBWidth:     0.08,
+			IndicatorExtremeOI:   0.0,
+			IndicatorOIChange:    0.0,
+		},
+	}
+	resProfileExpansion := uc.CheckEligibility(sel, policy, dataProfileExpansion, techProfileExpansion, structure)
+	if !resProfileExpansion.Eligible {
+		t.Errorf("Expected Compression Breakout Retest with 1.25x volume ratio to be eligible, but got rejected: %s", resProfileExpansion.Reason)
 	}
 }

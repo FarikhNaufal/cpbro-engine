@@ -43,7 +43,7 @@ func TestEvaluation_MissingReport_ReturnsEmptyReportValid(t *testing.T) {
 	if ev["metrics"] == nil {
 		t.Fatalf("expected metrics object")
 	}
-	for _, k := range []string{"playbook_stats", "regime_stats", "tier_stats", "direction_stats", "ai_stats", "staleness_stats", "conflict_stats", "cooldown_stats", "gate_bug_findings", "recommendations", "notes"} {
+	for _, k := range []string{"playbook_stats", "regime_stats", "tier_stats", "direction_stats", "ai_stats", "staleness_stats", "long_regime_playbook_stats", "weak_long_setups", "conflict_stats", "cooldown_stats", "gate_bug_findings", "recommendations", "notes"} {
 		if ev[k] == nil {
 			t.Fatalf("expected %s not null", k)
 		}
@@ -94,7 +94,7 @@ func TestEvaluationRun_EmptyStorage_ReturnsValidReport(t *testing.T) {
 	dataBytes, _ := json.Marshal(resp.Data)
 	var ev map[string]any
 	_ = json.Unmarshal(dataBytes, &ev)
-	for _, k := range []string{"playbook_stats", "regime_stats", "tier_stats", "direction_stats", "ai_stats", "staleness_stats", "conflict_stats", "cooldown_stats", "gate_bug_findings", "recommendations", "notes"} {
+	for _, k := range []string{"playbook_stats", "regime_stats", "tier_stats", "direction_stats", "ai_stats", "staleness_stats", "long_regime_playbook_stats", "weak_long_setups", "conflict_stats", "cooldown_stats", "gate_bug_findings", "recommendations", "notes"} {
 		if ev[k] == nil {
 			t.Fatalf("expected %s not null", k)
 		}

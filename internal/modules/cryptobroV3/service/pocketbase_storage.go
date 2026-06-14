@@ -1110,6 +1110,10 @@ func encodeEvaluationRun(evaluationID string, report *usecase.EvaluationReport) 
 			"config_version": report.ConfigVersion,
 			"notes":          report.Notes,
 			"source_files":   report.SourceFilesUsed,
+			"diagnostics": map[string]any{
+				"long_regime_playbook_stats": report.LongRegimePlaybookStats,
+				"weak_long_setups":           report.WeakLongSetups,
+			},
 		},
 	}
 	return out
@@ -1158,6 +1162,10 @@ func decodeEvaluationRun(m map[string]any) (*usecase.EvaluationReport, error) {
 					report.SourceFilesUsed = append(report.SourceFilesUsed, s)
 				}
 			}
+		}
+		if diagnostics, ok := notes["diagnostics"].(map[string]any); ok {
+			report.LongRegimePlaybookStats = decodeJSONField[[]usecase.SetupDiagnosticStats](diagnostics["long_regime_playbook_stats"])
+			report.WeakLongSetups = decodeJSONField[[]usecase.SetupDiagnosticStats](diagnostics["weak_long_setups"])
 		}
 	}
 	return &report, nil

@@ -57,6 +57,60 @@ func TestDescribeCandleStructure_DetectsBreakOfStructure(t *testing.T) {
 	}
 }
 
+func TestPopulateSnapshots_UsesRealBollingerWidthForContraction(t *testing.T) {
+	baseTime := time.Now().Add(-12 * time.Hour)
+	h1 := makeTrendCandles(baseTime, time.Hour, 60, 100, 0.1)
+	h4 := makeTrendCandles(baseTime, 4*time.Hour, 220, 100, 0.1)
+
+	tight := make([]dto.Candle, 40)
+	wide := make([]dto.Candle, 40)
+	for i := 0; i < 40; i++ {
+		tightClose := 100.0
+		if i%2 == 0 {
+			tightClose = 100.05
+		}
+		wideClose := 100.0
+		if i%2 == 0 {
+			wideClose = 110.0
+		} else {
+			wideClose = 90.0
+		}
+
+		tight[i] = dto.Candle{
+			Time:  baseTime.Add(time.Duration(i) * 15 * time.Minute),
+			Open:  tightClose,
+			High:  tightClose + 0.2,
+			Low:   tightClose - 0.2,
+			Close: tightClose,
+			Vol:   100,
+		}
+		wide[i] = dto.Candle{
+			Time:  baseTime.Add(time.Duration(i) * 15 * time.Minute),
+			Open:  wideClose,
+			High:  wideClose + 1,
+			Low:   wideClose - 1,
+			Close: wideClose,
+			Vol:   100,
+		}
+	}
+
+	tightTech, _ := PopulateSnapshots(tight, h1, h4, 0, 0, 0, 0, 0)
+	wideTech, _ := PopulateSnapshots(wide, h1, h4, 0, 0, 0, 0, 0)
+
+	if tightTech.IndicatorValues[IndicatorContraction] != 1.0 {
+		t.Fatalf("expected tight series to register contraction, got %v", tightTech.IndicatorValues[IndicatorContraction])
+	}
+	if tightTech.IndicatorValues[IndicatorBBWidth] <= 0 || tightTech.IndicatorValues[IndicatorBBWidth] > compressionMaxBBWidth {
+		t.Fatalf("expected tight series to have bb width <= %0.2f, got %0.4f", compressionMaxBBWidth, tightTech.IndicatorValues[IndicatorBBWidth])
+	}
+	if wideTech.IndicatorValues[IndicatorBBWidth] <= compressionMaxBBWidth {
+		t.Fatalf("expected wide series to have bb width > %0.2f, got %0.4f", compressionMaxBBWidth, wideTech.IndicatorValues[IndicatorBBWidth])
+	}
+	if wideTech.IndicatorValues[IndicatorContraction] == 1.0 {
+		t.Fatalf("expected wide series not to register contraction")
+	}
+}
+
 func makeTrendCandles(base time.Time, step time.Duration, count int, start float64, increment float64) []dto.Candle {
 	candles := make([]dto.Candle, count)
 	for i := 0; i < count; i++ {

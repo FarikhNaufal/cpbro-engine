@@ -40,6 +40,11 @@ type LatestResult struct {
 	ScanID                          string                   `json:"scan_id"`
 	MarketPolicy                    string                   `json:"market_policy"`
 	MarketRegime                    string                   `json:"market_regime"`
+	MacroVolatility                 string                   `json:"macro_volatility,omitempty"`
+	MarketBreadth                   float64                  `json:"market_breadth,omitempty"`
+	MedianAbsMove24h                float64                  `json:"median_abs_move_24h,omitempty"`
+	ActiveMoveShare                 float64                  `json:"active_move_share,omitempty"`
+	QuietMoveShare                  float64                  `json:"quiet_move_share,omitempty"`
 	TotalTickers                    int                      `json:"total_tickers"`
 	TotalUniversePass               int                      `json:"total_universe_pass"`
 	TotalUniverseRejected           int                      `json:"total_universe_rejected"`
@@ -64,6 +69,8 @@ type LatestResult struct {
 	TopFunnelBlockers               []string                 `json:"top_funnel_blockers,omitempty"`
 	PlaybookBlockerSummary          []PlaybookBlockerSummary `json:"playbook_blocker_summary,omitempty"`
 	EvaluationDataCompletenessHint  string                   `json:"evaluation_data_completeness_hint"`
+	CompressionZeroEligibleStreak   int                      `json:"compression_zero_eligible_streak,omitempty"`
+	CompressionLowVolFallbackActive bool                     `json:"compression_low_vol_fallback_active,omitempty"`
 	ArbiterSelectedDetails          []ArbiterSelectedDetail  `json:"arbiter_selected_details,omitempty"`
 
 	// Backward compatibility fields

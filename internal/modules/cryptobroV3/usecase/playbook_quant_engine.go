@@ -43,6 +43,25 @@ func directionalATRTradePlan(triggerPrice, atr float64, direction Direction, sto
 	return triggerPrice + (stopATR * atr), triggerPrice - (rewardATR * atr)
 }
 
+func applyPlaybookRuntimeSignals(techSnap *TechnicalSnapshot, m15Closed []dto.Candle, playbook Playbook, policy MarketPolicy) {
+	if techSnap == nil {
+		return
+	}
+	if techSnap.IndicatorValues == nil {
+		techSnap.IndicatorValues = make(map[string]float64)
+	}
+
+	switch playbook {
+	case LIQUIDITY_SWEEP_REVERSAL, COMPRESSION_BREAKOUT_RETEST:
+		minVolRatio := resolveConfiguredMinVolumeRatio(playbook, policy, "")
+		if hasVolumeConfirmation(techSnap, m15Closed, minVolRatio) {
+			techSnap.IndicatorValues[IndicatorVolumeSpike] = 1.0
+		} else {
+			techSnap.IndicatorValues[IndicatorVolumeSpike] = -1.0
+		}
+	}
+}
+
 // Run is kept for simple backwards compatibility checks.
 func (uc *PlaybookQuantEngineUsecase) Run(m15, h1, h4 []dto.Candle) QuantResult {
 	if len(m15) == 0 {
@@ -89,6 +108,7 @@ func (uc *PlaybookQuantEngineUsecase) RunEngineWithPreparedContext(
 	m15Closed := prepared.m15Closed
 	techSnap := cloneTechnicalSnapshot(prepared.technicalSnapshot)
 	structSnap := cloneStructureSnapshot(prepared.structureSnapshot)
+	applyPlaybookRuntimeSignals(&techSnap, m15Closed, playbook, policy)
 
 	// Save M15 raw klines (last 30 closed candles)
 	uc.saveM15RawKlines(data.Symbol, m15Closed)
@@ -165,7 +185,8 @@ func (uc *PlaybookQuantEngineUsecase) RunEngineWithPreparedContext(
 		isSweepLow := lastM15.Low < lowest
 
 		// Volume confirmation
-		volSpike := ConfirmLiquiditySweep(m15Closed, 20, 1.5)
+		minVolRatio := resolveConfiguredMinVolumeRatio(playbook, policy, "")
+		volSpike := hasVolumeConfirmation(&techSnap, m15Closed, minVolRatio)
 		if !volSpike {
 			res.Direction = WAIT
 			res.IndicatorMet = false

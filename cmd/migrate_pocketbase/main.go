@@ -183,6 +183,10 @@ func migrateEvaluationReport(ctx context.Context, cfg *config.Config, jsonStorag
 			"config_version": report.ConfigVersion,
 			"notes":          report.Notes,
 			"source_files":   report.SourceFilesUsed,
+			"diagnostics": map[string]any{
+				"long_regime_playbook_stats": report.LongRegimePlaybookStats,
+				"weak_long_setups":           report.WeakLongSetups,
+			},
 		},
 	}
 

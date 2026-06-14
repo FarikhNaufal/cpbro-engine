@@ -220,6 +220,60 @@ func TestQuantEngine_RunEngineWithPreparedContext_DoesNotMutateBaseSnapshot(t *t
 	}
 }
 
+func TestQuantEngine_LiquiditySweep_UsesConfiguredVolumeRatio(t *testing.T) {
+	engine := NewPlaybookQuantEngineUsecase()
+	now := time.Now()
+
+	m15Candles := make([]dto.Candle, 30)
+	for i := 0; i < 30; i++ {
+		m15Candles[i] = dto.Candle{
+			Time:  now.Add(-time.Duration(30-i) * 15 * time.Minute),
+			Open:  100.0,
+			High:  105.0,
+			Low:   95.0,
+			Close: 100.0,
+			Vol:   100.0,
+		}
+	}
+	m15Candles[29].Low = 90.0
+	m15Candles[29].Close = 98.0
+	m15Candles[29].Vol = 135.0 // above 1.3x profile threshold, below old 1.5x hardcode
+
+	h1Candles := make([]dto.Candle, 60)
+	h4Candles := make([]dto.Candle, 220)
+	for i := range h1Candles {
+		h1Candles[i] = dto.Candle{Time: now.Add(-time.Duration(60-i) * time.Hour), Close: 100.0, Vol: 1000.0}
+	}
+	for i := range h4Candles {
+		h4Candles[i] = dto.Candle{Time: now.Add(-time.Duration(220-i) * 4 * time.Hour), Close: 95.0, Vol: 1000.0}
+	}
+	h4Candles[len(h4Candles)-1].Close = 90.0 // bearish enough so SHORT safety does not interfere if direction changes
+
+	data := MarketData{
+		Symbol:      "TESTUSDT",
+		M15Candles:  m15Candles,
+		H1Candles:   h1Candles,
+		H4Candles:   h4Candles,
+		LatestPrice: m15Candles[29].Close,
+	}
+	policy := MarketPolicy{
+		AllowLong:        true,
+		AllowShort:       true,
+		LongMode:         NORMAL,
+		ShortMode:        NORMAL,
+		AllowedTiers:     []Tier{TierA},
+		AllowedPlaybooks: []Playbook{LIQUIDITY_SWEEP_REVERSAL},
+	}
+
+	res := engine.RunEngine(LIQUIDITY_SWEEP_REVERSAL, LONG, data, policy)
+	if !res.IndicatorMet {
+		t.Fatalf("expected sweep to pass with profile-based volume threshold, got reason: %s", res.Reason)
+	}
+	if res.TechnicalSnapshot.IndicatorValues[IndicatorVolumeSpike] != 1.0 {
+		t.Fatalf("expected quant engine to mark volume spike using configured ratio, got %v", res.TechnicalSnapshot.IndicatorValues[IndicatorVolumeSpike])
+	}
+}
+
 func TestQuantEngine_DebugSaveRawKlines_DefaultDisabled(t *testing.T) {
 	t.Setenv("DEBUG_SAVE_RAW_KLINES", "false")
 	debugDir := t.TempDir()

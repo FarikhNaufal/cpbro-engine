@@ -614,6 +614,26 @@ func TestPocketBaseStorageService_SaveAndLoadEvaluationReport(t *testing.T) {
 		DirectionStats:  map[string]usecase.DirectionStats{},
 		AIStats:         map[string]usecase.AIStats{},
 		StalenessStats:  map[string]usecase.StalenessStats{},
+		LongRegimePlaybookStats: []usecase.SetupDiagnosticStats{
+			{
+				Direction:    string(usecase.LONG),
+				MarketRegime: string(usecase.CHOP_RANGE),
+				Playbook:     string(usecase.TREND_PULLBACK),
+				TotalSignals: 4,
+				WinRate:      25,
+				SLRate:       75,
+			},
+		},
+		WeakLongSetups: []usecase.SetupDiagnosticStats{
+			{
+				Direction:    string(usecase.LONG),
+				MarketRegime: string(usecase.CHOP_RANGE),
+				Playbook:     string(usecase.TREND_PULLBACK),
+				TotalSignals: 4,
+				WinRate:      25,
+				SLRate:       75,
+			},
+		},
 		ConflictStats:   map[string]int{},
 		CooldownStats:   map[string]int{},
 		SourceFilesUsed: []string{"signal_journal.json"},
@@ -641,6 +661,12 @@ func TestPocketBaseStorageService_SaveAndLoadEvaluationReport(t *testing.T) {
 	}
 	if loaded.Metrics["win_rate"] != 50 {
 		t.Fatalf("expected win_rate=50, got %v", loaded.Metrics["win_rate"])
+	}
+	if len(loaded.LongRegimePlaybookStats) != 1 || loaded.LongRegimePlaybookStats[0].Playbook != string(usecase.TREND_PULLBACK) {
+		t.Fatalf("expected long diagnostics roundtrip, got %+v", loaded.LongRegimePlaybookStats)
+	}
+	if len(loaded.WeakLongSetups) != 1 || loaded.WeakLongSetups[0].MarketRegime != string(usecase.CHOP_RANGE) {
+		t.Fatalf("expected weak long setups roundtrip, got %+v", loaded.WeakLongSetups)
 	}
 }
 

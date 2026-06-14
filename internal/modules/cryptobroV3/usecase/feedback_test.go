@@ -559,8 +559,8 @@ func TestFeedback_CompressionBreakoutStale(t *testing.T) {
 	for _, rec := range report.Recommendations {
 		if rec.Playbook == "COMPRESSION_BREAKOUT_RETEST" && rec.IssueType == "THRESHOLD_TUNING" {
 			foundTuning = true
-			if !strings.Contains(rec.SuggestedAction, "AllowBreakoutCandleEntry to false") {
-				t.Errorf("Expected retest action suggestion, got %s", rec.SuggestedAction)
+			if !strings.Contains(strings.ToLower(rec.SuggestedAction), "tighten") && !strings.Contains(strings.ToLower(rec.SuggestedAction), "retest") {
+				t.Errorf("Expected compression quality tightening suggestion, got %s", rec.SuggestedAction)
 			}
 		}
 	}
@@ -635,7 +635,7 @@ func TestFeedback_LowVolExpired(t *testing.T) {
 	report := repo.report
 	foundTuning := false
 	for _, rec := range report.Recommendations {
-		if rec.MarketRegime == "LOW_VOLATILITY" && rec.IssueType == "TARGET_TUNING" {
+		if rec.MarketRegime == string(usecase.LOW_VOL) && rec.IssueType == "TARGET_TUNING" {
 			foundTuning = true
 			if !strings.Contains(rec.SuggestedAction, "Lower take-profit targets") {
 				t.Errorf("Expected lower TP targets action, got %s", rec.SuggestedAction)
@@ -643,8 +643,294 @@ func TestFeedback_LowVolExpired(t *testing.T) {
 		}
 	}
 	if !foundTuning {
-		t.Error("Expected TARGET_TUNING recommendation for LOW_VOLATILITY")
+		t.Error("Expected TARGET_TUNING recommendation for LOW_VOL")
 	}
+}
+
+func TestFeedback_RegimeStatsCanonicalizeLegacyLabels(t *testing.T) {
+	journal := []usecase.SignalJournal{
+		{
+			ID:           "legacy_low_vol",
+			Playbook:     "TREND_PULLBACK",
+			Status:       usecase.EXPIRED,
+			MarketRegime: "LOW_VOLATILITY",
+			AIConfidence: "HIGH",
+		},
+		{
+			ID:           "current_low_vol",
+			Playbook:     "TREND_PULLBACK",
+			Status:       usecase.EXPIRED,
+			MarketRegime: string(usecase.LOW_VOL),
+			AIConfidence: "HIGH",
+		},
+		{
+			ID:           "legacy_bullish",
+			Playbook:     "TREND_PULLBACK",
+			Status:       usecase.SL_HIT,
+			MarketRegime: "BULLISH",
+			Direction:    usecase.SHORT,
+			AIConfidence: "HIGH",
+		},
+		{
+			ID:           "current_supportive",
+			Playbook:     "TREND_PULLBACK",
+			Status:       usecase.SL_HIT,
+			MarketRegime: string(usecase.ALT_SUPPORTIVE),
+			Direction:    usecase.SHORT,
+			AIConfidence: "HIGH",
+		},
+		{
+			ID:           "reason_phrase_chop",
+			Playbook:     "RANGE_EDGE_REVERSAL",
+			Status:       usecase.TP2_HIT,
+			MarketRegime: "CHOP_RANGE active - mean reversion only",
+			Direction:    usecase.LONG,
+			AIConfidence: "HIGH",
+			EntryPrice:   100,
+			TP1:          102,
+			TP2:          104,
+		},
+	}
+
+	repo := &mockFeedbackStorageRepo{journal: journal}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	report := repo.report
+	if got := report.RegimeStats[string(usecase.LOW_VOL)].TotalSignals; got != 2 {
+		t.Fatalf("expected LOW_VOL regime stats to merge legacy/current labels into 2 signals, got %d", got)
+	}
+	if _, exists := report.RegimeStats["LOW_VOLATILITY"]; exists {
+		t.Fatal("expected legacy LOW_VOLATILITY key to be canonicalized away")
+	}
+	if got := report.RegimeStats[string(usecase.ALT_SUPPORTIVE)].TotalSignals; got != 2 {
+		t.Fatalf("expected ALT_SUPPORTIVE regime stats to merge legacy/current labels into 2 signals, got %d", got)
+	}
+	if _, exists := report.RegimeStats["BULLISH"]; exists {
+		t.Fatal("expected legacy BULLISH key to be canonicalized away")
+	}
+	if got := report.RegimeStats[string(usecase.CHOP_RANGE)].TotalSignals; got != 1 {
+		t.Fatalf("expected CHOP_RANGE reason phrase to canonicalize into 1 signal, got %d", got)
+	}
+}
+
+func TestFeedback_ShortSupportiveRecommendationUsesCanonicalRegimeLabel(t *testing.T) {
+	journal := make([]usecase.SignalJournal, 15)
+	for i := 0; i < 15; i++ {
+		journal[i] = usecase.SignalJournal{
+			ID:           "supportive_short_sl",
+			Playbook:     "TREND_PULLBACK",
+			Direction:    usecase.SHORT,
+			Status:       usecase.SL_HIT,
+			MarketRegime: "BULLISH",
+			AIConfidence: "HIGH",
+			RR:           1.8,
+		}
+	}
+
+	repo := &mockFeedbackStorageRepo{journal: journal}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	report := repo.report
+	for _, rec := range report.Recommendations {
+		if rec.MetricName == "SHORT_SUPPORTIVE_SL_RATE" {
+			if rec.MarketRegime != string(usecase.ALT_SUPPORTIVE) {
+				t.Fatalf("expected canonical supportive regime label, got %s", rec.MarketRegime)
+			}
+			if rec.Direction != string(usecase.SHORT) {
+				t.Fatalf("expected SHORT direction, got %s", rec.Direction)
+			}
+			return
+		}
+	}
+
+	t.Fatal("expected SHORT_SUPPORTIVE_SL_RATE recommendation")
+}
+
+func TestFeedback_LongRegimePlaybookDiagnosticsMergeLegacyRegimes(t *testing.T) {
+	journal := []usecase.SignalJournal{
+		{
+			ID:            "long_low_vol_legacy",
+			Playbook:      "TREND_PULLBACK",
+			Direction:     usecase.LONG,
+			Status:        usecase.SL_HIT,
+			MarketRegime:  "LOW_VOLATILITY",
+			AIConfidence:  "HIGH",
+			RR:            1.4,
+			MAE:           2.5,
+			MFE:           0.8,
+			PnlPercentage: -1.2,
+		},
+		{
+			ID:           "long_low_vol_current",
+			Playbook:     "TREND_PULLBACK",
+			Direction:    usecase.LONG,
+			Status:       usecase.EXPIRED,
+			MarketRegime: string(usecase.LOW_VOL),
+			AIConfidence: "HIGH",
+			RR:           1.3,
+			MAE:          1.8,
+			MFE:          0.7,
+		},
+		{
+			ID:            "long_supportive_win",
+			Playbook:      "LIQUIDITY_SWEEP_REVERSAL",
+			Direction:     usecase.LONG,
+			Status:        usecase.TP2_HIT,
+			MarketRegime:  string(usecase.ALT_SUPPORTIVE),
+			AIConfidence:  "HIGH",
+			RR:            2.1,
+			MAE:           0.9,
+			MFE:           3.4,
+			TP1:           110,
+			TP2:           115,
+			EntryPrice:    100,
+			PnlPercentage: 1.5,
+		},
+	}
+
+	repo := &mockFeedbackStorageRepo{journal: journal}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	report := repo.report
+	foundMerged := false
+	for _, stat := range report.LongRegimePlaybookStats {
+		if stat.MarketRegime == string(usecase.LOW_VOL) && stat.Playbook == "TREND_PULLBACK" {
+			foundMerged = true
+			if stat.TotalSignals != 2 {
+				t.Fatalf("expected canonical LOW_VOL long slice to merge into 2 signals, got %d", stat.TotalSignals)
+			}
+			if stat.SLRate <= 0 {
+				t.Fatalf("expected merged long slice to retain SL data, got %+v", stat)
+			}
+		}
+		if stat.MarketRegime == "LOW_VOLATILITY" {
+			t.Fatalf("expected no legacy regime label in long diagnostics, got %+v", stat)
+		}
+	}
+	if !foundMerged {
+		t.Fatal("expected merged LOW_VOL TREND_PULLBACK long diagnostic slice")
+	}
+}
+
+func TestFeedback_LongDirectionalDiagnosticRecommendation(t *testing.T) {
+	journal := make([]usecase.SignalJournal, 0, 24)
+	for i := 0; i < 12; i++ {
+		journal = append(journal, usecase.SignalJournal{
+			ID:            "long_chop_trendpullback_sl",
+			Playbook:      "TREND_PULLBACK",
+			Direction:     usecase.LONG,
+			Status:        usecase.SL_HIT,
+			MarketRegime:  string(usecase.CHOP_RANGE),
+			AIConfidence:  "HIGH",
+			RR:            1.3,
+			MAE:           2.2,
+			MFE:           0.6,
+			PnlPercentage: -1.0,
+		})
+	}
+	for i := 0; i < 12; i++ {
+		journal = append(journal, usecase.SignalJournal{
+			ID:            "long_supportive_sweep_win",
+			Playbook:      "LIQUIDITY_SWEEP_REVERSAL",
+			Direction:     usecase.LONG,
+			Status:        usecase.TP2_HIT,
+			MarketRegime:  string(usecase.ALT_SUPPORTIVE),
+			AIConfidence:  "HIGH",
+			RR:            2.0,
+			MAE:           0.8,
+			MFE:           2.8,
+			TP1:           104,
+			TP2:           108,
+			EntryPrice:    100,
+			PnlPercentage: 1.4,
+		})
+	}
+
+	repo := &mockFeedbackStorageRepo{journal: journal}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	report := repo.report
+	for _, rec := range report.Recommendations {
+		if rec.IssueType == "DIRECTIONAL_DIAGNOSTIC" && rec.Direction == string(usecase.LONG) && rec.Playbook == "TREND_PULLBACK" && rec.MarketRegime == string(usecase.CHOP_RANGE) {
+			if rec.MetricName != "LONG_REGIME_PLAYBOOK_WIN_RATE" {
+				t.Fatalf("expected metric name LONG_REGIME_PLAYBOOK_WIN_RATE, got %s", rec.MetricName)
+			}
+			return
+		}
+	}
+
+	t.Fatal("expected DIRECTIONAL_DIAGNOSTIC recommendation for weak LONG CHOP_RANGE TREND_PULLBACK slice")
+}
+
+func TestFeedback_LongDiagnosticsCanonicalizeRegimeReasonPhrase(t *testing.T) {
+	journal := []usecase.SignalJournal{
+		{
+			ID:            "reason_phrase_long",
+			Playbook:      "LIQUIDITY_SWEEP_REVERSAL",
+			Direction:     usecase.LONG,
+			Status:        usecase.SL_HIT,
+			MarketRegime:  "CHOP_RANGE active - mean reversion only",
+			AIConfidence:  "HIGH",
+			RR:            1.8,
+			MAE:           1.4,
+			MFE:           0.5,
+			PnlPercentage: -0.9,
+		},
+		{
+			ID:           "canonical_long",
+			Playbook:     "LIQUIDITY_SWEEP_REVERSAL",
+			Direction:    usecase.LONG,
+			Status:       usecase.TP2_HIT,
+			MarketRegime: string(usecase.CHOP_RANGE),
+			AIConfidence: "HIGH",
+			RR:           2.0,
+			MAE:          0.6,
+			MFE:          2.1,
+			EntryPrice:   100,
+			TP1:          103,
+			TP2:          106,
+		},
+	}
+
+	repo := &mockFeedbackStorageRepo{journal: journal}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	report := repo.report
+	for _, stat := range report.LongRegimePlaybookStats {
+		if stat.MarketRegime == string(usecase.CHOP_RANGE) && stat.Playbook == "LIQUIDITY_SWEEP_REVERSAL" {
+			if stat.TotalSignals != 2 {
+				t.Fatalf("expected CHOP_RANGE reason phrase + canonical long slice to merge into 2 signals, got %d", stat.TotalSignals)
+			}
+			return
+		}
+	}
+
+	t.Fatal("expected canonicalized CHOP_RANGE long diagnostic slice")
 }
 
 // 10. DataCompleteness verification

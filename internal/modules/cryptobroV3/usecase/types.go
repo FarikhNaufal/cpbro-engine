@@ -566,6 +566,22 @@ type StalenessStats struct {
 	WinRate      float64 `json:"win_rate"`
 }
 
+type SetupDiagnosticStats struct {
+	Direction          string  `json:"direction"`
+	MarketRegime       string  `json:"market_regime"`
+	Playbook           string  `json:"playbook"`
+	TotalSignals       int     `json:"total_signals"`
+	WinRate            float64 `json:"win_rate"`
+	TP1Rate            float64 `json:"tp1_rate"`
+	TP2Rate            float64 `json:"tp2_rate"`
+	SLRate             float64 `json:"sl_rate"`
+	ExpiredRate        float64 `json:"expired_rate"`
+	AverageMAE         float64 `json:"average_mae"`
+	AverageMFE         float64 `json:"average_mfe"`
+	AverageRR          float64 `json:"average_rr"`
+	TotalPnlPercentage float64 `json:"total_pnl_percentage"`
+}
+
 type EvaluationReport struct {
 	SchemaVersion             string                    `json:"schema_version,omitempty"`
 	ConfigVersion             string                    `json:"config_version,omitempty"`
@@ -580,6 +596,8 @@ type EvaluationReport struct {
 	DirectionStats            map[string]DirectionStats `json:"direction_stats"`
 	AIStats                   map[string]AIStats        `json:"ai_stats"`
 	StalenessStats            map[string]StalenessStats `json:"staleness_stats"`
+	LongRegimePlaybookStats   []SetupDiagnosticStats    `json:"long_regime_playbook_stats,omitempty"`
+	WeakLongSetups            []SetupDiagnosticStats    `json:"weak_long_setups,omitempty"`
 	ConflictStats             map[string]int            `json:"conflict_stats,omitempty"`
 	CooldownStats             map[string]int            `json:"cooldown_stats,omitempty"`
 	GateBugFindings           []string                  `json:"gate_bug_findings"`

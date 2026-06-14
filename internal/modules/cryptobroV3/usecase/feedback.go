@@ -34,6 +34,67 @@ func safeDiv(val, div float64) float64 {
 	return val / div
 }
 
+func maxFloat(left, right float64) float64 {
+	if left > right {
+		return left
+	}
+	return right
+}
+
+func canonicalRegimeLabel(label string) string {
+	normalized := strings.ToUpper(strings.TrimSpace(label))
+	switch normalized {
+	case "LOW_VOLATILITY":
+		return string(LOW_VOL)
+	case "HIGH_VOLATILITY":
+		return string(HIGH_VOL)
+	case "CHOP":
+		return string(CHOP_RANGE)
+	case "BEARISH":
+		return string(RISK_OFF)
+	case "BULLISH":
+		return string(ALT_SUPPORTIVE)
+	default:
+		switch {
+		case strings.Contains(normalized, string(BTC_CHAOS)) || strings.Contains(normalized, "CHAOS"):
+			return string(BTC_CHAOS)
+		case strings.Contains(normalized, string(HIGH_VOL)) || strings.Contains(normalized, "HIGH_VOLATILITY"):
+			return string(HIGH_VOL)
+		case strings.Contains(normalized, string(LOW_VOL)) || strings.Contains(normalized, "LOW_VOLATILITY"):
+			return string(LOW_VOL)
+		case strings.Contains(normalized, string(COMPRESSION)):
+			return string(COMPRESSION)
+		case strings.Contains(normalized, string(ALT_SUPPORTIVE)) || strings.Contains(normalized, "BULLISH"):
+			return string(ALT_SUPPORTIVE)
+		case strings.Contains(normalized, string(BTC_DOMINANCE)) || strings.Contains(normalized, "DOMINANCE"):
+			return string(BTC_DOMINANCE)
+		case strings.Contains(normalized, string(RISK_OFF)) || strings.Contains(normalized, "BEARISH"):
+			return string(RISK_OFF)
+		case strings.Contains(normalized, string(CHOP_RANGE)) || strings.Contains(normalized, "SIDEWAYS"):
+			return string(CHOP_RANGE)
+		default:
+			return normalized
+		}
+	}
+}
+
+func regimeIsAny(label string, regimes ...MarketRegime) bool {
+	canonical := canonicalRegimeLabel(label)
+	for _, regime := range regimes {
+		if canonical == string(regime) {
+			return true
+		}
+	}
+	return false
+}
+
+func formatFloatThreshold(name string, value float64) string {
+	if value == float64(int(value)) {
+		return fmt.Sprintf("%s: %.0f", name, value)
+	}
+	return fmt.Sprintf("%s: %.2f", name, value)
+}
+
 func isFinalizedSignalJournalForEvaluation(item SignalJournal, now time.Time) bool {
 	switch item.Status {
 	case TP2_HIT, SL_HIT, EXPIRED, BREAKEVEN:
@@ -326,6 +387,8 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		expCount    int
 		sumMAE      float64
 		sumMFE      float64
+		sumRR       float64
+		sumPnl      float64
 		maxMAE      float64
 		sumHoldTime float64
 		holdCount   int
@@ -343,6 +406,13 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	directionRaw := make(map[string]*rawStats)
 	aiRaw := make(map[string]*rawStats)
 	stalenessRaw := make(map[string]*rawStats)
+	longSetupRaw := make(map[string]*rawStats)
+
+	type longSetupMeta struct {
+		MarketRegime string
+		Playbook     string
+	}
+	longSetupIndex := make(map[string]longSetupMeta)
 
 	getOrInitRaw := func(m map[string]*rawStats, key string) *rawStats {
 		if key == "" {
@@ -432,7 +502,10 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 
 		// Keys
 		pbKey := string(item.Playbook)
-		regimeKey := item.MarketRegime
+		regimeKey := canonicalRegimeLabel(item.MarketRegime)
+		if regimeKey == "" {
+			regimeKey = string(UNKNOWN)
+		}
 		tierKey := string(item.Tier)
 		dirKey := string(item.Direction)
 		aiConfKey := item.AIConfidence
@@ -461,6 +534,8 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 			}
 			rs.sumMAE += item.MAE
 			rs.sumMFE += item.MFE
+			rs.sumRR += item.RR
+			rs.sumPnl += realizedEvaluationPnl(item, now)
 			if item.MAE > rs.maxMAE {
 				rs.maxMAE = item.MAE
 			}
@@ -495,6 +570,14 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		updateRaw(getOrInitRaw(directionRaw, dirKey))
 		updateRaw(getOrInitRaw(aiRaw, aiConfKey))
 		updateRaw(getOrInitRaw(stalenessRaw, stalenessKey))
+		if item.Direction == LONG {
+			setupKey := regimeKey + "|" + pbKey
+			longSetupIndex[setupKey] = longSetupMeta{
+				MarketRegime: regimeKey,
+				Playbook:     pbKey,
+			}
+			updateRaw(getOrInitRaw(longSetupRaw, setupKey))
+		}
 	}
 
 	// Calculate main rates
@@ -595,6 +678,77 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	stalenessStats := make(map[string]StalenessStats)
 	for k, v := range stalenessRaw {
 		stalenessStats[k] = StalenessStats{TotalSignals: v.total, WinRate: safeRate(v.wins, v.total)}
+	}
+
+	buildSetupDiagnostic := func(direction, regime, playbook string, stats *rawStats) SetupDiagnosticStats {
+		if stats == nil {
+			return SetupDiagnosticStats{
+				Direction:    direction,
+				MarketRegime: regime,
+				Playbook:     playbook,
+			}
+		}
+		return SetupDiagnosticStats{
+			Direction:          direction,
+			MarketRegime:       regime,
+			Playbook:           playbook,
+			TotalSignals:       stats.total,
+			WinRate:            safeRate(stats.wins, stats.total),
+			TP1Rate:            safeRate(stats.tp1Count, stats.total),
+			TP2Rate:            safeRate(stats.tp2Count, stats.total),
+			SLRate:             safeRate(stats.slCount, stats.total),
+			ExpiredRate:        safeRate(stats.expCount, stats.total),
+			AverageMAE:         safeDiv(stats.sumMAE, float64(stats.total)),
+			AverageMFE:         safeDiv(stats.sumMFE, float64(stats.total)),
+			AverageRR:          safeDiv(stats.sumRR, float64(stats.total)),
+			TotalPnlPercentage: stats.sumPnl,
+		}
+	}
+
+	longRegimePlaybookStats := make([]SetupDiagnosticStats, 0, len(longSetupRaw))
+	for key, stats := range longSetupRaw {
+		meta, ok := longSetupIndex[key]
+		if !ok {
+			continue
+		}
+		longRegimePlaybookStats = append(longRegimePlaybookStats, buildSetupDiagnostic(string(LONG), meta.MarketRegime, meta.Playbook, stats))
+	}
+	sort.Slice(longRegimePlaybookStats, func(i, j int) bool {
+		if longRegimePlaybookStats[i].MarketRegime != longRegimePlaybookStats[j].MarketRegime {
+			return longRegimePlaybookStats[i].MarketRegime < longRegimePlaybookStats[j].MarketRegime
+		}
+		if longRegimePlaybookStats[i].Playbook != longRegimePlaybookStats[j].Playbook {
+			return longRegimePlaybookStats[i].Playbook < longRegimePlaybookStats[j].Playbook
+		}
+		return longRegimePlaybookStats[i].TotalSignals > longRegimePlaybookStats[j].TotalSignals
+	})
+
+	weakLongSetups := make([]SetupDiagnosticStats, 0, len(longRegimePlaybookStats))
+	for _, stat := range longRegimePlaybookStats {
+		if stat.TotalSignals >= 3 {
+			weakLongSetups = append(weakLongSetups, stat)
+		}
+	}
+	sort.Slice(weakLongSetups, func(i, j int) bool {
+		if weakLongSetups[i].WinRate != weakLongSetups[j].WinRate {
+			return weakLongSetups[i].WinRate < weakLongSetups[j].WinRate
+		}
+		if weakLongSetups[i].SLRate != weakLongSetups[j].SLRate {
+			return weakLongSetups[i].SLRate > weakLongSetups[j].SLRate
+		}
+		if weakLongSetups[i].ExpiredRate != weakLongSetups[j].ExpiredRate {
+			return weakLongSetups[i].ExpiredRate > weakLongSetups[j].ExpiredRate
+		}
+		if weakLongSetups[i].TotalSignals != weakLongSetups[j].TotalSignals {
+			return weakLongSetups[i].TotalSignals > weakLongSetups[j].TotalSignals
+		}
+		if weakLongSetups[i].MarketRegime != weakLongSetups[j].MarketRegime {
+			return weakLongSetups[i].MarketRegime < weakLongSetups[j].MarketRegime
+		}
+		return weakLongSetups[i].Playbook < weakLongSetups[j].Playbook
+	})
+	if len(weakLongSetups) > 5 {
+		weakLongSetups = weakLongSetups[:5]
 	}
 
 	// Find best/worst metrics
@@ -850,7 +1004,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	shortBullishCount := 0
 	shortBullishSLCount := 0
 	for _, item := range finalized {
-		if item.Direction == SHORT && (item.MarketRegime == "BULLISH" || item.MarketRegime == "ALT_SUPPORTIVE" || item.MarketRegime == "BTC_DOMINANCE") {
+		if item.Direction == SHORT && regimeIsAny(item.MarketRegime, ALT_SUPPORTIVE, BTC_DOMINANCE) {
 			shortBullishCount++
 			if item.Status == SL_HIT {
 				shortBullishSLCount++
@@ -861,15 +1015,15 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		addRec(ThresholdRecommendation{
 			IssueType:          "POLICY_TUNING",
 			Playbook:           "ALL",
-			MarketRegime:       "BULLISH",
+			MarketRegime:       string(ALT_SUPPORTIVE),
 			Direction:          "SHORT",
-			MetricName:         "SHORT_BULLISH_SL_RATE",
+			MetricName:         "SHORT_SUPPORTIVE_SL_RATE",
 			MetricValue:        safeRate(shortBullishSLCount, shortBullishCount),
 			CurrentThreshold:   "LongMode/ShortMode active",
 			SuggestedThreshold: "ShortMode: SWEEP_ONLY",
-			EvidenceSummary:    "Short signals during bullish market regimes suffer high stop-out rates.",
-			Reason:             "Counter-trend shorting during bullish regimes leads to stop-outs.",
-			SuggestedAction:    "Restrict ShortMode in MarketPolicy to SWEEP_ONLY during ALT_SUPPORTIVE or BULLISH regimes, and block trend continuation shorts.",
+			EvidenceSummary:    "Short signals during supportive or BTC-dominance regimes suffer high stop-out rates.",
+			Reason:             "Counter-trend shorting during ALT_SUPPORTIVE or BTC_DOMINANCE conditions leads to stop-outs.",
+			SuggestedAction:    "Restrict ShortMode in MarketPolicy to SWEEP_ONLY during ALT_SUPPORTIVE or BTC_DOMINANCE regimes, and block trend continuation shorts.",
 		}, shortBullishCount)
 	}
 
@@ -877,7 +1031,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	longRiskOffCount := 0
 	longRiskOffSLCount := 0
 	for _, item := range finalized {
-		if item.Direction == LONG && (item.MarketRegime == "RISK_OFF" || item.MarketRegime == "BEARISH") {
+		if item.Direction == LONG && regimeIsAny(item.MarketRegime, RISK_OFF) {
 			longRiskOffCount++
 			if item.Status == SL_HIT {
 				longRiskOffSLCount++
@@ -898,6 +1052,35 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 			Reason:             "Trend continuation longs fail when overall market is in RISK_OFF or BEARISH mode.",
 			SuggestedAction:    "Restrict LongMode to REVERSAL_ONLY during RISK_OFF regimes, allowing only high-conviction low sweeps or range edge rejections.",
 		}, longRiskOffCount)
+	}
+
+	longBaselineWinRate := 0.0
+	if stats, ok := directionStats[string(LONG)]; ok {
+		longBaselineWinRate = stats.WinRate
+	}
+	for i, stat := range weakLongSetups {
+		if i >= 3 {
+			break
+		}
+		if stat.TotalSignals < 10 {
+			continue
+		}
+		if stat.WinRate >= 40.0 && stat.SLRate <= 55.0 && stat.ExpiredRate <= 50.0 && stat.WinRate+10.0 >= longBaselineWinRate {
+			continue
+		}
+		addRec(ThresholdRecommendation{
+			IssueType:          "DIRECTIONAL_DIAGNOSTIC",
+			Playbook:           stat.Playbook,
+			MarketRegime:       stat.MarketRegime,
+			Direction:          string(LONG),
+			MetricName:         "LONG_REGIME_PLAYBOOK_WIN_RATE",
+			MetricValue:        stat.WinRate,
+			CurrentThreshold:   "Selector + policy active",
+			SuggestedThreshold: "Review LONG slice before global tuning",
+			EvidenceSummary:    fmt.Sprintf("LONG %s in %s posts %.2f%% win rate with %.2f%% SL rate across %d finalized signals.", stat.Playbook, stat.MarketRegime, stat.WinRate, stat.SLRate, stat.TotalSignals),
+			Reason:             "This specific long slice underperforms on realized outcomes, so the next action should be targeted diagnosis rather than broad tightening.",
+			SuggestedAction:    "Review selector eligibility, local/final gate, and target profile for this exact LONG regime/playbook slice; if unchanged, downgrade it to WATCH_ONLY until the slice recovers.",
+		}, stat.TotalSignals)
 	}
 
 	// Recommendation 3: Tier C sering gagal
@@ -931,30 +1114,22 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	// Recommendation 4: TREND_PULLBACK sering gagal
 	tpCount := 0
 	tpSLCount := 0
-	tpLowADXSL := 0
-	tpChopSL := 0
 	for _, item := range finalized {
 		if item.Playbook == "TREND_PULLBACK" {
 			tpCount++
 			if item.Status == SL_HIT {
 				tpSLCount++
-				summary := strings.ToLower(item.ThresholdProfileSummary)
-				if strings.Contains(summary, "adx") || strings.Contains(summary, "momentum") {
-					tpLowADXSL++
-				}
-				if item.MarketRegime == "CHOP" || item.MarketRegime == "RANGE" || item.MarketRegime == "LOW_VOLATILITY" {
-					tpChopSL++
-				}
 			}
 		}
 	}
+	trendProfile := GetPlaybookThresholdProfile(TREND_PULLBACK, MarketPolicy{}, "")
 	if tpCount > 0 && safeRate(tpSLCount, tpCount) > 40 {
 		addRec(ThresholdRecommendation{
 			IssueType:          "THRESHOLD_TUNING",
 			Playbook:           "TREND_PULLBACK",
 			MetricName:         "TREND_PULLBACK_SL_RATE",
 			MetricValue:        safeRate(tpSLCount, tpCount),
-			CurrentThreshold:   "MinADX: 20",
+			CurrentThreshold:   formatFloatThreshold("MinADX", trendProfile.MinADX),
 			SuggestedThreshold: "MinADX: 25",
 			EvidenceSummary:    "TREND_PULLBACK has high stop-outs associated with low ADX values and range chops.",
 			Reason:             "Trend pullbacks require a strong active trend to continuation; entering in chop leads to range bounds stop-out.",
@@ -973,17 +1148,18 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 			}
 		}
 	}
+	sweepProfile := GetPlaybookThresholdProfile(LIQUIDITY_SWEEP_REVERSAL, MarketPolicy{}, "")
 	if lsCount > 0 && safeRate(lsSLCount, lsCount) > 40 {
 		addRec(ThresholdRecommendation{
 			IssueType:          "THRESHOLD_TUNING",
 			Playbook:           "LIQUIDITY_SWEEP_REVERSAL",
 			MetricName:         "LIQUIDITY_SWEEP_REVERSAL_SL_RATE",
 			MetricValue:        safeRate(lsSLCount, lsCount),
-			CurrentThreshold:   "MinVolumeRatio: 1.5",
-			SuggestedThreshold: "MinVolumeRatio: 1.8",
+			CurrentThreshold:   formatFloatThreshold("MinVolumeRatio", sweepProfile.MinVolumeRatio),
+			SuggestedThreshold: formatFloatThreshold("MinVolumeRatio", RoundToDecimalPlaces(maxFloat(sweepProfile.MinVolumeRatio+0.2, 1.5), 2)),
 			EvidenceSummary:    "Sweep reversals suffer stop-outs on weak volume confirmation.",
 			Reason:             "Liquidity sweep reversals require high volume validation to confirm exhaustion of counterparty orders.",
-			SuggestedAction:    "Increase MinVolumeRatio to 1.8 and require wick rejection confirmation.",
+			SuggestedAction:    "Increase MinVolumeRatio and require wick rejection confirmation.",
 		}, lsCount)
 	}
 
@@ -1002,17 +1178,28 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 			}
 		}
 	}
+	compressionProfile := GetPlaybookThresholdProfile(COMPRESSION_BREAKOUT_RETEST, MarketPolicy{}, "")
 	if cbCount > 0 && (safeRate(cbSLCount, cbCount) > 40 || safeRate(cbStaleCount, cbCount) > 40) {
+		currentThreshold := "RequireRetest: true"
+		suggestedThreshold := "MinRetestQuality: 0.65 | StalenessATR: 0.25"
+		suggestedAction := "Keep breakout-candle entry disabled, require stronger retest hold, and tighten StalenessATR."
+		reason := "Even with retest-only execution, weak holds and stale entries still degrade breakout quality."
+		if compressionProfile.AllowBreakoutCandleEntry {
+			currentThreshold = "AllowBreakoutCandleEntry: true"
+			suggestedThreshold = "AllowBreakoutCandleEntry: false"
+			suggestedAction = "Set AllowBreakoutCandleEntry to false, require retest hold, and tighten StalenessATR."
+			reason = "Entering directly on breakout candle increases stop-out rate; waiting for retest confirmation is safer."
+		}
 		addRec(ThresholdRecommendation{
 			IssueType:          "THRESHOLD_TUNING",
 			Playbook:           "COMPRESSION_BREAKOUT_RETEST",
 			MetricName:         "COMPRESSION_BREAKOUT_RETEST_FAILURE_RATE",
 			MetricValue:        safeRate(cbSLCount+cbStaleCount, cbCount),
-			CurrentThreshold:   "AllowBreakoutCandleEntry: true",
-			SuggestedThreshold: "AllowBreakoutCandleEntry: false",
+			CurrentThreshold:   currentThreshold,
+			SuggestedThreshold: suggestedThreshold,
 			EvidenceSummary:    "Compression breakouts are hit by fake breakouts and expiration.",
-			Reason:             "Entering directly on breakout candle increases stop-out rate; waiting for retest confirmation is safer.",
-			SuggestedAction:    "Set AllowBreakoutCandleEntry to false, require retest hold, and tighten StalenessATR.",
+			Reason:             reason,
+			SuggestedAction:    suggestedAction,
 		}, cbCount)
 	}
 
@@ -1027,13 +1214,14 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 			}
 		}
 	}
+	rangeProfile := GetPlaybookThresholdProfile(RANGE_EDGE_REVERSAL, MarketPolicy{}, "")
 	if reCount > 0 && safeRate(reSLCount, reCount) > 40 {
 		addRec(ThresholdRecommendation{
 			IssueType:          "THRESHOLD_TUNING",
 			Playbook:           "RANGE_EDGE_REVERSAL",
 			MetricName:         "RANGE_EDGE_REVERSAL_SL_RATE",
 			MetricValue:        safeRate(reSLCount, reCount),
-			CurrentThreshold:   "MaxADX: 30",
+			CurrentThreshold:   formatFloatThreshold("MaxADX", rangeProfile.MaxADX),
 			SuggestedThreshold: "MaxADX: 22",
 			EvidenceSummary:    "Range edge reversals fail during active trend expansion.",
 			Reason:             "Range boundaries break during ADX trend expansion; reversal trades must be rejected under strong trend.",
@@ -1052,17 +1240,18 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 			}
 		}
 	}
+	squeezeProfile := GetPlaybookThresholdProfile(CROWDED_POSITIONING_SQUEEZE, MarketPolicy{}, "")
 	if csCount > 0 && safeRate(csSLCount, csCount) > 40 {
 		addRec(ThresholdRecommendation{
 			IssueType:          "THRESHOLD_TUNING",
 			Playbook:           "CROWDED_POSITIONING_SQUEEZE",
 			MetricName:         "CROWDED_POSITIONING_SQUEEZE_SL_RATE",
 			MetricValue:        safeRate(csSLCount, csCount),
-			CurrentThreshold:   "MinCrowdingScore: 65",
-			SuggestedThreshold: "MinCrowdingScore: 75",
+			CurrentThreshold:   formatFloatThreshold("MinCrowdingScore", squeezeProfile.MinCrowdingScore),
+			SuggestedThreshold: formatFloatThreshold("MinCrowdingScore", RoundToDecimalPlaces(maxFloat(squeezeProfile.MinCrowdingScore+0.2, 0.7), 2)),
 			EvidenceSummary:    "Crowded squeeze signals fail due to lack of price action confirmation.",
 			Reason:             "Executing squeezes based solely on extreme funding without reclaim/rejection leads to stop-outs.",
-			SuggestedAction:    "Increase MinCrowdingScore to 75 and require reclaim/rejection confirmation.",
+			SuggestedAction:    "Increase MinCrowdingScore and require reclaim/rejection confirmation.",
 		}, csCount)
 	}
 
@@ -1333,7 +1522,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	highVolCount := 0
 	highVolSLCount := 0
 	for _, item := range finalized {
-		if item.MarketRegime == "HIGH_VOLATILITY" || item.MarketRegime == "BTC_CHAOS" {
+		if regimeIsAny(item.MarketRegime, HIGH_VOL, BTC_CHAOS) {
 			highVolCount++
 			if item.Status == SL_HIT {
 				highVolSLCount++
@@ -1344,7 +1533,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		addRec(ThresholdRecommendation{
 			IssueType:          "POLICY_TUNING",
 			Playbook:           "ALL",
-			MarketRegime:       "HIGH_VOLATILITY",
+			MarketRegime:       string(HIGH_VOL),
 			MetricName:         "HIGH_VOL_SL_RATE",
 			MetricValue:        safeRate(highVolSLCount, highVolCount),
 			CurrentThreshold:   "MaxSymbols: 5",
@@ -1359,7 +1548,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	lowVolCount := 0
 	lowVolExpCount := 0
 	for _, item := range finalized {
-		if item.MarketRegime == "LOW_VOLATILITY" || item.MarketRegime == "CHOP" {
+		if regimeIsAny(item.MarketRegime, LOW_VOL, CHOP_RANGE) {
 			lowVolCount++
 			if item.Status == EXPIRED {
 				lowVolExpCount++
@@ -1370,7 +1559,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		addRec(ThresholdRecommendation{
 			IssueType:          "TARGET_TUNING",
 			Playbook:           "ALL",
-			MarketRegime:       "LOW_VOLATILITY",
+			MarketRegime:       string(LOW_VOL),
 			MetricName:         "LOW_VOL_EXPIRED_RATE",
 			MetricValue:        safeRate(lowVolExpCount, lowVolCount),
 			CurrentThreshold:   "Standard TP levels",
@@ -1446,33 +1635,35 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		DataCompleteness: completeness,
 		TotalSignals:     totalCount,
 		Metrics: map[string]float64{
-			"win_rate":                      winRate,
-			"tp1_rate":                      tp1Rate,
-			"tp2_rate":                      tp2Rate,
-			"sl_rate":                       slRate,
-			"expired_rate":                  expiredRate,
-			"average_mfe":                   avgMFE,
-			"average_mae":                   avgMAE,
-			"average_rr":                    avgRR,
-			"average_time_to_tp1":           avgTimeToTP1,
-			"average_time_to_tp2":           avgTimeToTP2,
-			"average_time_to_sl":            avgTimeToSL,
-			"average_holding_time":          avgHoldingTime,
-			"total_pnl_percentage":          totalPnl,
-			"raw_signal_journal_count":      float64(len(journal)),
-			"excluded_signal_anomaly_count": float64(excludedSignalAnomalies),
-			"watch_total":                   float64(len(watchJournal)),
-			"watch_finalized":               float64(watchFinalizedCount),
-			"watch_virtual_win_rate":        watchVirtualWinRate,
-			"watch_virtual_tp1_rate":        watchVirtualTP1Rate,
-			"watch_virtual_tp2_rate":        watchVirtualTP2Rate,
-			"watch_virtual_sl_rate":         watchVirtualSLRate,
-			"watch_virtual_expired_rate":    watchVirtualExpiredRate,
-			"watch_average_mfe":             watchAverageMFE,
-			"watch_average_mae":             watchAverageMAE,
-			"watch_total_pnl_percentage":    watchTotalPnl,
-			"raw_watch_journal_count":       float64(len(watchJournal)),
-			"excluded_watch_anomaly_count":  float64(excludedWatchAnomalies),
+			"win_rate":                         winRate,
+			"tp1_rate":                         tp1Rate,
+			"tp2_rate":                         tp2Rate,
+			"sl_rate":                          slRate,
+			"expired_rate":                     expiredRate,
+			"average_mfe":                      avgMFE,
+			"average_mae":                      avgMAE,
+			"average_rr":                       avgRR,
+			"average_time_to_tp1":              avgTimeToTP1,
+			"average_time_to_tp2":              avgTimeToTP2,
+			"average_time_to_sl":               avgTimeToSL,
+			"average_holding_time":             avgHoldingTime,
+			"total_pnl_percentage":             totalPnl,
+			"raw_signal_journal_count":         float64(len(journal)),
+			"excluded_signal_anomaly_count":    float64(excludedSignalAnomalies),
+			"watch_total":                      float64(len(watchJournal)),
+			"watch_finalized":                  float64(watchFinalizedCount),
+			"watch_virtual_win_rate":           watchVirtualWinRate,
+			"watch_virtual_tp1_rate":           watchVirtualTP1Rate,
+			"watch_virtual_tp2_rate":           watchVirtualTP2Rate,
+			"watch_virtual_sl_rate":            watchVirtualSLRate,
+			"watch_virtual_expired_rate":       watchVirtualExpiredRate,
+			"watch_average_mfe":                watchAverageMFE,
+			"watch_average_mae":                watchAverageMAE,
+			"watch_total_pnl_percentage":       watchTotalPnl,
+			"raw_watch_journal_count":          float64(len(watchJournal)),
+			"excluded_watch_anomaly_count":     float64(excludedWatchAnomalies),
+			"long_regime_playbook_slice_count": float64(len(longRegimePlaybookStats)),
+			"weak_long_setup_count":            float64(len(weakLongSetups)),
 		},
 		PlaybookStats:             playbookStats,
 		RegimeStats:               regimeStats,
@@ -1480,6 +1671,8 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		DirectionStats:            directionStats,
 		AIStats:                   aiStats,
 		StalenessStats:            stalenessStats,
+		LongRegimePlaybookStats:   longRegimePlaybookStats,
+		WeakLongSetups:            weakLongSetups,
 		ConflictStats:             conflictStats,
 		CooldownStats:             cooldownStats,
 		GateBugFindings:           gateBugFindings,

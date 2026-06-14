@@ -160,10 +160,10 @@
     "COMPRESSION": {
       "allow_long": true,
       "allow_short": true,
-      "long_mode": "BREAKOUT_RETEST_ONLY",
-      "short_mode": "BREAKOUT_RETEST_ONLY",
+      "long_mode": "NORMAL",
+      "short_mode": "NORMAL",
       "allowed_tiers": ["A", "B", "C"],
-      "allowed_playbooks": ["COMPRESSION_BREAKOUT_RETEST"],
+      "allowed_playbooks": ["COMPRESSION_BREAKOUT_RETEST", "LIQUIDITY_SWEEP_REVERSAL", "RANGE_EDGE_REVERSAL"],
       "max_symbols": 50,
       "max_ai_candidates": 3,
       "max_final_execute": 5,
