@@ -475,17 +475,20 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 		if p == CROWDED_POSITIONING_SQUEEZE && !hasDerivativesEvidence {
 			continue
 		}
+		skipDefaultLongBreakout := p == COMPRESSION_BREAKOUT_RETEST && (regime == DEFAULT || regime == UNKNOWN || regime == "")
 		if policy.AllowLong {
-			selections = append(selections, StrategySelection{
-				Symbol:        candidate.Symbol,
-				StrategyName:  string(p),
-				Direction:     LONG,
-				Priority:      3,
-				Reason:        "LONG allowed playbook by active policy constraints",
-				PolicyContext: policyCtx,
-				Tier:          candidate.Tier,
-				Status:        STRATEGY_SELECTED,
-			})
+			if !skipDefaultLongBreakout {
+				selections = append(selections, StrategySelection{
+					Symbol:        candidate.Symbol,
+					StrategyName:  string(p),
+					Direction:     LONG,
+					Priority:      3,
+					Reason:        "LONG allowed playbook by active policy constraints",
+					PolicyContext: policyCtx,
+					Tier:          candidate.Tier,
+					Status:        STRATEGY_SELECTED,
+				})
+			}
 		}
 		if policy.AllowShort {
 			selections = append(selections, StrategySelection{

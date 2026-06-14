@@ -184,4 +184,26 @@ func TestSelectPlaybooksRegimes(t *testing.T) {
 	if ok, _ := hasSelection(selectionsChaos, LIQUIDITY_SWEEP_REVERSAL, LONG); !ok {
 		t.Errorf("BTC_CHAOS: LIQUIDITY_SWEEP_REVERSAL should be allowed")
 	}
+
+	// 6. DEFAULT fallback should not expose weak LONG default compression breakouts,
+	// but can still keep the SHORT side available.
+	policyDefault := MarketPolicy{
+		Regime:     DEFAULT,
+		AllowLong:  true,
+		AllowShort: true,
+		AllowedPlaybooks: []Playbook{
+			TREND_PULLBACK,
+			LIQUIDITY_SWEEP_REVERSAL,
+			COMPRESSION_BREAKOUT_RETEST,
+			RANGE_EDGE_REVERSAL,
+		},
+		Reason: "DEFAULT active - neutral conditions",
+	}
+	selectionsDefault := selector.SelectPlaybooks(policyDefault, candidate, prelimData, tech, structure)
+	if ok, _ := hasSelection(selectionsDefault, COMPRESSION_BREAKOUT_RETEST, LONG); ok {
+		t.Errorf("DEFAULT: LONG COMPRESSION_BREAKOUT_RETEST should be suppressed in neutral regime")
+	}
+	if ok, _ := hasSelection(selectionsDefault, COMPRESSION_BREAKOUT_RETEST, SHORT); !ok {
+		t.Errorf("DEFAULT: SHORT COMPRESSION_BREAKOUT_RETEST should remain available when policy allows it")
+	}
 }

@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
+	"strings"
 	"testing"
 )
 
@@ -471,5 +472,16 @@ func TestPlaybookEligibility_CompressionBreakoutRetest(t *testing.T) {
 	resProfileExpansion := uc.CheckEligibility(sel, policy, dataProfileExpansion, techProfileExpansion, structure)
 	if !resProfileExpansion.Eligible {
 		t.Errorf("Expected Compression Breakout Retest with 1.25x volume ratio to be eligible, but got rejected: %s", resProfileExpansion.Reason)
+	}
+
+	// Test 6: LONG compression breakout retest must stay disabled in DEFAULT regime.
+	policyDefault := policy
+	policyDefault.Regime = DEFAULT
+	resDefaultLong := uc.CheckEligibility(sel, policyDefault, dataProfileExpansion, techProfileExpansion, structure)
+	if resDefaultLong.Eligible {
+		t.Errorf("Expected LONG Compression Breakout Retest in DEFAULT regime to be rejected, but it passed")
+	}
+	if !strings.Contains(resDefaultLong.Reason, "DEFAULT regime") {
+		t.Errorf("Expected DEFAULT regime rejection reason, got %s", resDefaultLong.Reason)
 	}
 }

@@ -413,6 +413,14 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 					Reason:   "LONG trades are disabled",
 				}
 			}
+			if policy.EffectiveRegime() == DEFAULT {
+				return PlaybookEligibilityResult{
+					Playbook: playbook,
+					Eligible: false,
+					Status:   PLAYBOOK_REJECTED,
+					Reason:   "LONG compression breakout retest is disabled in DEFAULT regime; reserve it for COMPRESSION or ALT_SUPPORTIVE conditions",
+				}
+			}
 		} else if sel.Direction == SHORT {
 			if policy.ShortMode == PULLBACK_ONLY {
 				return PlaybookEligibilityResult{
