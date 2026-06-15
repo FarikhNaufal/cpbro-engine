@@ -557,6 +557,27 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 			t.Errorf("expected LONG to be rejected under RISK_OFF due to dump, got status %s (reason: %s)", resRo.Status, resRo.Reason)
 		}
 	})
+
+	t.Run("Rule25 SL borderline case passes due to tolerance", func(t *testing.T) {
+		pol := policy
+		pol.Reason = "HIGH_VOL active - strict risk reduction mode" // regime high vol, requires 1.5x SL
+
+		q := baseQuant
+		q.TradePlan.EntryPrice = 100.0
+		q.TradePlan.StopLoss = 93.928214  // SL distance = 6.071786
+		q.TradePlan.TakeProfit = 110.0
+		q.TechnicalSnapshot = TechnicalSnapshot{
+			IndicatorValues: map[string]float64{
+				IndicatorADX: 25.0,
+				IndicatorATR: 4.047857, // 6.071786 / 4.047857 = 1.50000012
+			},
+		}
+
+		res := uc.Evaluate(q, baseLocalGate, baseAI, basePlanReview, baseStaleness, pol, 100.0, nil, nil, nil)
+		if contains(res.Reason, "SL distance") {
+			t.Errorf("SL distance should pass with tolerance, but got rejected/watched: %s", res.Reason)
+		}
+	})
 }
 
 func contains(s, substr string) bool {

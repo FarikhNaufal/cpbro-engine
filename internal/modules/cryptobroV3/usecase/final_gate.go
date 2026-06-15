@@ -476,7 +476,7 @@ func (uc *FinalGateUsecase) Evaluate(
 		if policy.EffectiveRegime() == BTC_CHAOS || policy.EffectiveRegime() == HIGH_VOL {
 			minSLMultiplier = 1.5 // high vol requires even wider SL
 		}
-		if slDistance < atrFromSnapshot*minSLMultiplier {
+		if slDistance < atrFromSnapshot*(minSLMultiplier-0.01) {
 			watchReasons = append(watchReasons,
 				fmt.Sprintf("SL distance %0.6f is only %0.2fx ATR (%0.6f), minimum required %0.1fx ATR",
 					slDistance, slDistance/atrFromSnapshot, atrFromSnapshot, minSLMultiplier))
