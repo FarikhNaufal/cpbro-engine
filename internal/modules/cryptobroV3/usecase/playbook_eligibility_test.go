@@ -485,3 +485,110 @@ func TestPlaybookEligibility_CompressionBreakoutRetest(t *testing.T) {
 		t.Errorf("Expected DEFAULT regime rejection reason, got %s", resDefaultLong.Reason)
 	}
 }
+
+func TestPlaybookEligibility_HighVolRelaxationsAndSubstringFix(t *testing.T) {
+	uc := NewPlaybookEligibilityUsecase()
+
+	t.Run("Trend Pullback relaxed trend in HIGH_VOL", func(t *testing.T) {
+		sel := StrategySelection{
+			StrategyName: string(TREND_PULLBACK),
+			Direction:    LONG,
+			Tier:         TierA,
+		}
+
+		policyHighVol := MarketPolicy{
+			AllowLong:    true,
+			AllowShort:   true,
+			AllowedTiers: []Tier{TierA},
+			Regime:       HIGH_VOL,
+		}
+
+		// H4 Trend: BULLISH
+		h4Candles := make([]dto.Candle, 200)
+		for i := 0; i < 200; i++ {
+			h4Candles[i] = dto.Candle{Close: 100.0}
+		}
+		h4Candles[199].Close = 105.0
+
+		// H1 Trend: BEARISH (opposite trend)
+		h1Candles := make([]dto.Candle, 50)
+		for i := 0; i < 50; i++ {
+			h1Candles[i] = dto.Candle{Close: 100.0}
+		}
+		h1Candles[49].Close = 95.0
+
+		// M15 inside value area
+		m15Candles := make([]dto.Candle, 60)
+		for i := 0; i < 60; i++ {
+			m15Candles[i] = dto.Candle{Close: 100.0}
+		}
+		for i := 50; i < 58; i++ {
+			m15Candles[i].Close = 110.0
+		}
+		m15Candles[59].Close = 104.0
+
+		data := MarketData{
+			Symbol:     "BTCUSDT",
+			H4Candles:  h4Candles,
+			H1Candles:  h1Candles,
+			M15Candles: m15Candles,
+		}
+
+		tech := &TechnicalSnapshot{
+			RSI: 50.0,
+			IndicatorValues: map[string]float64{
+				IndicatorADX: 25.0,
+			},
+		}
+
+		res := uc.CheckEligibility(sel, policyHighVol, data, tech, &StructureSnapshot{})
+		if !res.Eligible {
+			t.Errorf("Expected Trend Pullback in HIGH_VOL to pass even with H1 trend mismatch, but got rejected: %s", res.Reason)
+		}
+	})
+
+	t.Run("Liquidity Sweep eligibility bug fix verify", func(t *testing.T) {
+		sel := StrategySelection{
+			StrategyName: string(LIQUIDITY_SWEEP_REVERSAL),
+			Direction:    LONG,
+			Tier:         TierA,
+		}
+
+		policy := MarketPolicy{
+			AllowLong:    true,
+			AllowShort:   true,
+			AllowedTiers: []Tier{TierA},
+		}
+
+		m15Candles := make([]dto.Candle, 25)
+		for i := 0; i < 25; i++ {
+			m15Candles[i] = dto.Candle{Open: 100.0, Close: 100.0, High: 105.0, Low: 95.0, Vol: 10.0}
+		}
+
+		data := MarketData{
+			Symbol:     "BTCUSDT",
+			M15Candles: m15Candles,
+		}
+
+		// sweep_low is 0.0 (no sweep occurred)
+		// but structure notes contains "sweep_low=false"
+		tech := &TechnicalSnapshot{
+			RSI:         50.0,
+			VolumeRatio: 1.35,
+			IndicatorValues: map[string]float64{
+				"sweep_low":      0.0, // NO SWEEP
+				"wick_rejection": 1.0,
+				"volume_spike":   1.0,
+			},
+		}
+
+		structure := &StructureSnapshot{
+			Notes: "sweep_low=false", // this used to trigger the substring match bug!
+		}
+
+		res := uc.CheckEligibility(sel, policy, data, tech, structure)
+		if res.Eligible {
+			t.Errorf("Expected Liquidity Sweep with sweep_low=0.0 to be rejected, but it was accepted (substring match bug still active!)")
+		}
+	})
+}

@@ -322,7 +322,7 @@ func (uc *LocalGateUsecase) Evaluate(quant QuantResult, policy MarketPolicy, m15
 		if minVolRatio <= 0 {
 			minVolRatio = 1.3
 		}
-		if !ConfirmLiquiditySweep(m15, 10, minVolRatio) {
+		if !hasVolumeConfirmation(&quant.TechnicalSnapshot, m15, minVolRatio) {
 			return LocalGateResult{
 				Passed: false,
 				Status: LOCAL_REJECT,

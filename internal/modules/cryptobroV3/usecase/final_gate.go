@@ -486,10 +486,21 @@ func (uc *FinalGateUsecase) Evaluate(
 	// Playbook-specific execution safety rules
 	if quant.Playbook == TREND_PULLBACK {
 		trendAligned := false
-		if quant.Direction == LONG && quant.H4Trend == "BULLISH" && quant.H1Trend == "BULLISH" {
-			trendAligned = true
-		} else if quant.Direction == SHORT && quant.H4Trend == "BEARISH" && quant.H1Trend == "BEARISH" {
-			trendAligned = true
+		regime := policy.EffectiveRegime()
+		if regime == HIGH_VOL || regime == BTC_CHAOS {
+			// Relaxed check: only require macro H4 trend alignment
+			if quant.Direction == LONG && quant.H4Trend == "BULLISH" {
+				trendAligned = true
+			} else if quant.Direction == SHORT && quant.H4Trend == "BEARISH" {
+				trendAligned = true
+			}
+		} else {
+			// Normal strict check: both H4 and H1 must match
+			if quant.Direction == LONG && quant.H4Trend == "BULLISH" && quant.H1Trend == "BULLISH" {
+				trendAligned = true
+			} else if quant.Direction == SHORT && quant.H4Trend == "BEARISH" && quant.H1Trend == "BEARISH" {
+				trendAligned = true
+			}
 		}
 		if !trendAligned {
 			rejectReasons = append(rejectReasons, "Trend pullback lacks H1/H4 trend alignment")

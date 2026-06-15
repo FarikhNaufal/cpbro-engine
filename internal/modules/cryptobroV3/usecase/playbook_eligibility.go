@@ -3,7 +3,6 @@ package usecase
 import (
 	"fmt"
 	"math"
-	"strings"
 	"time"
 )
 
@@ -164,7 +163,17 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 			expectedTrend = "BEARISH"
 		}
 
-		if h4Trend != expectedTrend || h1Trend != expectedTrend {
+		trendAligned := false
+		regime := policy.EffectiveRegime()
+		if regime == HIGH_VOL || regime == BTC_CHAOS {
+			// Relaxed check: only require macro H4 trend alignment
+			trendAligned = (h4Trend == expectedTrend)
+		} else {
+			// Normal strict check: both H4 and H1 must match
+			trendAligned = (h4Trend == expectedTrend && h1Trend == expectedTrend)
+		}
+
+		if !trendAligned {
 			return PlaybookEligibilityResult{
 				Playbook: playbook,
 				Eligible: false,
@@ -306,7 +315,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 		// 1. Sweep check and Close returned to range
 		if sel.Direction == LONG {
 			sweepLow := tech.IndicatorValues["sweep_low"]
-			if sweepLow != 1.0 && !strings.Contains(strings.ToLower(structure.Notes), "sweep_low") && !strings.Contains(strings.ToLower(structure.Notes), "lower sweep") {
+			if sweepLow != 1.0 {
 				return PlaybookEligibilityResult{
 					Playbook: playbook,
 					Eligible: false,
@@ -314,8 +323,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 					Reason:   "No lower liquidity sweep detected for LONG setup",
 				}
 			}
-
-			m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
+		m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
 			if len(m15Closed) >= 21 {
 				lowest20 := LowestLow(m15Closed[:len(m15Closed)-1], 20)
 				lastClose := m15Closed[len(m15Closed)-1].Close
@@ -330,7 +338,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 			}
 		} else if sel.Direction == SHORT {
 			sweepHigh := tech.IndicatorValues["sweep_high"]
-			if sweepHigh != 1.0 && !strings.Contains(strings.ToLower(structure.Notes), "sweep_high") && !strings.Contains(strings.ToLower(structure.Notes), "upper sweep") {
+			if sweepHigh != 1.0 {
 				return PlaybookEligibilityResult{
 					Playbook: playbook,
 					Eligible: false,

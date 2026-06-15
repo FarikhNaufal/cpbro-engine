@@ -174,7 +174,8 @@ func GetPlaybookThresholdProfile(playbook Playbook, policy MarketPolicy, tier Ti
 	}
 
 	// 1. BTCChaos active - stricter profile limits
-	if policy.EffectiveRegime() == BTC_CHAOS {
+	regime := policy.EffectiveRegime()
+	if regime == BTC_CHAOS {
 		if profile.MinScoreAI < 7.8 {
 			profile.MinScoreAI = 7.8
 		}
@@ -187,6 +188,13 @@ func GetPlaybookThresholdProfile(playbook Playbook, policy MarketPolicy, tier Ti
 		profile.StalenessATR = math.Max(0.15, profile.StalenessATR-0.10)
 		profile.RequireAIHigh = true
 		profile.Reason = fmt.Sprintf("%s (Chaos tightened)", profile.Reason)
+	}
+
+	// Relax volume spike confirmation under high volatility since baseline volume is already spiked
+	if regime == HIGH_VOL || regime == BTC_CHAOS {
+		if profile.Playbook == LIQUIDITY_SWEEP_REVERSAL {
+			profile.MinVolumeRatio = 1.15
+		}
 	}
 
 	// 2. Tier C candidate - stricter limits

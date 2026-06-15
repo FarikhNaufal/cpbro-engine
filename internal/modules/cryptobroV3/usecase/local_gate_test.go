@@ -25,7 +25,9 @@ func TestLocalGate_RuleChecks(t *testing.T) {
 	m15 := []dto.Candle{
 		{Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100},
 		{Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100},
-		{Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 200}, // volume spike at last candle (200 vs 100 avg = 2.0x > 1.5x)
+		{Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100},
+		{Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100},
+		{Vol: 200}, // volume spike at last candle (200 vs 100 avg = 2.0x > 1.3x)
 	}
 
 	// 1. Valid passing case

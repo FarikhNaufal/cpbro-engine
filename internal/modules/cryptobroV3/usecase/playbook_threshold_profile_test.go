@@ -35,10 +35,14 @@ func TestPlaybookThresholdProfile_Scenarios(t *testing.T) {
 	m15VolumeSpike := []dto.Candle{
 		{Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0},
 		{Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0},
+		{Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0},
+		{Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0},
 		{Vol: 50.0}, // Last candle has volume spike > multiplier * average
 	}
 
 	m15NoVolumeSpike := []dto.Candle{
+		{Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0},
+		{Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0},
 		{Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0},
 		{Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0}, {Vol: 10.0},
 		{Vol: 10.0}, // No volume spike
