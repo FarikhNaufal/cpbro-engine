@@ -201,8 +201,8 @@ func (uc *PlaybookQuantEngineUsecase) RunEngineWithPreparedContext(
 				res.Reason = "No sweep low confirmation detected"
 				break
 			}
-			res.StopLoss = lowest - (0.5 * atr)
-			res.TakeProfit = triggerPrice + (1.8 * atr)
+			res.StopLoss = lowest - (0.8 * atr)
+			res.TakeProfit = triggerPrice + (2.2 * atr)
 		} else if direction == SHORT {
 			if !isSweepHigh {
 				res.Direction = WAIT
@@ -210,18 +210,18 @@ func (uc *PlaybookQuantEngineUsecase) RunEngineWithPreparedContext(
 				res.Reason = "No sweep high confirmation detected"
 				break
 			}
-			res.StopLoss = highest + (0.5 * atr)
-			res.TakeProfit = triggerPrice - (1.8 * atr)
+			res.StopLoss = highest + (0.8 * atr)
+			res.TakeProfit = triggerPrice - (2.2 * atr)
 		}
 
 	case COMPRESSION_BREAKOUT_RETEST:
 		res.SetupType = "BREAKOUT"
 		if direction == LONG {
-			res.StopLoss = triggerPrice - (1.2 * atr)
-			res.TakeProfit = triggerPrice + (2.5 * atr)
+			res.StopLoss = triggerPrice - (1.8 * atr)
+			res.TakeProfit = triggerPrice + (3.2 * atr)
 		} else if direction == SHORT {
-			res.StopLoss = triggerPrice + (1.2 * atr)
-			res.TakeProfit = triggerPrice - (2.5 * atr)
+			res.StopLoss = triggerPrice + (1.8 * atr)
+			res.TakeProfit = triggerPrice - (3.2 * atr)
 		}
 
 		// Breakout retest evidence (explicit, for scoring/AI context).
@@ -283,10 +283,10 @@ func (uc *PlaybookQuantEngineUsecase) RunEngineWithPreparedContext(
 				res.Reason = "LONG range edge reversal rejected due to strong bearish trend expansion"
 				break
 			}
-			res.StopLoss = triggerPrice - (1.2 * atr)
+			res.StopLoss = triggerPrice - (1.5 * atr)
 			res.TakeProfit = midPrice
 			if res.TakeProfit <= triggerPrice {
-				res.TakeProfit = triggerPrice + (1.5 * atr)
+				res.TakeProfit = triggerPrice + (2.2 * atr)
 			}
 			res.Reason = "LONG range edge reversal near support"
 		} else { // SHORT
@@ -296,10 +296,10 @@ func (uc *PlaybookQuantEngineUsecase) RunEngineWithPreparedContext(
 				res.Reason = "SHORT range edge reversal rejected due to strong bullish trend expansion"
 				break
 			}
-			res.StopLoss = triggerPrice + (1.2 * atr)
+			res.StopLoss = triggerPrice + (1.5 * atr)
 			res.TakeProfit = midPrice
 			if res.TakeProfit >= triggerPrice {
-				res.TakeProfit = triggerPrice - (1.5 * atr)
+				res.TakeProfit = triggerPrice - (2.2 * atr)
 			}
 			res.Reason = "SHORT range edge reversal near resistance"
 		}

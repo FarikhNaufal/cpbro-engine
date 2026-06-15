@@ -190,10 +190,10 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 		}
 		policy.Regime = RISK_OFF
 		policy.ShortMode = NORMAL
-		policy.LongMode = REVERSAL_ONLY
+		policy.LongMode = SWEEP_ONLY
 		policy.AllowedTiers = []Tier{TierA, TierB}
 		// Bear market: prioritize SHORT continuation (trend pullback) + defensive reversals.
-		// LONG should remain reversal-only via LongMode=REVERSAL_ONLY.
+		// LONG should remain sweep-only via LongMode=SWEEP_ONLY.
 		policy.AllowedPlaybooks = []Playbook{TREND_PULLBACK, LIQUIDITY_SWEEP_REVERSAL, RANGE_EDGE_REVERSAL}
 		policy.MaxSymbols = 50
 		policy.MaxAICandidates = 3

@@ -20,6 +20,7 @@ func (uc *FinalGateUsecase) Validate(signal dto.SignalResponse, policy MarketPol
 	quant := QuantResult{
 		Symbol:       signal.Symbol,
 		Direction:    Direction(signal.Direction),
+		Playbook:     Playbook(signal.Strategy),
 		TriggerPrice: signal.TriggerPrice,
 		StopLoss:     signal.StopLoss,
 		TakeProfit:   signal.TakeProfit,

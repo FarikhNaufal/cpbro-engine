@@ -247,6 +247,7 @@ func monitorJournalEntries(ctx context.Context, uc *MonitoringUsecase, provider 
 					item.Status = profile.TP1Hit
 					item.TimeToTP1 = c.Time.Sub(item.CreatedAt).String()
 					item.OutcomeReason = profile.CandleTP1Reason
+					item.StopLoss = item.EntryPrice // Move SL to entry price (breakeven)
 				}
 
 				if item.Status == profile.TP1Hit && isTP2Hit(item.Direction, c, item.TP2) {
@@ -284,6 +285,7 @@ func monitorJournalEntries(ctx context.Context, uc *MonitoringUsecase, provider 
 						item.Status = profile.TP1Hit
 						item.TimeToTP1 = elapsed.String()
 						item.OutcomeReason = profile.LiveTP1Reason
+						item.StopLoss = item.EntryPrice // Move SL to entry price (breakeven)
 						if price >= item.TP2 {
 							item.Status = profile.TP2Hit
 							item.TimeToTP2 = elapsed.String()
@@ -309,6 +311,7 @@ func monitorJournalEntries(ctx context.Context, uc *MonitoringUsecase, provider 
 						item.Status = profile.TP1Hit
 						item.TimeToTP1 = elapsed.String()
 						item.OutcomeReason = profile.LiveTP1Reason
+						item.StopLoss = item.EntryPrice // Move SL to entry price (breakeven)
 						if price <= item.TP2 {
 							item.Status = profile.TP2Hit
 							item.TimeToTP2 = elapsed.String()

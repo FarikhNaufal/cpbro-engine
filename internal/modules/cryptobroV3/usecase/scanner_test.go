@@ -280,12 +280,19 @@ func generateSweepCandles(startPrice float64) []dto.Candle {
 	for i := 0; i < 60; i++ {
 		t := baseTime.Add(time.Duration(i) * 15 * time.Minute)
 		closePrice := startPrice
-		high := startPrice + 0.1
-		low := startPrice - 0.1
+		if i%2 == 0 {
+			closePrice = startPrice + 0.02
+		} else {
+			closePrice = startPrice - 0.02
+		}
+		high := closePrice + 0.05
+		low := closePrice - 0.05
 		vol := 1000.0
 		// Candle 59 is the sweep candle
 		if i == 59 {
-			low = startPrice - 1.0 // sweeps below previous lows (99.9)
+			closePrice = startPrice
+			high = startPrice + 0.02
+			low = startPrice - 1.0 // sweeps below previous lows
 			vol = 2000.0           // volume spike
 		}
 		candles = append(candles, dto.Candle{

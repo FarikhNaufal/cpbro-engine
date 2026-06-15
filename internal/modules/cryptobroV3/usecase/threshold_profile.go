@@ -193,7 +193,9 @@ func GetPlaybookThresholdProfile(playbook Playbook, policy MarketPolicy, tier Ti
 	// Relax volume spike confirmation under high volatility since baseline volume is already spiked
 	if regime == HIGH_VOL || regime == BTC_CHAOS {
 		if profile.Playbook == LIQUIDITY_SWEEP_REVERSAL {
-			profile.MinVolumeRatio = 1.15
+			if profile.MinVolumeRatio > 1.15 || profile.MinVolumeRatio <= 0 {
+				profile.MinVolumeRatio = 1.15
+			}
 		}
 	}
 
