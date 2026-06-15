@@ -253,9 +253,9 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 		policy.AllowedTiers = []Tier{TierA, TierB} // Tier C limited
 		policy.MaxFinalExecute = 2                 // limit executes
 		policy.StalenessATRMultiplier = 0.8        // stricter staleness
-		// High volatility: allow only higher-quality playbooks and reduce breadth.
-		// Keep sweep reversals as primary; trend pullback can still be valid if policy allows it.
-		policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, TREND_PULLBACK, COMPRESSION_BREAKOUT_RETEST}
+		// High volatility: avoid admitting breakout-retest compression plays.
+		// Fresh production data shows they dominate rejects under HIGH_VOL instead of producing viable AI candidates.
+		policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, TREND_PULLBACK}
 		policy.RequireAIConfidence = AIConfidenceHigh
 		policy.RequireFreshEntry = true
 		policy.MaxPriceMove24hLong = 0.08
