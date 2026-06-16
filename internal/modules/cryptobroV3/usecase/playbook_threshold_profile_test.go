@@ -347,7 +347,7 @@ func TestPlaybookThresholdProfile_Scenarios(t *testing.T) {
 		if res.Passed || res.Status != LOCAL_REJECT {
 			t.Errorf("Expected LOCAL_REJECT for Short Trend Pullback under SWEEP_ONLY, got Passed=%v, Status=%s", res.Passed, res.Status)
 		}
-		if !strings.Contains(res.Reason, "ShortMode is SWEEP_ONLY") {
+		if !strings.Contains(res.Reason, "SWEEP_ONLY policy mode") {
 			t.Errorf("Expected reason to mention SWEEP_ONLY, got %q", res.Reason)
 		}
 	})
@@ -370,7 +370,7 @@ func TestPlaybookThresholdProfile_Scenarios(t *testing.T) {
 		if res.Passed || res.Status != LOCAL_REJECT {
 			t.Errorf("Expected LOCAL_REJECT for Long Trend Pullback under REVERSAL_ONLY, got Passed=%v, Status=%s", res.Passed, res.Status)
 		}
-		if !strings.Contains(res.Reason, "LongMode is REVERSAL_ONLY") {
+		if !strings.Contains(res.Reason, "REVERSAL_ONLY policy mode") {
 			t.Errorf("Expected reason to mention REVERSAL_ONLY, got %q", res.Reason)
 		}
 	})

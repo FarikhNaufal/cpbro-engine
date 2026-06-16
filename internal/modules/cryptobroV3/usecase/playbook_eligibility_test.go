@@ -271,6 +271,22 @@ func TestPlaybookEligibility_RangeEdgeReversal(t *testing.T) {
 		t.Errorf("Expected Range Edge Reversal to be eligible under RISK_OFF when policy allows it, but got rejected: %s", resRiskOff.Reason)
 	}
 
+	policyRiskOffSweepOnly := policyRiskOff
+	policyRiskOffSweepOnly.LongMode = SWEEP_ONLY
+	resRiskOffSweepOnly := uc.CheckEligibility(sel, policyRiskOffSweepOnly, MarketData{}, tech, structure)
+	if resRiskOffSweepOnly.Eligible {
+		t.Errorf("Expected Range Edge Reversal LONG to be rejected under SWEEP_ONLY, but it passed")
+	}
+
+	selShort := sel
+	selShort.Direction = SHORT
+	policyShortSweepOnly := policyRiskOff
+	policyShortSweepOnly.ShortMode = SWEEP_ONLY
+	resShortSweepOnly := uc.CheckEligibility(selShort, policyShortSweepOnly, MarketData{}, tech, structure)
+	if resShortSweepOnly.Eligible {
+		t.Errorf("Expected Range Edge Reversal SHORT to be rejected under SWEEP_ONLY, but it passed")
+	}
+
 	// Test 2: Strong trending regime (ADX > 30) should reject
 	techHighADX := &TechnicalSnapshot{
 		RSI: 50.0,

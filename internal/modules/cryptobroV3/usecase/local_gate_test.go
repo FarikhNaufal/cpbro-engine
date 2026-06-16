@@ -1,7 +1,11 @@
 package usecase
 
 import (
+	"context"
+	"fmt"
+	"strings"
 	"testing"
+	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 )
@@ -95,6 +99,23 @@ func TestLocalGate_RuleChecks(t *testing.T) {
 		t.Errorf("Expected reject for SWEEP_ONLY blocking TREND_PULLBACK, got status %s reason %s", res.Status, res.Reason)
 	}
 
+	quantShortRange := quantShortTP
+	quantShortRange.Playbook = RANGE_EDGE_REVERSAL
+	res = gate.Evaluate(quantShortRange, policyShortSweep, m15)
+	if res.Passed || res.Status != LOCAL_REJECT {
+		t.Errorf("Expected reject for ShortMode SWEEP_ONLY blocking RANGE_EDGE_REVERSAL, got status %s reason %s", res.Status, res.Reason)
+	}
+
+	// 5b. LongMode SWEEP_ONLY must block non-sweep reversal playbooks
+	policyLongSweep := policy
+	policyLongSweep.LongMode = SWEEP_ONLY
+	quantLongRange := quantPass
+	quantLongRange.Playbook = RANGE_EDGE_REVERSAL
+	res = gate.Evaluate(quantLongRange, policyLongSweep, m15)
+	if res.Passed || res.Status != LOCAL_REJECT {
+		t.Errorf("Expected reject for LongMode SWEEP_ONLY blocking RANGE_EDGE_REVERSAL, got status %s reason %s", res.Status, res.Reason)
+	}
+
 	// 6. Rule 8: RR < 1.5
 	quantBadRR := quantPass
 	quantBadRR.TradePlan.TakeProfit = 5.2 // Reward = 0.2, Risk = 0.5 (RR = 0.4 < 1.5)
@@ -180,5 +201,187 @@ func TestLocalGate_RuleChecks(t *testing.T) {
 	res = gate.Evaluate(quantRangeHighADX, policy, m15)
 	if res.Passed || res.Status != LOCAL_WATCH {
 		t.Errorf("Expected LOCAL_WATCH for high ADX Range Edge Reversal, got status %s reason %s", res.Status, res.Reason)
+	}
+}
+
+type mockLocalGateMarketDataProvider struct {
+	m5Candles []dto.Candle
+}
+
+func (m *mockLocalGateMarketDataProvider) FetchClosedCandles(ctx context.Context, symbol string, interval string, limit int) ([]dto.Candle, error) {
+	if interval == "5m" {
+		return m.m5Candles, nil
+	}
+	return nil, fmt.Errorf("unexpected interval: %s", interval)
+}
+func (m *mockLocalGateMarketDataProvider) FetchLatestPrice(ctx context.Context, symbol string) (float64, error) {
+	return 0, nil
+}
+func (m *mockLocalGateMarketDataProvider) FetchAllFuturesTickers24h(ctx context.Context) ([]dto.Ticker24h, error) {
+	return nil, nil
+}
+func (m *mockLocalGateMarketDataProvider) FetchPremiumFundingRates(ctx context.Context) (map[string]float64, error) {
+	return nil, nil
+}
+func (m *mockLocalGateMarketDataProvider) FetchOpenInterest(ctx context.Context, symbol string) (float64, error) {
+	return 0, nil
+}
+func (m *mockLocalGateMarketDataProvider) FetchHistoricalCandles(ctx context.Context, symbol string, interval string, startTime time.Time, endTime time.Time) ([]dto.Candle, error) {
+	return nil, nil
+}
+
+func TestLocalGate_M5Confirmation(t *testing.T) {
+	// Setup standard policy and candidate
+	policy := MarketPolicy{
+		AllowLong:        true,
+		AllowShort:       true,
+		LongMode:         NORMAL,
+		ShortMode:        NORMAL,
+		AllowedTiers:     []Tier{TierA},
+		AllowedPlaybooks: []Playbook{LIQUIDITY_SWEEP_REVERSAL, TREND_PULLBACK},
+		MinScoreAI:       7.0,
+		MinScoreExecute:  7.0,
+		Reason:           "Normal conditions",
+	}
+
+	m15 := []dto.Candle{
+		{Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100},
+		{Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100},
+		{Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100},
+		{Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100}, {Vol: 100},
+		{Vol: 200}, // volume confirmation spike
+	}
+
+	quantPass := QuantResult{
+		Symbol:       "NEARUSDT",
+		Direction:    LONG,
+		Playbook:     LIQUIDITY_SWEEP_REVERSAL,
+		Score:        8.0,
+		Tier:         TierA,
+		IndicatorMet: true,
+		TechnicalSnapshot: TechnicalSnapshot{
+			IndicatorValues: map[string]float64{
+				"adx":            25.0,
+				"volume_spike":   1.0,
+				"wick_rejection": 1.0,
+			},
+		},
+		TradePlan: TradePlan{
+			EntryPrice: 5.0,
+			TakeProfit: 6.0,
+			StopLoss:   4.5,
+		},
+	}
+
+	// 1. Verify M5 disabled: passes without fetching M5
+	gate := NewLocalGateUsecase()
+	// No marketData setup, both flags false by default
+	res := gate.Evaluate(quantPass, policy, m15)
+	if !res.Passed || res.Status != AI_CANDIDATE {
+		t.Errorf("Expected pass with M5 disabled, got status %s reason %s", res.Status, res.Reason)
+	}
+
+	// 2. Enable M5 confirmations and setup mock market data
+	reg := GetGlobalConfigRegistry()
+	originalProfile, exists := reg.GetPlaybookProfile(LIQUIDITY_SWEEP_REVERSAL)
+	if !exists {
+		originalProfile = PlaybookThresholdProfile{Playbook: LIQUIDITY_SWEEP_REVERSAL}
+	}
+	defer func() {
+		// Restore
+		reg.mu.Lock()
+		reg.profiles[LIQUIDITY_SWEEP_REVERSAL] = originalProfile
+		reg.mu.Unlock()
+	}()
+
+	evaluateWithM5 := func(m5 []dto.Candle) LocalGateResult {
+		mockProv := &mockLocalGateMarketDataProvider{m5Candles: m5}
+		mdu := NewMarketDataUsecase(mockProv)
+		gate.SetMarketData(mdu)
+		return gate.Evaluate(quantPass, policy, m15)
+	}
+
+	// A. Early Invalidation check
+	reg.mu.Lock()
+	reg.profiles[LIQUIDITY_SWEEP_REVERSAL] = PlaybookThresholdProfile{
+		Playbook:                  LIQUIDITY_SWEEP_REVERSAL,
+		RequireM5RejectionConfirm: true,
+		MinRR:                     1.0,
+	}
+	reg.mu.Unlock()
+
+	// Last M5 Close crosses Stop Loss (4.5)
+	res = evaluateWithM5([]dto.Candle{
+		{Open: 4.8, Close: 4.4, High: 4.9, Low: 4.3}, // Close 4.4 is <= StopLoss 4.5
+	})
+	if res.Passed || res.Status != LOCAL_REJECT || !strings.Contains(res.Reason, "M5 early invalidation") {
+		t.Errorf("Expected LOCAL_REJECT for M5 early invalidation, got status %s reason %s", res.Status, res.Reason)
+	}
+
+	// B. Sweep Rejection Confirmation (succeeds)
+	// At least one candle has wick ratio >= 0.35. For LONG, lower wick ratio.
+	// Candle range: 5.0 - 4.5 = 0.5. Open: 4.8, Close: 4.8, Low: 4.6
+	// Min(Open, Close) = 4.8. Lower wick = (4.8 - 4.6)/0.5 = 0.4 >= 0.35
+	res = evaluateWithM5([]dto.Candle{
+		{Open: 4.8, Close: 4.8, High: 5.0, Low: 4.6}, // Lower wick ratio = 0.40
+	})
+	if !res.Passed || res.Status != AI_CANDIDATE {
+		t.Errorf("Expected pass for Sweep Rejection Confirmation, got status %s reason %s", res.Status, res.Reason)
+	}
+
+	// C. Sweep Rejection Confirmation (fails)
+	// Candle: Open: 4.8, Close: 4.7, Low: 4.68. Range: 5.0 - 4.68 = 0.32
+	// Min(Open, Close) = 4.7. Lower wick = (4.7 - 4.68)/0.32 = 0.02 / 0.32 = 0.06 < 0.35
+	res = evaluateWithM5([]dto.Candle{
+		{Open: 4.8, Close: 4.7, High: 5.0, Low: 4.68},
+	})
+	if res.Passed || res.Status != LOCAL_WATCH || !strings.Contains(res.Reason, "M5 sweep rejection confirmation failed") {
+		t.Errorf("Expected LOCAL_WATCH for failed Sweep Rejection Confirmation, got status %s reason %s", res.Status, res.Reason)
+	}
+
+	// D. Pullback Continuation Confirmation (succeeds)
+	reg.mu.Lock()
+	reg.profiles[LIQUIDITY_SWEEP_REVERSAL] = PlaybookThresholdProfile{
+		Playbook:                     LIQUIDITY_SWEEP_REVERSAL,
+		RequireM5ContinuationConfirm: true,
+		MinRR:                        1.0,
+	}
+	reg.mu.Unlock()
+
+	// Setup 10 candles where Close of last candle is above its EMA9.
+	// Let's create a series of 10 identical candles at Close 5.0, High 5.1, Low 4.9.
+	// EMA9 should resolve to 5.0, last closed Close is 5.1 (above 5.0).
+	res = evaluateWithM5([]dto.Candle{
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.1, High: 5.2, Low: 5.0}, // Last Close: 5.1
+	})
+	if !res.Passed || res.Status != AI_CANDIDATE {
+		t.Errorf("Expected pass for Pullback Continuation Confirmation, got status %s reason %s", res.Status, res.Reason)
+	}
+
+	// E. Pullback Continuation Confirmation (fails)
+	// Last Close is 4.9 (below EMA9).
+	res = evaluateWithM5([]dto.Candle{
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 4.9, High: 5.0, Low: 4.8}, // Last Close: 4.9
+	})
+	if res.Passed || res.Status != LOCAL_WATCH || !strings.Contains(res.Reason, "M5 pullback continuation confirmation failed") {
+		t.Errorf("Expected LOCAL_WATCH for failed Pullback Continuation Confirmation, got status %s reason %s", res.Status, res.Reason)
 	}
 }

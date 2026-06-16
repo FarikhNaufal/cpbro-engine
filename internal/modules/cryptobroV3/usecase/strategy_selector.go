@@ -57,10 +57,15 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 
 	hasDerivativesEvidence := tech != nil && tech.IndicatorValues != nil && tech.IndicatorValues[IndicatorHasCrowdingEvidence] == 1.0
 	finalizeSelections := func(selections []StrategySelection) []StrategySelection {
+		filtered := make([]StrategySelection, 0, len(selections))
 		for i := range selections {
+			if !ValidateDirectionalPath(policy, selections[i].Direction, Playbook(selections[i].StrategyName)) {
+				continue
+			}
 			selections[i].Priority = resolvePlaybookPriority(regime, selections[i].Direction, Playbook(selections[i].StrategyName))
+			filtered = append(filtered, selections[i])
 		}
-		return selections
+		return filtered
 	}
 
 	// 1. BTC_CHAOS regime
@@ -308,7 +313,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 		// RISK_OFF policy is expected to bias defensive setups.
 		// Keep selections aligned with policy.AllowedPlaybooks to avoid dead branches.
 		if policy.AllowShort {
-			if isPlaybookAllowed(TREND_PULLBACK) {
+			if isPlaybookAllowed(TREND_PULLBACK) && ValidateShortPath(policy, TREND_PULLBACK) {
 				selections = append(selections, StrategySelection{
 					Symbol:        candidate.Symbol,
 					StrategyName:  string(TREND_PULLBACK),
@@ -320,7 +325,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 					Status:        STRATEGY_SELECTED,
 				})
 			}
-			if isPlaybookAllowed(LIQUIDITY_SWEEP_REVERSAL) {
+			if isPlaybookAllowed(LIQUIDITY_SWEEP_REVERSAL) && ValidateShortPath(policy, LIQUIDITY_SWEEP_REVERSAL) {
 				selections = append(selections, StrategySelection{
 					Symbol:        candidate.Symbol,
 					StrategyName:  string(LIQUIDITY_SWEEP_REVERSAL),
@@ -332,7 +337,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 					Status:        STRATEGY_SELECTED,
 				})
 			}
-			if isPlaybookAllowed(RANGE_EDGE_REVERSAL) {
+			if isPlaybookAllowed(RANGE_EDGE_REVERSAL) && ValidateShortPath(policy, RANGE_EDGE_REVERSAL) {
 				selections = append(selections, StrategySelection{
 					Symbol:        candidate.Symbol,
 					StrategyName:  string(RANGE_EDGE_REVERSAL),
@@ -346,7 +351,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 			}
 		}
 		if policy.AllowLong {
-			if isPlaybookAllowed(LIQUIDITY_SWEEP_REVERSAL) {
+			if isPlaybookAllowed(LIQUIDITY_SWEEP_REVERSAL) && ValidateLongPath(policy, LIQUIDITY_SWEEP_REVERSAL) {
 				selections = append(selections, StrategySelection{
 					Symbol:        candidate.Symbol,
 					StrategyName:  string(LIQUIDITY_SWEEP_REVERSAL),
@@ -358,7 +363,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 					Status:        STRATEGY_SELECTED,
 				})
 			}
-			if isPlaybookAllowed(RANGE_EDGE_REVERSAL) {
+			if isPlaybookAllowed(RANGE_EDGE_REVERSAL) && ValidateLongPath(policy, RANGE_EDGE_REVERSAL) {
 				selections = append(selections, StrategySelection{
 					Symbol:        candidate.Symbol,
 					StrategyName:  string(RANGE_EDGE_REVERSAL),
@@ -370,7 +375,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 					Status:        STRATEGY_SELECTED,
 				})
 			}
-			if isPlaybookAllowed(CROWDED_POSITIONING_SQUEEZE) {
+			if isPlaybookAllowed(CROWDED_POSITIONING_SQUEEZE) && ValidateLongPath(policy, CROWDED_POSITIONING_SQUEEZE) {
 				selections = append(selections, StrategySelection{
 					Symbol:        candidate.Symbol,
 					StrategyName:  string(CROWDED_POSITIONING_SQUEEZE),

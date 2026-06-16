@@ -7,7 +7,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
@@ -136,10 +135,25 @@ func (uc *PlaybookQuantEngineUsecase) RunEngineWithPreparedContext(
 
 	atr := CalculateATR(m15Closed, 14)
 	if atr == 0 {
-		atr = triggerPrice * 0.01 // fallback to 1% ATR
+		fallbackPct := getRuntimeSettings().ATRFallbackPercent
+		if fallbackPct <= 0 {
+			fallbackPct = 0.01
+		}
+		atr = triggerPrice * fallbackPct
 	}
 
-	// Policy and safety check for SHORT paths
+	// Policy and safety checks for directional paths
+	if direction == LONG {
+		if !ValidateLongPath(policy, playbook) {
+			return QuantResult{
+				Symbol:       data.Symbol,
+				Direction:    WAIT,
+				Status:       PLAYBOOK_REJECTED,
+				Reason:       "LONG direction rejected by long path policy validation",
+				IndicatorMet: false,
+			}
+		}
+	}
 	if direction == SHORT {
 		if !ValidateShortPath(policy, playbook) {
 			return QuantResult{
@@ -437,8 +451,8 @@ func cloneStructureSnapshot(snapshot StructureSnapshot) StructureSnapshot {
 }
 
 func (uc *PlaybookQuantEngineUsecase) saveM15RawKlines(symbol string, candles []dto.Candle) {
-	// Debug-only raw kline dump (disabled by default).
-	if strings.TrimSpace(strings.ToLower(os.Getenv("DEBUG_SAVE_RAW_KLINES"))) != "true" {
+	settings := getRuntimeSettings()
+	if !settings.DebugSaveRawKlines {
 		return
 	}
 
@@ -451,7 +465,7 @@ func (uc *PlaybookQuantEngineUsecase) saveM15RawKlines(symbol string, candles []
 	}
 	closedCandles := candles[len(candles)-limit:]
 
-	dir := strings.TrimSpace(os.Getenv("RAW_KLINES_DEBUG_DIR"))
+	dir := settings.RawKlinesDebugDir
 	if dir == "" {
 		dir = "debug/klines"
 	}

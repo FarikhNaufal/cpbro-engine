@@ -470,12 +470,24 @@ func (uc *FinalGateUsecase) Evaluate(
 	atrFromSnapshot := quant.TechnicalSnapshot.IndicatorValues[IndicatorATR]
 	if atrFromSnapshot > 0 && entry > 0 && sl > 0 {
 		slDistance := math.Abs(entry - sl)
-		minSLMultiplier := 1.0 // minimum 1.0x ATR for SL distance
+		settings := getRuntimeSettings()
+		minSLMultiplier := settings.MinSLATRMultiplierBase
+		if minSLMultiplier <= 0 {
+			minSLMultiplier = 1.0
+		}
 		if quant.Playbook == LIQUIDITY_SWEEP_REVERSAL || quant.Playbook == RANGE_EDGE_REVERSAL {
-			minSLMultiplier = 1.2 // reversal playbooks need wider SL for sweep noise
+			if settings.MinSLATRMultiplierReversal > 0 {
+				minSLMultiplier = settings.MinSLATRMultiplierReversal
+			} else {
+				minSLMultiplier = 1.2
+			}
 		}
 		if policy.EffectiveRegime() == BTC_CHAOS || policy.EffectiveRegime() == HIGH_VOL {
-			minSLMultiplier = 1.5 // high vol requires even wider SL
+			if settings.MinSLATRMultiplierHighVol > 0 {
+				minSLMultiplier = settings.MinSLATRMultiplierHighVol
+			} else {
+				minSLMultiplier = 1.5
+			}
 		}
 		if slDistance < atrFromSnapshot*(minSLMultiplier-0.01) {
 			watchReasons = append(watchReasons,

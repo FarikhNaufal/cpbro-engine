@@ -1,17 +1,25 @@
 package usecase
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"strings"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 )
 
-type LocalGateUsecase struct{}
+type LocalGateUsecase struct {
+	marketData *MarketDataUsecase
+}
 
 func NewLocalGateUsecase() *LocalGateUsecase {
 	return &LocalGateUsecase{}
+}
+
+func (uc *LocalGateUsecase) SetMarketData(md *MarketDataUsecase) {
+	uc.marketData = md
 }
 
 // Passes checks local structural criteria against active MarketPolicy constraints.
@@ -22,6 +30,11 @@ func (uc *LocalGateUsecase) Passes(result QuantResult, policy MarketPolicy, play
 
 // Evaluate evaluates a trade candidate that has passed Candidate Arbiter.
 func (uc *LocalGateUsecase) Evaluate(quant QuantResult, policy MarketPolicy, m15 []dto.Candle) LocalGateResult {
+	return uc.EvaluateWithContext(context.Background(), quant, policy, m15)
+}
+
+// EvaluateWithContext evaluates a trade candidate with context, enabling on-demand M5 confirmations if configured.
+func (uc *LocalGateUsecase) EvaluateWithContext(ctx context.Context, quant QuantResult, policy MarketPolicy, m15 []dto.Candle) LocalGateResult {
 	// Guard: ensure IndicatorValues is never nil to prevent panic on map read
 	if quant.TechnicalSnapshot.IndicatorValues == nil {
 		quant.TechnicalSnapshot.IndicatorValues = make(map[string]float64)
@@ -197,7 +210,22 @@ func (uc *LocalGateUsecase) Evaluate(quant QuantResult, policy MarketPolicy, m15
 
 	// LongMode/ShortMode detailed checks
 	if quant.Direction == LONG {
-		if policy.LongMode == REVERSAL_ONLY {
+		if policy.LongMode != NORMAL && !ValidateLongPath(policy, quant.Playbook) {
+			return LocalGateResult{
+				Passed: false,
+				Status: LOCAL_REJECT,
+				Reason: modeRejectReason(policy, quant.Direction, quant.Playbook),
+			}
+		}
+		if policy.LongMode == SWEEP_ONLY {
+			if quant.Playbook != LIQUIDITY_SWEEP_REVERSAL {
+				return LocalGateResult{
+					Passed: false,
+					Status: LOCAL_REJECT,
+					Reason: fmt.Sprintf("LongMode is SWEEP_ONLY; playbook %s is blocked", quant.Playbook),
+				}
+			}
+		} else if policy.LongMode == REVERSAL_ONLY {
 			isSweep := quant.Playbook == LIQUIDITY_SWEEP_REVERSAL
 			isRangeReversal := quant.Playbook == RANGE_EDGE_REVERSAL
 			isSqueeze := quant.Playbook == CROWDED_POSITIONING_SQUEEZE
@@ -231,6 +259,13 @@ func (uc *LocalGateUsecase) Evaluate(quant QuantResult, policy MarketPolicy, m15
 			}
 		}
 	} else if quant.Direction == SHORT {
+		if policy.ShortMode != NORMAL && !ValidateShortPath(policy, quant.Playbook) {
+			return LocalGateResult{
+				Passed: false,
+				Status: LOCAL_REJECT,
+				Reason: modeRejectReason(policy, quant.Direction, quant.Playbook),
+			}
+		}
 		if policy.ShortMode == SWEEP_ONLY {
 			isSweep := quant.Playbook == LIQUIDITY_SWEEP_REVERSAL
 			isFailedBreakout := strings.Contains(strings.ToUpper(quant.SetupType), "FAILED_BREAKOUT")
@@ -425,6 +460,102 @@ func (uc *LocalGateUsecase) Evaluate(quant QuantResult, policy MarketPolicy, m15
 			Passed: false,
 			Status: LOCAL_REJECT,
 			Reason: "Technical setup indicators not fully met",
+		}
+	}
+
+	// M5 confirmations logic
+	if (profile.RequireM5RejectionConfirm || profile.RequireM5ContinuationConfirm) && uc.marketData != nil {
+		m5Candles, err := uc.marketData.FetchM5Candles(ctx, quant.Symbol, 30)
+		if err != nil {
+			slog.Warn("Failed to fetch M5 candles for confirmation", "symbol", quant.Symbol, "error", err)
+			return LocalGateResult{
+				Passed: false,
+				Status: LOCAL_WATCH,
+				Reason: fmt.Sprintf("M5 confirmation skipped: failed to fetch M5 candles: %v", err),
+			}
+		}
+
+		if len(m5Candles) == 0 {
+			return LocalGateResult{
+				Passed: false,
+				Status: LOCAL_WATCH,
+				Reason: "M5 confirmation failed: no M5 candles returned",
+			}
+		}
+
+		lastM5 := m5Candles[len(m5Candles)-1]
+
+		// Early Invalidation Check
+		if quant.Direction == LONG && lastM5.Close <= sl {
+			return LocalGateResult{
+				Passed: false,
+				Status: LOCAL_REJECT,
+				Reason: fmt.Sprintf("M5 early invalidation: last M5 close %0.4f crossed M15 stop loss level %0.4f", lastM5.Close, sl),
+			}
+		}
+		if quant.Direction == SHORT && lastM5.Close >= sl {
+			return LocalGateResult{
+				Passed: false,
+				Status: LOCAL_REJECT,
+				Reason: fmt.Sprintf("M5 early invalidation: last M5 close %0.4f crossed M15 stop loss level %0.4f", lastM5.Close, sl),
+			}
+		}
+
+		// Sweep Rejection Check
+		if profile.RequireM5RejectionConfirm {
+			m5Len := len(m5Candles)
+			checkCount := 3
+			if m5Len < 3 {
+				checkCount = m5Len
+			}
+			hasConfirm := false
+			var wickRatioVal float64
+			for i := 0; i < checkCount; i++ {
+				candle := m5Candles[m5Len-1-i]
+				if wr, ok := calculateDirectionalWickRatio([]dto.Candle{candle}, quant.Direction); ok {
+					if wr >= 0.35 {
+						hasConfirm = true
+						wickRatioVal = wr
+						break
+					} else {
+						wickRatioVal = wr
+					}
+				}
+			}
+			if !hasConfirm {
+				return LocalGateResult{
+					Passed: false,
+					Status: LOCAL_WATCH,
+					Reason: fmt.Sprintf("M5 sweep rejection confirmation failed: no recent M5 candle had wick ratio >= 0.35 (last checked wick ratio: %0.2f)", wickRatioVal),
+				}
+			}
+		}
+
+		// Pullback Continuation Check
+		if profile.RequireM5ContinuationConfirm {
+			ema9Series := CalculateEMA(m5Candles, 9)
+			if len(ema9Series) == 0 || ema9Series[len(ema9Series)-1] == 0 {
+				return LocalGateResult{
+					Passed: false,
+					Status: LOCAL_WATCH,
+					Reason: "M5 continuation confirmation failed: insufficient candles for M5 EMA9 calculation",
+				}
+			}
+			ema9Val := ema9Series[len(ema9Series)-1]
+			if quant.Direction == LONG && lastM5.Close <= ema9Val {
+				return LocalGateResult{
+					Passed: false,
+					Status: LOCAL_WATCH,
+					Reason: fmt.Sprintf("M5 pullback continuation confirmation failed: last M5 close %0.4f is not above EMA9 %0.4f", lastM5.Close, ema9Val),
+				}
+			}
+			if quant.Direction == SHORT && lastM5.Close >= ema9Val {
+				return LocalGateResult{
+					Passed: false,
+					Status: LOCAL_WATCH,
+					Reason: fmt.Sprintf("M5 pullback continuation confirmation failed: last M5 close %0.4f is not below EMA9 %0.4f", lastM5.Close, ema9Val),
+				}
+			}
 		}
 	}
 

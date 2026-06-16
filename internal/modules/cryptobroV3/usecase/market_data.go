@@ -60,6 +60,11 @@ type cachedFloat64 struct {
 	validUntil time.Time
 }
 
+const (
+	maxClosedCandleCacheEntries = 512
+	maxOpenInterestCacheEntries = 512
+)
+
 type MarketDataUsecaseConfig struct {
 	BootstrapTimeout time.Duration
 	InitialTimeout   time.Duration
@@ -429,10 +434,12 @@ func (uc *MarketDataUsecase) fetchClosedCandlesCached(ctx context.Context, symbo
 
 	cloned := append([]dto.Candle(nil), candles...)
 	uc.candleCacheMu.Lock()
+	pruneExpiredClosedCandleCache(uc.candleCache, now, maxClosedCandleCacheEntries)
 	uc.candleCache[cacheKey] = cachedClosedCandles{
 		candles:    cloned,
 		validUntil: validUntil,
 	}
+	pruneExpiredClosedCandleCache(uc.candleCache, now, maxClosedCandleCacheEntries)
 	uc.candleCacheMu.Unlock()
 
 	return append([]dto.Candle(nil), cloned...), nil
@@ -454,10 +461,12 @@ func (uc *MarketDataUsecase) fetchOpenInterestCached(ctx context.Context, symbol
 	}
 
 	uc.oiCacheMu.Lock()
+	pruneExpiredFloatCache(uc.oiCache, now, maxOpenInterestCacheEntries)
 	uc.oiCache[symbol] = cachedFloat64{
 		value:      value,
 		validUntil: now.Add(30 * time.Second),
 	}
+	pruneExpiredFloatCache(uc.oiCache, now, maxOpenInterestCacheEntries)
 	uc.oiCacheMu.Unlock()
 
 	return value, nil
@@ -481,8 +490,48 @@ func nextClosedCandleAvailability(candles []dto.Candle, interval string) time.Ti
 	return lastOpen.Add(tf * 2)
 }
 
+func pruneExpiredClosedCandleCache(cache map[string]cachedClosedCandles, now time.Time, maxEntries int) {
+	for key, cached := range cache {
+		if !now.Before(cached.validUntil) {
+			delete(cache, key)
+		}
+	}
+	if len(cache) <= maxEntries {
+		return
+	}
+	for key := range cache {
+		delete(cache, key)
+		if len(cache) <= maxEntries {
+			return
+		}
+	}
+}
+
+func pruneExpiredFloatCache(cache map[string]cachedFloat64, now time.Time, maxEntries int) {
+	for key, cached := range cache {
+		if !now.Before(cached.validUntil) {
+			delete(cache, key)
+		}
+	}
+	if len(cache) <= maxEntries {
+		return
+	}
+	for key := range cache {
+		delete(cache, key)
+		if len(cache) <= maxEntries {
+			return
+		}
+	}
+}
+
+func (uc *MarketDataUsecase) FetchM5Candles(ctx context.Context, symbol string, limit int) ([]dto.Candle, error) {
+	return uc.fetchClosedCandlesCached(ctx, symbol, "5m", limit)
+}
+
 func intervalToDuration(interval string) (time.Duration, bool) {
 	switch interval {
+	case "5m":
+		return 5 * time.Minute, true
 	case "15m":
 		return 15 * time.Minute, true
 	case "1h":

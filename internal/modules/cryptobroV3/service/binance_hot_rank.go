@@ -17,20 +17,60 @@ import (
 type BinanceHotRankService struct {
 	client   *http.Client
 	cacheTTL time.Duration
+	config   BinanceHotRankConfig
 
 	mu       sync.RWMutex
 	cached   []usecase.HotSymbol
 	cachedAt time.Time
 }
 
+type BinanceHotRankConfig struct {
+	RequestTimeout   time.Duration
+	CacheTTL         time.Duration
+	TrendingChains   []string
+	SocialChains     []string
+	SmartMoneyChains []string
+}
+
 func NewBinanceHotRankService() *BinanceHotRankService {
+	return NewBinanceHotRankServiceWithConfig(BinanceHotRankConfig{})
+}
+
+func NewBinanceHotRankServiceWithConfig(cfg BinanceHotRankConfig) *BinanceHotRankService {
+	if cfg.RequestTimeout <= 0 {
+		cfg.RequestTimeout = 10 * time.Second
+	}
+	if cfg.CacheTTL <= 0 {
+		cfg.CacheTTL = 10 * time.Minute
+	}
+	if len(cfg.TrendingChains) == 0 {
+		cfg.TrendingChains = []string{"1", "56", "8453"}
+	}
+	if len(cfg.SocialChains) == 0 {
+		cfg.SocialChains = []string{"56", "8453"}
+	}
+	if len(cfg.SmartMoneyChains) == 0 {
+		cfg.SmartMoneyChains = []string{"56", "8453"}
+	}
 	return &BinanceHotRankService{
-		client:   &http.Client{Timeout: 10 * time.Second},
-		cacheTTL: 10 * time.Minute,
+		client:   &http.Client{Timeout: cfg.RequestTimeout},
+		cacheTTL: cfg.CacheTTL,
+		config:   cfg,
 	}
 }
 
 func (s *BinanceHotRankService) FetchHotSymbols(ctx context.Context) ([]usecase.HotSymbol, error) {
+	cfg := s.config
+	if len(cfg.TrendingChains) == 0 {
+		cfg.TrendingChains = []string{"1", "56", "8453"}
+	}
+	if len(cfg.SocialChains) == 0 {
+		cfg.SocialChains = []string{"56", "8453"}
+	}
+	if len(cfg.SmartMoneyChains) == 0 {
+		cfg.SmartMoneyChains = []string{"56", "8453"}
+	}
+
 	s.mu.RLock()
 	if len(s.cached) > 0 && time.Since(s.cachedAt) < s.cacheTTL {
 		defer s.mu.RUnlock()
@@ -55,8 +95,7 @@ func (s *BinanceHotRankService) FetchHotSymbols(ctx context.Context) ([]usecase.
 	var allHot []usecase.HotSymbol
 
 	// 1. Trending & Top Search for chains "1", "56", "8453"
-	targetChains := []string{"1", "56", "8453"}
-	for _, chain := range targetChains {
+	for _, chain := range cfg.TrendingChains {
 		trending, err := s.fetchFromBapi(ctx, 10, chain, "Trending")
 		if err == nil {
 			allHot = append(allHot, trending...)
@@ -73,8 +112,7 @@ func (s *BinanceHotRankService) FetchHotSymbols(ctx context.Context) ([]usecase.
 	}
 
 	// 2. Social Hype for chains "56", "8453"
-	socialChains := []string{"56", "8453"}
-	for _, chain := range socialChains {
+	for _, chain := range cfg.SocialChains {
 		hypeList, err := s.fetchSocialHype(ctx, chain)
 		if err == nil {
 			allHot = append(allHot, hypeList...)
@@ -84,8 +122,7 @@ func (s *BinanceHotRankService) FetchHotSymbols(ctx context.Context) ([]usecase.
 	}
 
 	// 3. Smart Money Inflow for chains "56", "8453"
-	smartMoneyChains := []string{"56", "8453"}
-	for _, chain := range smartMoneyChains {
+	for _, chain := range cfg.SmartMoneyChains {
 		inflowList, err := s.fetchSmartMoneyInflow(ctx, chain)
 		if err == nil {
 			allHot = append(allHot, inflowList...)

@@ -81,14 +81,27 @@ func selectPrefetchCandidates(candidates []UniverseCandidate, prefetchLimit int,
 }
 
 func resolveRotationActivityThreshold(policy MarketPolicy) float64 {
+	settings := getRuntimeSettings()
 	switch policy.EffectiveRegime() {
 	case ALT_SUPPORTIVE, COMPRESSION:
+		if settings.RotationActivityThresholdAlt > 0 {
+			return settings.RotationActivityThresholdAlt
+		}
 		return 0.45
 	case RISK_OFF, BTC_CHAOS, HIGH_VOL:
+		if settings.RotationActivityThresholdDefensive > 0 {
+			return settings.RotationActivityThresholdDefensive
+		}
 		return 0.65
 	case CHOP_RANGE, LOW_VOL:
+		if settings.RotationActivityThresholdLowVol > 0 {
+			return settings.RotationActivityThresholdLowVol
+		}
 		return 0.50
 	default:
+		if settings.RotationActivityThresholdDefault > 0 {
+			return settings.RotationActivityThresholdDefault
+		}
 		return 0.55
 	}
 }
@@ -98,12 +111,24 @@ func resolveRotationPrefetchSlots(policy MarketPolicy, prefetchLimit int, rotati
 		return 0
 	}
 
-	ratio := 0.15
+	settings := getRuntimeSettings()
+	ratio := settings.RotationPrefetchRatioDefault
+	if ratio <= 0 {
+		ratio = 0.15
+	}
 	switch policy.EffectiveRegime() {
 	case ALT_SUPPORTIVE, COMPRESSION:
-		ratio = 0.20
+		if settings.RotationPrefetchRatioAlt > 0 {
+			ratio = settings.RotationPrefetchRatioAlt
+		} else {
+			ratio = 0.20
+		}
 	case RISK_OFF, BTC_CHAOS, HIGH_VOL:
-		ratio = 0.10
+		if settings.RotationPrefetchRatioDefensive > 0 {
+			ratio = settings.RotationPrefetchRatioDefensive
+		} else {
+			ratio = 0.10
+		}
 	}
 
 	slots := int(math.Round(float64(prefetchLimit) * ratio))

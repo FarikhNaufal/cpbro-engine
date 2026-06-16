@@ -44,7 +44,11 @@ func CalculateH4Trend(h4Candles []dto.Candle, emaPeriod int) string {
 	if len(h4Candles) == 0 {
 		return "UNKNOWN"
 	}
-	emas := CalculateEMA(h4Candles, emaPeriod)
+	effectivePeriod := emaPeriod
+	if len(h4Candles) < effectivePeriod {
+		effectivePeriod = len(h4Candles)
+	}
+	emas := CalculateEMA(h4Candles, effectivePeriod)
 	if len(emas) == 0 {
 		return "UNKNOWN"
 	}
@@ -85,7 +89,27 @@ func ConfirmLiquiditySweep(candles []dto.Candle, averagePeriod int, multiplier f
 	return lastCandle.Vol >= avgVol*multiplier
 }
 
-// 4. ValidateShortPath checks if short trade matches MarketPolicy short mode constraint.
+// 4. ValidateLongPath checks if long trade matches MarketPolicy long mode constraint.
+func ValidateLongPath(policy MarketPolicy, playbook Playbook) bool {
+	if !policy.AllowLong {
+		return false
+	}
+	switch policy.LongMode {
+	case SWEEP_ONLY:
+		return playbook == LIQUIDITY_SWEEP_REVERSAL
+	case PULLBACK_ONLY:
+		return playbook == TREND_PULLBACK
+	case REVERSAL_ONLY:
+		return playbook == LIQUIDITY_SWEEP_REVERSAL || playbook == RANGE_EDGE_REVERSAL || playbook == CROWDED_POSITIONING_SQUEEZE
+	case BREAKOUT_RETEST_ONLY:
+		return playbook == COMPRESSION_BREAKOUT_RETEST
+	case DISABLED:
+		return false
+	}
+	return true
+}
+
+// 5. ValidateShortPath checks if short trade matches MarketPolicy short mode constraint.
 func ValidateShortPath(policy MarketPolicy, playbook Playbook) bool {
 	if !policy.AllowShort {
 		return false
@@ -96,7 +120,7 @@ func ValidateShortPath(policy MarketPolicy, playbook Playbook) bool {
 	case PULLBACK_ONLY:
 		return playbook == TREND_PULLBACK
 	case REVERSAL_ONLY:
-		return playbook == LIQUIDITY_SWEEP_REVERSAL || playbook == RANGE_EDGE_REVERSAL
+		return playbook == LIQUIDITY_SWEEP_REVERSAL || playbook == RANGE_EDGE_REVERSAL || playbook == CROWDED_POSITIONING_SQUEEZE
 	case BREAKOUT_RETEST_ONLY:
 		return playbook == COMPRESSION_BREAKOUT_RETEST
 	case DISABLED:
@@ -105,7 +129,32 @@ func ValidateShortPath(policy MarketPolicy, playbook Playbook) bool {
 	return true
 }
 
-// 5. ValidateShortDuringBTCBullish restricts shorting when BTC trend is bullish.
+func ValidateDirectionalPath(policy MarketPolicy, direction Direction, playbook Playbook) bool {
+	switch direction {
+	case LONG:
+		return ValidateLongPath(policy, playbook)
+	case SHORT:
+		return ValidateShortPath(policy, playbook)
+	default:
+		return false
+	}
+}
+
+func modeRejectReason(policy MarketPolicy, direction Direction, playbook Playbook) string {
+	mode := policy.LongMode
+	dirLabel := "LONG"
+	if direction == SHORT {
+		mode = policy.ShortMode
+		dirLabel = "SHORT"
+	}
+	if mode == DISABLED {
+		return fmt.Sprintf("%s trades are disabled", dirLabel)
+	}
+	playbookLabel := strings.ToLower(strings.ReplaceAll(string(playbook), "_", " "))
+	return fmt.Sprintf("%s %s is disabled under %s policy mode", dirLabel, playbookLabel, mode)
+}
+
+// 6. ValidateShortDuringBTCBullish restricts shorting when BTC trend is bullish.
 // Allowed playbooks: liquidity_sweep_high, failed_breakout, range edge reversal with strong rejection.
 func ValidateShortDuringBTCBullish(playbook Playbook, strongRejection bool) bool {
 	switch playbook {
@@ -549,7 +598,7 @@ func populateSnapshotsFromClosedCandles(m15Closed []dto.Candle, h1Closed []dto.C
 			if lastIdx >= 0 && lastIdx < len(basis) && basis[lastIdx] > 0 {
 				bbWidth := (upper[lastIdx] - lower[lastIdx]) / basis[lastIdx]
 				tech.IndicatorValues[IndicatorBBWidth] = bbWidth
-				if bbWidth <= compressionMaxBBWidth {
+				if bbWidth <= compressionMaxBBWidth() {
 					tech.IndicatorValues[IndicatorContraction] = 1.0
 				}
 			}
@@ -558,7 +607,7 @@ func populateSnapshotsFromClosedCandles(m15Closed []dto.Candle, h1Closed []dto.C
 		// Funding (OI is optional; do NOT dummy-true).
 		tech.IndicatorValues[IndicatorFundingRate] = fundingRate
 		tech.IndicatorValues[IndicatorFundingAbs] = math.Abs(fundingRate)
-		if math.Abs(fundingRate) > 0.003 {
+		if math.Abs(fundingRate) > fundingExtremeThreshold() {
 			tech.IndicatorValues[IndicatorExtremeFunding] = 1.0
 		} else {
 			tech.IndicatorValues[IndicatorExtremeFunding] = 0.0

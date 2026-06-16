@@ -756,6 +756,47 @@ func TestFeedback_ShortSupportiveRecommendationUsesCanonicalRegimeLabel(t *testi
 	t.Fatal("expected SHORT_SUPPORTIVE_SL_RATE recommendation")
 }
 
+func TestFeedback_LongRiskOffRecommendationUsesCurrentModeSemantics(t *testing.T) {
+	journal := make([]usecase.SignalJournal, 15)
+	for i := 0; i < 15; i++ {
+		journal[i] = usecase.SignalJournal{
+			ID:           "risk_off_long_sl",
+			Playbook:     "TREND_PULLBACK",
+			Direction:    usecase.LONG,
+			Status:       usecase.SL_HIT,
+			MarketRegime: "BEARISH",
+			AIConfidence: "HIGH",
+			RR:           1.8,
+		}
+	}
+
+	repo := &mockFeedbackStorageRepo{journal: journal}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	report := repo.report
+	for _, rec := range report.Recommendations {
+		if rec.MetricName == "LONG_RISK_OFF_SL_RATE" {
+			if rec.MarketRegime != string(usecase.RISK_OFF) {
+				t.Fatalf("expected canonical risk-off regime label, got %s", rec.MarketRegime)
+			}
+			if rec.SuggestedThreshold != "LongMode: SWEEP_ONLY" {
+				t.Fatalf("expected updated mode semantics, got %s", rec.SuggestedThreshold)
+			}
+			if !strings.Contains(rec.SuggestedAction, "SWEEP_ONLY") {
+				t.Fatalf("expected suggested action to mention SWEEP_ONLY, got %s", rec.SuggestedAction)
+			}
+			return
+		}
+	}
+
+	t.Fatal("expected LONG_RISK_OFF_SL_RATE recommendation")
+}
+
 func TestFeedback_LongRegimePlaybookDiagnosticsMergeLegacyRegimes(t *testing.T) {
 	journal := []usecase.SignalJournal{
 		{
@@ -1013,7 +1054,11 @@ func TestFeedback_PlaybookDisable(t *testing.T) {
 }
 
 func TestFeedback_QuarantinesTimingAnomaliesFromEvaluation(t *testing.T) {
-	t.Setenv("MONITORING_MAX_HOLD_MINUTES", "120")
+	original := usecase.SnapshotRuntimeSettings()
+	t.Cleanup(func() { usecase.SetRuntimeSettings(original) })
+	settings := original
+	settings.MonitoringMaxHoldMinutes = 120
+	usecase.SetRuntimeSettings(settings)
 
 	now := time.Now().UTC()
 	repo := &mockFeedbackStorageRepo{

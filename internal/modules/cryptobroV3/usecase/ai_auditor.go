@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,6 +19,11 @@ type AIAuditorUsecase struct {
 	aiService      AIAuditorService
 	storageUsecase *StorageUsecase
 }
+
+const (
+	aiAuditCacheTTL     = 15 * time.Minute
+	aiAuditCacheMaxSize = 2000
+)
 
 func normalizeSuggestedActionDecision(res *dto.AIAuditResponse) (bool, string) {
 	if res == nil {
@@ -44,6 +50,36 @@ func NewAIAuditorUsecase(aiService AIAuditorService, storageUsecase *StorageUsec
 	return &AIAuditorUsecase{
 		aiService:      aiService,
 		storageUsecase: storageUsecase,
+	}
+}
+
+func pruneAIAuditCacheEntries(cacheMap map[string]entity.CachedAudit, now time.Time) {
+	if cacheMap == nil {
+		return
+	}
+	for key, cached := range cacheMap {
+		if now.Sub(cached.CachedAt) >= aiAuditCacheTTL {
+			delete(cacheMap, key)
+		}
+	}
+	if len(cacheMap) <= aiAuditCacheMaxSize {
+		return
+	}
+
+	type cacheEntry struct {
+		key      string
+		cachedAt time.Time
+	}
+	entries := make([]cacheEntry, 0, len(cacheMap))
+	for key, cached := range cacheMap {
+		entries = append(entries, cacheEntry{key: key, cachedAt: cached.CachedAt})
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].cachedAt.Before(entries[j].cachedAt)
+	})
+	removeCount := len(cacheMap) - aiAuditCacheMaxSize
+	for index := 0; index < removeCount && index < len(entries); index++ {
+		delete(cacheMap, entries[index].key)
 	}
 }
 
@@ -225,9 +261,10 @@ func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy
 	// Try loading cache
 	cache, err := uc.storageUsecase.LoadAIAuditCache()
 	if err == nil && cache != nil && cache.CacheMap != nil {
+		pruneAIAuditCacheEntries(cache.CacheMap, time.Now())
 		if cached, ok := cache.CacheMap[cacheKey]; ok {
 			// Cache validity duration is 15 minutes
-			if time.Since(cached.CachedAt) < 15*time.Minute {
+			if time.Since(cached.CachedAt) < aiAuditCacheTTL {
 				slog.Info("AI Audit Cache HIT", "module", "gemini", "key", cacheKey, "symbol", symbol, "cached_at", cached.CachedAt)
 				cachedRes := cached.Response
 				if changed, reason := normalizeSuggestedActionDecision(&cachedRes); changed {
@@ -402,10 +439,13 @@ func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy
 		if c.CacheMap == nil {
 			c.CacheMap = make(map[string]entity.CachedAudit)
 		}
+		now := time.Now()
+		pruneAIAuditCacheEntries(c.CacheMap, now)
 		c.CacheMap[cacheKey] = entity.CachedAudit{
 			Response: *res,
-			CachedAt: time.Now(),
+			CachedAt: now,
 		}
+		pruneAIAuditCacheEntries(c.CacheMap, now)
 		return nil
 	})
 

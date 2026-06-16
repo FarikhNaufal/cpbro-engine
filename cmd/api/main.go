@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -61,6 +62,8 @@ func main() {
 	}
 
 	slog.Info("Configuration loaded successfully", "env", cfg.App.Env, "version", cfg.App.Version)
+
+	usecase.SetRuntimeSettings(buildRuntimeSettings(cfg))
 
 	// 2. Initialize Storage from config
 	jsonStorage, err := service.NewJSONStorageService(cfg.Storage.StoragePath)
@@ -122,7 +125,7 @@ func main() {
 
 	var geminiService *service.GeminiService
 	if cfg.Gemini.APIKey != "" {
-		geminiService, err = service.NewGeminiServiceWithTimeout(cfg.Gemini.Model, time.Duration(cfg.Gemini.RequestTimeoutSeconds)*time.Second)
+		geminiService, err = service.NewGeminiServiceWithAPIKey(cfg.Gemini.APIKey, cfg.Gemini.Model, time.Duration(cfg.Gemini.RequestTimeoutSeconds)*time.Second)
 		if err != nil {
 			slog.Warn("Gemini service failed to initialize", "error", err, "context", "AI audits will fail")
 		}
@@ -155,8 +158,8 @@ func main() {
 	storageUC := usecase.NewStorageUsecase(storageRepo)
 	marketDataUC := usecase.NewMarketDataUsecase(binanceService, usecase.MarketDataUsecaseConfig{
 		BootstrapTimeout: time.Duration(cfg.Binance.BootstrapTimeoutSeconds) * time.Second,
-		InitialTimeout:   10 * time.Second,
-		EnrichTimeout:    15 * time.Second,
+		InitialTimeout:   time.Duration(cfg.Binance.InitialTimeoutSeconds) * time.Second,
+		EnrichTimeout:    time.Duration(cfg.Binance.EnrichTimeoutSeconds) * time.Second,
 		GlobalCacheTTL:   time.Duration(cfg.Binance.BootstrapCacheSeconds) * time.Second,
 	})
 	marketPolicyUC := usecase.NewMarketPolicyUsecase()
@@ -167,6 +170,7 @@ func main() {
 	scoringUC := usecase.NewScoringUsecase()
 	candidateArbiterUC := usecase.NewCandidateArbiterUsecase()
 	localGateUC := usecase.NewLocalGateUsecase()
+	localGateUC.SetMarketData(marketDataUC)
 	aiCandidateSelectorUC := usecase.NewAICandidateSelectorUsecase(60.0)
 
 	var aiService usecase.AIAuditorService
@@ -191,7 +195,7 @@ func main() {
 	feedbackUC := usecase.NewFeedbackUsecase(storageUC)
 
 	{
-		startCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		startCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.App.StartupNotificationTimeoutSeconds)*time.Second)
 		defer cancel()
 		if cfg.Telegram.OpsBootEnabled {
 			opsNotificationUC.SendBootStatus(
@@ -230,8 +234,18 @@ func main() {
 		feedbackUC,
 		storageUC,
 	)
-	hotRankService := service.NewBinanceHotRankService()
-	scannerUC.SetHotSymbolProvider(hotRankService)
+	if cfg.HotSource.Enabled {
+		hotRankService := service.NewBinanceHotRankServiceWithConfig(service.BinanceHotRankConfig{
+			RequestTimeout:   time.Duration(cfg.HotSource.RequestTimeoutSeconds) * time.Second,
+			CacheTTL:         time.Duration(cfg.HotSource.CacheTTLSeconds) * time.Second,
+			TrendingChains:   cfg.HotSource.TrendingChains,
+			SocialChains:     cfg.HotSource.SocialHypeChains,
+			SmartMoneyChains: cfg.HotSource.SmartMoneyChains,
+		})
+		scannerUC.SetHotSymbolProvider(hotRankService)
+	} else {
+		slog.Info("Hot source overlay disabled by config")
+	}
 
 	backtestUC := usecase.NewBacktestEngineUsecase(
 		binanceService,
@@ -281,7 +295,22 @@ func main() {
 	// 7. Setup HTTP transport Handler and Router
 	observabilityUC := usecase.NewObservabilityUsecase(binanceService, aiService, telegramService, cfg.Storage.StoragePath)
 	observabilityUC.SetRealtimeStatusProvider(realtimePriceFeed)
-	handler := transhttp.NewHandler(scannerUC, feedbackUC, storageUC, backtestUC, observabilityUC, cfg.Storage.StoragePath, &scannerRunning)
+	handler := transhttp.NewHandler(scannerUC, feedbackUC, storageUC, backtestUC, observabilityUC, cfg.Storage.StoragePath, &scannerRunning, transhttp.HandlerRuntimeConfig{
+		AppName:         cfg.App.Name,
+		AppVersion:      cfg.App.Version,
+		AppEnv:          cfg.App.Env,
+		SwaggerEnabled:  cfg.Route.SwaggerEnabled,
+		BinanceReadOnly: cfg.Safety.BinanceReadOnly,
+		LogFilePath:     cfg.Logging.LogFilePath,
+		SafeConfig: map[string]any{
+			"binance_api_key_set":         strings.TrimSpace(cfg.Binance.APIKey) != "",
+			"binance_api_secret_set":      strings.TrimSpace(cfg.Binance.APISecret) != "",
+			"gemini_api_key_set":          strings.TrimSpace(cfg.Gemini.APIKey) != "",
+			"telegram_bot_token_set":      strings.TrimSpace(cfg.Telegram.BotToken) != "",
+			"telegram_signal_chat_id_set": strings.TrimSpace(cfg.Telegram.SignalChatID) != "" || strings.TrimSpace(cfg.Telegram.ChatID) != "",
+			"telegram_status_chat_id_set": strings.TrimSpace(cfg.Telegram.StatusChatID) != "",
+		},
+	})
 	router := transhttp.SetupRouter(cfg, handler)
 
 	server := &http.Server{
@@ -293,7 +322,7 @@ func main() {
 	go func() {
 		<-ctx.Done()
 		slog.Info("Shutting down HTTP server...")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.App.ShutdownTimeoutSeconds)*time.Second)
 		defer cancel()
 		if err := server.Shutdown(shutdownCtx); err != nil {
 			slog.Error("HTTP server shutdown error", "error", err)
@@ -326,14 +355,17 @@ func startStartupScan(ctx context.Context, cfg *config.Config, scannerUC *usecas
 		}()
 
 		slog.Info("Startup scan trigger: executing initial scan")
-		boundary := time.Now().Truncate(15 * time.Minute)
+		boundaryDuration := time.Duration(cfg.Scanner.BoundaryMinutes) * time.Minute
+		boundary := time.Now().Truncate(boundaryDuration)
 		scanID := boundary.Format("20060102150405")
 
-		if !scannerRunning.CompareAndSwap(false, true) {
-			slog.Warn("Startup scan skipped: scan already in progress")
-			return
+		if cfg.Scanner.PreventOverlap {
+			if !scannerRunning.CompareAndSwap(false, true) {
+				slog.Warn("Startup scan skipped: scan already in progress")
+				return
+			}
+			defer scannerRunning.Store(false)
 		}
-		defer scannerRunning.Store(false)
 
 		if cfg.Telegram.OpsScanEnabled {
 			opsUC.SendScanStarted(ctx, scanID, boundary, "startup M15 close scan")
@@ -373,10 +405,11 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 	slog.Info("Starting background scan worker...")
 	usecase.ScanWorkerRunning.Store(true)
 	defer usecase.ScanWorkerRunning.Store(false)
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(time.Duration(cfg.Scanner.PollIntervalSeconds) * time.Second)
 	defer ticker.Stop()
 
-	lastRun := time.Now().Truncate(15 * time.Minute)
+	boundaryDuration := time.Duration(cfg.Scanner.BoundaryMinutes) * time.Minute
+	lastRun := time.Now().Truncate(boundaryDuration)
 
 	for {
 		select {
@@ -384,7 +417,7 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 			slog.Info("Background scan worker stopped.")
 			return
 		case now := <-ticker.C:
-			boundary := now.Truncate(15 * time.Minute)
+			boundary := now.Truncate(boundaryDuration)
 			bufferSec := cfg.Scanner.CloseCandleBufferSeconds
 			if bufferSec <= 0 {
 				bufferSec = 3
@@ -402,11 +435,13 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 					slog.Info("Background worker trigger: executing M15 scan", "boundary", boundary.Format("15:04:05"))
 					scanID := boundary.Format("20060102150405")
 
-					if !scannerRunning.CompareAndSwap(false, true) {
-						slog.Warn("Scan worker skipped: scan already in progress")
-						return
+					if cfg.Scanner.PreventOverlap {
+						if !scannerRunning.CompareAndSwap(false, true) {
+							slog.Warn("Scan worker skipped: scan already in progress")
+							return
+						}
+						defer scannerRunning.Store(false)
 					}
-					defer scannerRunning.Store(false)
 
 					if cfg.Telegram.OpsScanEnabled {
 						opsUC.SendScanStarted(ctx, scanID, boundary, "M15 close scan")
@@ -472,7 +507,7 @@ func startMonitoringWorker(ctx context.Context, cfg *config.Config, monitoringUC
 					}
 				}()
 
-				timeoutSec := cfg.Monitoring.IntervalSeconds - 5
+				timeoutSec := cfg.Monitoring.IntervalSeconds - cfg.Monitoring.TimeoutBufferSeconds
 				if timeoutSec <= 0 {
 					timeoutSec = 25
 				}
@@ -488,6 +523,17 @@ func startMonitoringWorker(ctx context.Context, cfg *config.Config, monitoringUC
 	}
 }
 
+func tryStartBackgroundRun(flag *atomic.Bool, workerName string) bool {
+	if flag == nil {
+		return true
+	}
+	if !flag.CompareAndSwap(false, true) {
+		slog.Warn(workerName + " skipped: previous tick still running")
+		return false
+	}
+	return true
+}
+
 func startEvaluationWorker(ctx context.Context, cfg *config.Config, feedbackUC *usecase.FeedbackUsecase) {
 	if !cfg.Evaluation.Enabled || !cfg.Evaluation.AutoRun {
 		slog.Info("Evaluation background worker disabled by config (Evaluation.Enabled=false or AutoRun=false)")
@@ -499,6 +545,7 @@ func startEvaluationWorker(ctx context.Context, cfg *config.Config, feedbackUC *
 	defer usecase.EvaluationWorkerRunning.Store(false)
 	ticker := time.NewTicker(time.Duration(cfg.Evaluation.IntervalMinutes) * time.Minute)
 	defer ticker.Stop()
+	var evaluationTickRunning atomic.Bool
 
 	for {
 		select {
@@ -506,7 +553,11 @@ func startEvaluationWorker(ctx context.Context, cfg *config.Config, feedbackUC *
 			slog.Info("Evaluation worker stopped.")
 			return
 		case <-ticker.C:
+			if !tryStartBackgroundRun(&evaluationTickRunning, "Evaluation worker") {
+				continue
+			}
 			go func() {
+				defer evaluationTickRunning.Store(false)
 				defer func() {
 					if r := recover(); r != nil {
 						slog.Error("PANIC RECOVERY in evaluation worker", "panic", r)

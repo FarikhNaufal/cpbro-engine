@@ -533,7 +533,11 @@ func TestScannerUsecase_Run(t *testing.T) {
 	})
 
 	t.Run("AI_AUDIT_ENABLED=false cannot produce FINAL_EXECUTE", func(t *testing.T) {
-		t.Setenv("AI_AUDIT_ENABLED", "false")
+		original := getRuntimeSettings()
+		t.Cleanup(func() { SetRuntimeSettings(original) })
+		settings := original
+		settings.AIAuditEnabled = false
+		SetRuntimeSettings(settings)
 		// Ensure mocks remain populated for the second run.
 		mockProvider.tickers = tickers
 
@@ -669,7 +673,11 @@ func TestScannerUsecase_Run_AIWait_And_AIReject(t *testing.T) {
 	)
 
 	t.Run("Scanner AI_WAIT becomes FINAL_WATCH and appears in watchlist", func(t *testing.T) {
-		t.Setenv("MONITORING_MAX_HOLD_MINUTES", "90")
+		original := getRuntimeSettings()
+		t.Cleanup(func() { SetRuntimeSettings(original) })
+		settings := original
+		settings.MonitoringMaxHoldMinutes = 90
+		SetRuntimeSettings(settings)
 		ctx := context.Background()
 		_, err := uc.Run(ctx, dto.ScanRequest{TriggerTime: time.Now()})
 		if err != nil {
@@ -1005,7 +1013,11 @@ func TestArbiterRejectedSummaryFormattingAndDeduplication(t *testing.T) {
 }
 
 func TestResolveMarketDataPrefetchLimit_DefaultUsesAllCandidates(t *testing.T) {
-	t.Setenv("MAX_MARKETDATA_PREFETCH_SYMBOLS", "")
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.MaxMarketDataPrefetchSymbols = 0
+	SetRuntimeSettings(settings)
 	limit := resolveMarketDataPrefetchLimit(MarketPolicy{
 		Regime:          DEFAULT,
 		MaxSymbols:      50,
@@ -1018,7 +1030,11 @@ func TestResolveMarketDataPrefetchLimit_DefaultUsesAllCandidates(t *testing.T) {
 }
 
 func TestResolveMarketDataPrefetchLimit_EnvOverride(t *testing.T) {
-	t.Setenv("MAX_MARKETDATA_PREFETCH_SYMBOLS", "12")
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.MaxMarketDataPrefetchSymbols = 12
+	SetRuntimeSettings(settings)
 	limit := resolveMarketDataPrefetchLimit(MarketPolicy{MaxSymbols: 50, MaxAICandidates: 3}, 42)
 	if limit != 12 {
 		t.Fatalf("expected env override prefetch limit 12, got %d", limit)
@@ -1026,7 +1042,11 @@ func TestResolveMarketDataPrefetchLimit_EnvOverride(t *testing.T) {
 }
 
 func TestResolveMarketDataPrefetchLimit_BTCChaosIsTighter(t *testing.T) {
-	t.Setenv("MAX_MARKETDATA_PREFETCH_SYMBOLS", "")
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.MaxMarketDataPrefetchSymbols = 0
+	SetRuntimeSettings(settings)
 	limit := resolveMarketDataPrefetchLimit(MarketPolicy{
 		Regime:          BTC_CHAOS,
 		MaxSymbols:      35,
@@ -1039,7 +1059,11 @@ func TestResolveMarketDataPrefetchLimit_BTCChaosIsTighter(t *testing.T) {
 }
 
 func TestResolveMarketDataPrefetchLimit_AltSupportiveAllowsBroaderPrefetch(t *testing.T) {
-	t.Setenv("MAX_MARKETDATA_PREFETCH_SYMBOLS", "")
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.MaxMarketDataPrefetchSymbols = 0
+	SetRuntimeSettings(settings)
 	limit := resolveMarketDataPrefetchLimit(MarketPolicy{
 		Regime:          ALT_SUPPORTIVE,
 		MaxSymbols:      75,
@@ -1060,7 +1084,11 @@ func TestEstimateScanRequestWeight(t *testing.T) {
 }
 
 func TestResolveAdaptiveScanRequestGuard_ReducesPrefetchToBudget(t *testing.T) {
-	t.Setenv("SCAN_REQUEST_WEIGHT_BUDGET", "120")
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.ScanRequestWeightBudget = 120
+	SetRuntimeSettings(settings)
 
 	guard := resolveAdaptiveScanRequestGuard(MarketPolicy{Regime: ALT_SUPPORTIVE}, 50, 24, 8)
 	if !guard.Applied {
@@ -1078,7 +1106,11 @@ func TestResolveAdaptiveScanRequestGuard_ReducesPrefetchToBudget(t *testing.T) {
 }
 
 func TestResolveAdaptiveScanRequestGuard_BTCChaosTightensConcurrency(t *testing.T) {
-	t.Setenv("SCAN_REQUEST_WEIGHT_BUDGET", "")
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.ScanRequestWeightBudget = 0
+	SetRuntimeSettings(settings)
 
 	guard := resolveAdaptiveScanRequestGuard(MarketPolicy{Regime: BTC_CHAOS}, 30, 8, 6)
 	if guard.MarketDataConcurrency != 2 {
@@ -1099,8 +1131,12 @@ func (m *mockHotSymbolProvider) FetchHotSymbols(ctx context.Context) ([]HotSymbo
 }
 
 func TestScanner_PrefetchSlotReservation(t *testing.T) {
-	t.Setenv("MAX_MARKETDATA_PREFETCH_SYMBOLS", "4")
-	t.Setenv("SCAN_REQUEST_WEIGHT_BUDGET", "500")
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.MaxMarketDataPrefetchSymbols = 4
+	settings.ScanRequestWeightBudget = 500
+	SetRuntimeSettings(settings)
 
 	policy := MarketPolicy{
 		AllowedTiers:         []Tier{TierA, TierB, TierC},
@@ -1184,7 +1220,7 @@ func TestScanner_PrefetchSlotReservation(t *testing.T) {
 	reg.policies["DEFAULT"] = policy
 	riskOffPolicy := policy
 	riskOffPolicy.Regime = RISK_OFF
-	riskOffPolicy.LongMode = REVERSAL_ONLY
+	riskOffPolicy.LongMode = SWEEP_ONLY
 	riskOffPolicy.ShortMode = NORMAL
 	reg.policies["RISK_OFF"] = riskOffPolicy
 	SetGlobalConfigRegistry(reg)

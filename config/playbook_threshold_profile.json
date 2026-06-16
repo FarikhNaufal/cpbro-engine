@@ -14,6 +14,8 @@
       "require_confirmation": false,
       "require_retest": false,
       "allow_breakout_candle_entry": false,
+      "require_m5_rejection_confirm": false,
+      "require_m5_continuation_confirm": false,
       "staleness_atr": 0.45,
       "reason": "Trend Pullback profile"
     },
@@ -29,6 +31,8 @@
       "require_rejection": true,
       "require_confirmation": true,
       "require_retest": true,
+      "require_m5_rejection_confirm": false,
+      "require_m5_continuation_confirm": false,
       "min_volume_ratio": 1.3,
       "min_wick_ratio": 0.3,
       "allow_breakout_candle_entry": false,

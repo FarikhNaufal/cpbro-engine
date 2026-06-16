@@ -20,8 +20,13 @@ type UniverseThresholds struct {
 }
 
 func NewUniverseUsecase() *UniverseUsecase {
+	settings := getRuntimeSettings()
+	symbols := settings.UniverseDefaultSymbols
+	if len(symbols) == 0 {
+		symbols = []string{"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"}
+	}
 	return &UniverseUsecase{
-		symbols: []string{"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"},
+		symbols: append([]string(nil), symbols...),
 	}
 }
 
@@ -113,7 +118,11 @@ func (uc *UniverseUsecase) FilterUniverse(
 		}
 
 		// 7. Determine Tier
-		if tier == TierC && t.QuoteVolume < 15000000.0 && t.QuoteVolume < thresholds.MinVolume {
+		tierCMinVolume := getRuntimeSettings().UniverseTierCMinVolume
+		if tierCMinVolume <= 0 {
+			tierCMinVolume = 15000000.0
+		}
+		if tier == TierC && t.QuoteVolume < tierCMinVolume && t.QuoteVolume < thresholds.MinVolume {
 			rejected = append(rejected, UniverseRejected{
 				Symbol: sym,
 				Status: UNIVERSE_REJECT,
@@ -212,11 +221,15 @@ func (uc *UniverseUsecase) FilterUniverse(
 }
 
 func normalizeUniverseLiquidityScore(volume, floor, ceiling float64) float64 {
+	settings := getRuntimeSettings()
 	if volume <= 0 {
 		return 0
 	}
 	if floor <= 0 {
-		floor = 1000000.0
+		floor = settings.UniverseDefaultMinFundingVolume / 50.0
+		if floor <= 0 {
+			floor = 1000000.0
+		}
 	}
 	if ceiling <= floor {
 		return 1
@@ -253,33 +266,42 @@ func calculateUniverseCompositeScore(policy MarketPolicy, candidate UniverseCand
 }
 
 func getUniverseRankingWeights(policy MarketPolicy) (liquidity float64, activity float64, hot float64) {
+	settings := getRuntimeSettings()
 	switch policy.EffectiveRegime() {
 	case ALT_SUPPORTIVE:
-		return 0.55, 0.25, 0.20
+		return settings.UniverseWeightLiquidityAlt, settings.UniverseWeightActivityAlt, settings.UniverseWeightHotAlt
 	case COMPRESSION:
-		return 0.60, 0.25, 0.15
+		return settings.UniverseWeightLiquidityCompression, settings.UniverseWeightActivityCompression, settings.UniverseWeightHotCompression
 	case RISK_OFF:
-		return 0.75, 0.15, 0.10
+		return settings.UniverseWeightLiquidityRiskOff, settings.UniverseWeightActivityRiskOff, settings.UniverseWeightHotRiskOff
 	case BTC_CHAOS, HIGH_VOL:
-		return 0.80, 0.15, 0.05
+		return settings.UniverseWeightLiquidityChaos, settings.UniverseWeightActivityChaos, settings.UniverseWeightHotChaos
 	case LOW_VOL, CHOP_RANGE:
-		return 0.70, 0.15, 0.15
+		return settings.UniverseWeightLiquidityLowVol, settings.UniverseWeightActivityLowVol, settings.UniverseWeightHotLowVol
 	case BTC_DOMINANCE:
-		return 0.72, 0.13, 0.15
+		return settings.UniverseWeightLiquidityDominance, settings.UniverseWeightActivityDominance, settings.UniverseWeightHotDominance
 	default:
-		return 0.65, 0.20, 0.15
+		return settings.UniverseWeightLiquidityDefault, settings.UniverseWeightActivityDefault, settings.UniverseWeightHotDefault
 	}
 }
 
 func clampUniverseHotBoost(boost float64) float64 {
+	settings := getRuntimeSettings()
 	if boost <= 0 {
-		boost = 1.25
+		boost = settings.UniverseDefaultHotBoost
+		if boost <= 0 {
+			boost = 1.25
+		}
 	}
 	if boost < 1.0 {
 		boost = 1.0
 	}
-	if boost > 1.5 {
-		boost = 1.5
+	maxBoost := settings.UniverseMaxHotBoost
+	if maxBoost < 1.0 {
+		maxBoost = 1.5
+	}
+	if boost > maxBoost {
+		boost = maxBoost
 	}
 	return boost
 }
@@ -295,16 +317,26 @@ func clampUniverseUnit(value float64) float64 {
 }
 
 func classifyUniverseTier(quoteVolume float64) Tier {
-	if quoteVolume >= 150000000.0 {
+	settings := getRuntimeSettings()
+	tierAMin := settings.UniverseTierAMinQuoteVolume
+	if tierAMin <= 0 {
+		tierAMin = 150000000.0
+	}
+	tierBMin := settings.UniverseTierBMinQuoteVolume
+	if tierBMin <= 0 {
+		tierBMin = 50000000.0
+	}
+	if quoteVolume >= tierAMin {
 		return TierA
 	}
-	if quoteVolume >= 50000000.0 {
+	if quoteVolume >= tierBMin {
 		return TierB
 	}
 	return TierC
 }
 
 func GetEffectiveUniverseThresholds(policy MarketPolicy, tier Tier) UniverseThresholds {
+	settings := getRuntimeSettings()
 	minVolume := policy.MinVolume
 	if minVolume <= 0 {
 		minVolume = 1000000.0
@@ -327,13 +359,13 @@ func GetEffectiveUniverseThresholds(policy MarketPolicy, tier Tier) UniverseThre
 		recommendedMove = 0.18
 	case BTC_CHAOS:
 		recommendedMove = 0.12
-		minVolume = math.Max(minVolume, 10000000.0)
+		minVolume = math.Max(minVolume, settings.UniverseChaosHighVolMinVolumeFloor)
 	case HIGH_VOL:
 		recommendedMove = 0.20
-		minVolume = math.Max(minVolume, 10000000.0)
+		minVolume = math.Max(minVolume, settings.UniverseChaosHighVolMinVolumeFloor)
 	case LOW_VOL:
 		recommendedMove = 0.12
-		minVolume = math.Max(minVolume, 750000.0)
+		minVolume = math.Max(minVolume, settings.UniverseLowVolMinVolumeFloor)
 	case CHOP_RANGE:
 		recommendedMove = 0.12
 	case COMPRESSION:
@@ -355,14 +387,14 @@ func GetEffectiveUniverseThresholds(policy MarketPolicy, tier Tier) UniverseThre
 		} else {
 			recommendedMove = math.Min(recommendedMove, 0.12)
 		}
-		minVolume = math.Max(minVolume, 15000000.0)
+		minVolume = math.Max(minVolume, settings.UniverseTierCMinVolume)
 	}
 
 	maxMove = math.Min(maxMove, recommendedMove)
 
-	minFundingVolume := math.Max(minVolume*2.0, 50000000.0)
+	minFundingVolume := math.Max(minVolume*2.0, settings.UniverseDefaultMinFundingVolume)
 	if regime == BTC_CHAOS || regime == HIGH_VOL {
-		minFundingVolume = math.Max(minFundingVolume, 150000000.0)
+		minFundingVolume = math.Max(minFundingVolume, settings.UniverseChaosMinFundingVolume)
 	}
 
 	return UniverseThresholds{

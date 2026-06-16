@@ -433,6 +433,9 @@ type SignalJournal struct {
 	Reason             string    `json:"reason,omitempty"`
 	NotificationStatus string    `json:"notification_status,omitempty"`
 	NotificationError  string    `json:"notification_error,omitempty"`
+
+	TechnicalSnapshot  TechnicalSnapshot `json:"technical_snapshot,omitempty"`
+	StructureSnapshot  StructureSnapshot `json:"structure_snapshot,omitempty"`
 }
 
 // WatchJournal intentionally reuses the same persistence shape as SignalJournal,

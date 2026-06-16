@@ -60,6 +60,7 @@ func TestQuantEngineSafetyChecks(t *testing.T) {
 
 	// 2. SHORT during BTC Bullish restriction
 	policy := MarketPolicy{
+		AllowLong:    true,
 		AllowShort:   true,
 		ShortMode:    NORMAL,
 		BtcTrend:     "BULLISH",
@@ -275,9 +276,13 @@ func TestQuantEngine_LiquiditySweep_UsesConfiguredVolumeRatio(t *testing.T) {
 }
 
 func TestQuantEngine_DebugSaveRawKlines_DefaultDisabled(t *testing.T) {
-	t.Setenv("DEBUG_SAVE_RAW_KLINES", "false")
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
 	debugDir := t.TempDir()
-	t.Setenv("RAW_KLINES_DEBUG_DIR", debugDir)
+	settings := original
+	settings.DebugSaveRawKlines = false
+	settings.RawKlinesDebugDir = debugDir
+	SetRuntimeSettings(settings)
 
 	engine := NewPlaybookQuantEngineUsecase()
 	engine.saveM15RawKlines("BTCUSDT", []dto.Candle{{Time: time.Now().Add(-30 * time.Minute), Close: 100, Vol: 1}})
@@ -289,9 +294,13 @@ func TestQuantEngine_DebugSaveRawKlines_DefaultDisabled(t *testing.T) {
 }
 
 func TestQuantEngine_DebugSaveRawKlines_EnabledWrites(t *testing.T) {
-	t.Setenv("DEBUG_SAVE_RAW_KLINES", "true")
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
 	debugDir := t.TempDir()
-	t.Setenv("RAW_KLINES_DEBUG_DIR", debugDir)
+	settings := original
+	settings.DebugSaveRawKlines = true
+	settings.RawKlinesDebugDir = debugDir
+	SetRuntimeSettings(settings)
 
 	engine := NewPlaybookQuantEngineUsecase()
 	engine.saveM15RawKlines("BTCUSDT", []dto.Candle{{Time: time.Now().Add(-30 * time.Minute), Close: 100, Vol: 1}})
@@ -303,14 +312,18 @@ func TestQuantEngine_DebugSaveRawKlines_EnabledWrites(t *testing.T) {
 }
 
 func TestQuantEngine_DebugSaveRawKlines_WriteErrorDoesNotPanic(t *testing.T) {
-	t.Setenv("DEBUG_SAVE_RAW_KLINES", "true")
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
 
 	// Set RAW_KLINES_DEBUG_DIR to a file path to force mkdir error.
 	filePath := filepath.Join(t.TempDir(), "not_a_dir")
 	if err := os.WriteFile(filePath, []byte("x"), 0644); err != nil {
 		t.Fatalf("setup failed: %v", err)
 	}
-	t.Setenv("RAW_KLINES_DEBUG_DIR", filePath)
+	settings := original
+	settings.DebugSaveRawKlines = true
+	settings.RawKlinesDebugDir = filePath
+	SetRuntimeSettings(settings)
 
 	engine := NewPlaybookQuantEngineUsecase()
 	engine.saveM15RawKlines("BTCUSDT", []dto.Candle{{Time: time.Now().Add(-30 * time.Minute), Close: 100, Vol: 1}})

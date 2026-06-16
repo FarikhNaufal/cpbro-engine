@@ -81,15 +81,15 @@ func TestConfigRegistry_SafetyCompliance(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// User attempts to weaken limits below safety bounds:
-	// MinScoreExecute = 5.0 (clamped to 7.0)
-	// MinRRExecute = 1.0 (clamped to 1.5)
+	// MinScoreExecute = 4.0 (clamped to 5.0)
+	// MinRRExecute = 0.5 (clamped to 1.0)
 	// MaxFinalExecute = 0 (clamped to 1)
 	weakPolicyJSON := `{
 		"version": "v1.1.0",
 		"policies": {
 			"DEFAULT": {
-				"min_score_execute": 5.0,
-				"min_rr_execute": 1.0,
+				"min_score_execute": 4.0,
+				"min_rr_execute": 0.5,
 				"max_final_execute": 0,
 				"allow_long": true,
 				"allow_short": true
@@ -115,7 +115,7 @@ func TestConfigRegistry_SafetyCompliance(t *testing.T) {
 			},
 			"CROWDED_POSITIONING_SQUEEZE": {
 				"playbook": "CROWDED_POSITIONING_SQUEEZE",
-				"min_score_execute": 6.5,
+				"min_score_execute": 4.5,
 				"require_rejection": false,
 				"require_confirmation": false
 			}
@@ -139,11 +139,11 @@ func TestConfigRegistry_SafetyCompliance(t *testing.T) {
 
 	// Verify clamping
 	policy, _ := reg.GetMarketPolicy("DEFAULT")
-	if policy.MinScoreExecute != 7.0 {
-		t.Errorf("Expected MinScoreExecute clamped to 7.0, got %f", policy.MinScoreExecute)
+	if policy.MinScoreExecute != 5.0 {
+		t.Errorf("Expected MinScoreExecute clamped to 5.0, got %f", policy.MinScoreExecute)
 	}
-	if policy.MinRRExecute != 1.5 {
-		t.Errorf("Expected MinRRExecute clamped to 1.5, got %f", policy.MinRRExecute)
+	if policy.MinRRExecute != 1.0 {
+		t.Errorf("Expected MinRRExecute clamped to 1.0, got %f", policy.MinRRExecute)
 	}
 	if policy.MaxFinalExecute != 1 {
 		t.Errorf("Expected MaxFinalExecute clamped to 1, got %d", policy.MaxFinalExecute)
@@ -151,35 +151,32 @@ func TestConfigRegistry_SafetyCompliance(t *testing.T) {
 
 	// Verify Liquidity Sweep constraints
 	sweep, _ := reg.GetPlaybookProfile(LIQUIDITY_SWEEP_REVERSAL)
-	if !sweep.RequireVolumeConfirm {
-		t.Error("Expected sweep RequireVolumeConfirm overridden to true")
+	if sweep.RequireVolumeConfirm {
+		t.Error("Expected sweep RequireVolumeConfirm to follow JSON and be false")
 	}
-	if sweep.MinVolumeRatio != 1.1 {
-		t.Errorf("Expected sweep MinVolumeRatio overridden to 1.1, got %f", sweep.MinVolumeRatio)
+	if sweep.MinVolumeRatio != 1.0 {
+		t.Errorf("Expected sweep MinVolumeRatio overridden to 1.0, got %f", sweep.MinVolumeRatio)
 	}
-	if !sweep.RequireRejection || !sweep.RequireConfirmation {
-		t.Error("Expected sweep rejection and confirmation overridden to true")
-	}
-	if !sweep.RequireRetest {
-		t.Error("Expected sweep RequireRetest overridden to true")
+	if sweep.RequireRejection || sweep.RequireConfirmation {
+		t.Error("Expected sweep rejection and confirmation to follow JSON and be false")
 	}
 
 	// Verify Breakout Retest constraints
 	breakout, _ := reg.GetPlaybookProfile(COMPRESSION_BREAKOUT_RETEST)
-	if !breakout.RequireRetest {
-		t.Error("Expected breakout RequireRetest overridden to true")
+	if breakout.RequireRetest {
+		t.Error("Expected breakout RequireRetest to follow JSON and be false")
 	}
-	if !breakout.RequireConfirmation {
-		t.Error("Expected breakout RequireConfirmation overridden to true")
+	if breakout.RequireConfirmation {
+		t.Error("Expected breakout RequireConfirmation to follow JSON and be false")
 	}
 
 	// Verify Crowded Squeeze constraints
 	squeeze, _ := reg.GetPlaybookProfile(CROWDED_POSITIONING_SQUEEZE)
-	if squeeze.MinScoreExecute != 7.8 {
-		t.Errorf("Expected squeeze MinScoreExecute clamped to 7.8, got %f", squeeze.MinScoreExecute)
+	if squeeze.MinScoreExecute != 5.0 {
+		t.Errorf("Expected squeeze MinScoreExecute clamped to 5.0, got %f", squeeze.MinScoreExecute)
 	}
-	if !squeeze.RequireRejection || !squeeze.RequireConfirmation {
-		t.Error("Expected squeeze rejection and confirmation overridden to true")
+	if squeeze.RequireRejection || squeeze.RequireConfirmation {
+		t.Error("Expected squeeze rejection and confirmation to follow JSON and be false")
 	}
 
 	// Check checksum is computed and not empty/none
@@ -216,7 +213,7 @@ func TestConfigRegistry_RegimePolicyDriftIsClamped(t *testing.T) {
 			"RISK_OFF": {
 				"allow_long": true,
 				"allow_short": true,
-				"long_mode": "REVERSAL_ONLY",
+				"long_mode": "SWEEP_ONLY",
 				"short_mode": "NORMAL",
 				"allowed_tiers": ["A", "B"],
 				"allowed_playbooks": ["LIQUIDITY_SWEEP_REVERSAL", "RANGE_EDGE_REVERSAL"],
@@ -262,6 +259,9 @@ func TestConfigRegistry_RegimePolicyDriftIsClamped(t *testing.T) {
 	}
 
 	riskOff, _ := reg.GetMarketPolicy("RISK_OFF")
+	if riskOff.LongMode != SWEEP_ONLY {
+		t.Fatalf("RISK_OFF should default to LongMode SWEEP_ONLY, got %s", riskOff.LongMode)
+	}
 	hasTrendPullback := false
 	for _, playbook := range riskOff.AllowedPlaybooks {
 		if playbook == TREND_PULLBACK {

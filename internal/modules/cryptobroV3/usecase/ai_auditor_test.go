@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -246,6 +247,25 @@ func TestAIAuditor_NormalizesConfirmWatchOnlyToWait(t *testing.T) {
 	}
 	if res.Sentiment != "NEUTRAL" {
 		t.Fatalf("expected neutral sentiment for non-executable watch response, got %s", res.Sentiment)
+	}
+}
+
+func TestPruneAIAuditCacheEntries_RemovesExpiredAndBoundsSize(t *testing.T) {
+	now := time.Now()
+	cacheMap := map[string]entity.CachedAudit{
+		"expired": {CachedAt: now.Add(-aiAuditCacheTTL - time.Minute)},
+	}
+	for index := 0; index < aiAuditCacheMaxSize+5; index++ {
+		cacheMap[fmt.Sprintf("fresh-%d", index)] = entity.CachedAudit{CachedAt: now.Add(-time.Duration(index) * time.Second)}
+	}
+
+	pruneAIAuditCacheEntries(cacheMap, now)
+
+	if _, exists := cacheMap["expired"]; exists {
+		t.Fatal("expected expired cache entry to be pruned")
+	}
+	if len(cacheMap) > aiAuditCacheMaxSize {
+		t.Fatalf("expected cache size <= %d, got %d", aiAuditCacheMaxSize, len(cacheMap))
 	}
 }
 

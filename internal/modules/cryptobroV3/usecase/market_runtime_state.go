@@ -81,7 +81,7 @@ func deriveMacroMarketState(tickers []dto.Ticker24h) macroMarketState {
 	state.ActiveMoveShare = float64(activeMoves) / float64(total)
 	state.QuietMoveShare = float64(quietMoves) / float64(total)
 	state.MedianAbsMove24h = medianFloat64(absMoves)
-	broadSampleReliable := total >= broaderVolatilitySampleFloor
+	broadSampleReliable := total >= broaderVolatilitySampleFloor()
 
 	switch {
 	case btcAbsChange > 5.0 || state.MedianAbsMove24h >= 3.0 || (broadSampleReliable && state.ActiveMoveShare >= 0.40):
@@ -116,7 +116,7 @@ func shouldFallbackCompressionToLowVol(previous *entity.LatestResult, compressio
 	if !compressionMacroActive || previous == nil {
 		return false
 	}
-	return previous.CompressionZeroEligibleStreak >= compressionZeroEligibleFallbackThreshold
+	return previous.CompressionZeroEligibleStreak >= compressionZeroEligibleFallbackThreshold()
 }
 
 func nextCompressionZeroEligibleStreak(previous *entity.LatestResult, compressionMacroActive bool, totalPlaybookEligible int) int {

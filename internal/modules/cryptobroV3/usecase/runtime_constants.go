@@ -3,22 +3,41 @@ package usecase
 import "cpbro-engine/internal/modules/cryptobroV3/dto"
 
 const (
-	compressionNeutralBreadthLower           = 0.35
-	compressionNeutralBreadthUpper           = 0.65
-	compressionMaxBBWidth                    = 0.10
-	compressionZeroEligibleFallbackThreshold = 2
-	broaderVolatilitySampleFloor             = 6
-	defaultSweepVolumeRatio                  = 1.3
-	defaultCompressionVolumeRatio            = 1.2
+	defaultSweepVolumeRatio       = 1.3
+	defaultCompressionVolumeRatio = 1.2
 )
 
+func compressionNeutralBreadthLower() float64 {
+	return getRuntimeSettings().CompressionNeutralBreadthLower
+}
+
+func compressionNeutralBreadthUpper() float64 {
+	return getRuntimeSettings().CompressionNeutralBreadthUpper
+}
+
+func compressionMaxBBWidth() float64 {
+	return getRuntimeSettings().CompressionMaxBBWidth
+}
+
+func compressionZeroEligibleFallbackThreshold() int {
+	return getRuntimeSettings().CompressionZeroEligibleFallbackThreshold
+}
+
+func broaderVolatilitySampleFloor() int {
+	return getRuntimeSettings().BroaderVolatilitySampleFloor
+}
+
+func fundingExtremeThreshold() float64 {
+	return getRuntimeSettings().FundingExtremeThreshold
+}
+
 func isCompressionMacroContext(breadth float64) bool {
-	return breadth >= compressionNeutralBreadthLower && breadth <= compressionNeutralBreadthUpper
+	return breadth >= compressionNeutralBreadthLower() && breadth <= compressionNeutralBreadthUpper()
 }
 
 func hasCompressionEvidence(indicators map[string]float64) bool {
 	bbWidth := GetIndicator(indicators, IndicatorBBWidth)
-	return GetIndicator(indicators, IndicatorContraction) == 1.0 || (bbWidth > 0 && bbWidth <= compressionMaxBBWidth)
+	return GetIndicator(indicators, IndicatorContraction) == 1.0 || (bbWidth > 0 && bbWidth <= compressionMaxBBWidth())
 }
 
 func resolveConfiguredMinVolumeRatio(playbook Playbook, policy MarketPolicy, tier Tier) float64 {

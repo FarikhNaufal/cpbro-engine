@@ -98,6 +98,47 @@ func TestFilterUniverse(t *testing.T) {
 	}
 }
 
+func TestUniverse_RuntimeSettingsAffectTieringAndWeights(t *testing.T) {
+	original := SnapshotRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+
+	settings := original
+	settings.UniverseTierAMinQuoteVolume = 300000000.0
+	settings.UniverseTierBMinQuoteVolume = 100000000.0
+	settings.UniverseWeightLiquidityDefault = 0.20
+	settings.UniverseWeightActivityDefault = 0.60
+	settings.UniverseWeightHotDefault = 0.20
+	SetRuntimeSettings(settings)
+
+	uc := NewUniverseUsecase()
+	policy := MarketPolicy{
+		AllowedTiers:    []Tier{TierA, TierB, TierC},
+		MaxSymbols:      10,
+		MinVolume:       1000000.0,
+		MaxFundingAbs:   0.01,
+		MaxPriceMove24h: 0.20,
+	}
+
+	tickers := []dto.Ticker24h{
+		{Symbol: "AAAUSDT", QuoteVolume: 250000000.0, PriceChangePercent: 1.0},
+		{Symbol: "BBBUSDT", QuoteVolume: 120000000.0, PriceChangePercent: 8.0},
+	}
+
+	candidates, rejected := uc.FilterUniverse(tickers, nil, policy, nil)
+	if len(rejected) != 0 || len(candidates) != 2 {
+		t.Fatalf("expected both candidates to pass, got candidates=%+v rejected=%+v", candidates, rejected)
+	}
+	if candidates[0].Tier != TierB {
+		t.Fatalf("expected custom tier threshold to classify AAAUSDT as TierB, got %s", candidates[0].Tier)
+	}
+	if candidates[1].Tier != TierB {
+		t.Fatalf("expected custom tier threshold to classify BBBUSDT as TierB, got %s", candidates[1].Tier)
+	}
+	if candidates[0].Symbol != "BBBUSDT" {
+		t.Fatalf("expected activity-heavy BBBUSDT to rank first with custom weights, got %+v", candidates)
+	}
+}
+
 func TestFilterUniverseDynamicThresholds(t *testing.T) {
 	uc := NewUniverseUsecase()
 

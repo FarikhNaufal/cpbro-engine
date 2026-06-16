@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -216,6 +217,36 @@ func TestMarketDataUsecase_FetchAllFuturesTickers24hWithMeta_ReportsLiveThenCach
 	require.Len(t, second, 1)
 	require.Equal(t, bootstrapSourceCache, secondMeta.Source)
 	require.GreaterOrEqual(t, secondMeta.CacheAge, time.Duration(0))
+}
+
+func TestPruneExpiredClosedCandleCache_RemovesExpiredAndBoundsSize(t *testing.T) {
+	now := time.Now()
+	cache := map[string]cachedClosedCandles{
+		"expired": {validUntil: now.Add(-time.Second)},
+	}
+	for index := 0; index < maxClosedCandleCacheEntries+5; index++ {
+		cache[fmt.Sprintf("fresh-%d", index)] = cachedClosedCandles{validUntil: now.Add(time.Minute)}
+	}
+
+	pruneExpiredClosedCandleCache(cache, now, maxClosedCandleCacheEntries)
+
+	require.NotContains(t, cache, "expired")
+	require.LessOrEqual(t, len(cache), maxClosedCandleCacheEntries)
+}
+
+func TestPruneExpiredFloatCache_RemovesExpiredAndBoundsSize(t *testing.T) {
+	now := time.Now()
+	cache := map[string]cachedFloat64{
+		"expired": {validUntil: now.Add(-time.Second)},
+	}
+	for index := 0; index < maxOpenInterestCacheEntries+5; index++ {
+		cache[fmt.Sprintf("fresh-%d", index)] = cachedFloat64{validUntil: now.Add(time.Minute)}
+	}
+
+	pruneExpiredFloatCache(cache, now, maxOpenInterestCacheEntries)
+
+	require.NotContains(t, cache, "expired")
+	require.LessOrEqual(t, len(cache), maxOpenInterestCacheEntries)
 }
 
 func TestMarketDataUsecase_FetchPremiumFundingRates_UsesFreshCacheOnFailure(t *testing.T) {

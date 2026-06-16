@@ -82,32 +82,11 @@ func (uc *CandidateArbiterUsecase) Arbitrate(candidates []QuantResult, policy Ma
 				rejected = append(rejected, cand)
 				continue
 			}
-			if policy.LongMode == PULLBACK_ONLY && cand.Playbook != TREND_PULLBACK {
+			if !ValidateLongPath(policy, cand.Playbook) {
 				cand.Status = ARBITER_REJECTED
-				cand.Reason = fmt.Sprintf("Arbiter reject: Policy LongMode PULLBACK_ONLY blocks playbook %s", cand.Playbook)
+				cand.Reason = fmt.Sprintf("Arbiter reject: %s", modeRejectReason(policy, cand.Direction, cand.Playbook))
 				rejected = append(rejected, cand)
 				continue
-			}
-			if policy.LongMode == SWEEP_ONLY && cand.Playbook != LIQUIDITY_SWEEP_REVERSAL {
-				cand.Status = ARBITER_REJECTED
-				cand.Reason = fmt.Sprintf("Arbiter reject: Policy LongMode SWEEP_ONLY blocks playbook %s", cand.Playbook)
-				rejected = append(rejected, cand)
-				continue
-			}
-			if policy.LongMode == BREAKOUT_RETEST_ONLY && cand.Playbook != COMPRESSION_BREAKOUT_RETEST {
-				cand.Status = ARBITER_REJECTED
-				cand.Reason = fmt.Sprintf("Arbiter reject: Policy LongMode BREAKOUT_RETEST_ONLY blocks playbook %s", cand.Playbook)
-				rejected = append(rejected, cand)
-				continue
-			}
-			if policy.LongMode == REVERSAL_ONLY {
-				isReversal := cand.Playbook == LIQUIDITY_SWEEP_REVERSAL || cand.Playbook == RANGE_EDGE_REVERSAL || cand.Playbook == CROWDED_POSITIONING_SQUEEZE
-				if !isReversal {
-					cand.Status = ARBITER_REJECTED
-					cand.Reason = fmt.Sprintf("Arbiter reject: Policy LongMode REVERSAL_ONLY blocks playbook %s", cand.Playbook)
-					rejected = append(rejected, cand)
-					continue
-				}
 			}
 		} else if cand.Direction == SHORT {
 			if !policy.AllowShort || policy.ShortMode == DISABLED {
@@ -116,32 +95,11 @@ func (uc *CandidateArbiterUsecase) Arbitrate(candidates []QuantResult, policy Ma
 				rejected = append(rejected, cand)
 				continue
 			}
-			if policy.ShortMode == PULLBACK_ONLY && cand.Playbook != TREND_PULLBACK {
+			if !ValidateShortPath(policy, cand.Playbook) {
 				cand.Status = ARBITER_REJECTED
-				cand.Reason = fmt.Sprintf("Arbiter reject: Policy ShortMode PULLBACK_ONLY blocks playbook %s", cand.Playbook)
+				cand.Reason = fmt.Sprintf("Arbiter reject: %s", modeRejectReason(policy, cand.Direction, cand.Playbook))
 				rejected = append(rejected, cand)
 				continue
-			}
-			if policy.ShortMode == SWEEP_ONLY && cand.Playbook != LIQUIDITY_SWEEP_REVERSAL {
-				cand.Status = ARBITER_REJECTED
-				cand.Reason = fmt.Sprintf("Arbiter reject: Policy ShortMode SWEEP_ONLY blocks playbook %s", cand.Playbook)
-				rejected = append(rejected, cand)
-				continue
-			}
-			if policy.ShortMode == BREAKOUT_RETEST_ONLY && cand.Playbook != COMPRESSION_BREAKOUT_RETEST {
-				cand.Status = ARBITER_REJECTED
-				cand.Reason = fmt.Sprintf("Arbiter reject: Policy ShortMode BREAKOUT_RETEST_ONLY blocks playbook %s", cand.Playbook)
-				rejected = append(rejected, cand)
-				continue
-			}
-			if policy.ShortMode == REVERSAL_ONLY {
-				isReversal := cand.Playbook == LIQUIDITY_SWEEP_REVERSAL || cand.Playbook == RANGE_EDGE_REVERSAL || cand.Playbook == CROWDED_POSITIONING_SQUEEZE
-				if !isReversal {
-					cand.Status = ARBITER_REJECTED
-					cand.Reason = fmt.Sprintf("Arbiter reject: Policy ShortMode REVERSAL_ONLY blocks playbook %s", cand.Playbook)
-					rejected = append(rejected, cand)
-					continue
-				}
 			}
 		}
 

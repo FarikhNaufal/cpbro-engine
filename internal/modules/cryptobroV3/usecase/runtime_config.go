@@ -1,7 +1,6 @@
 package usecase
 
 import (
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -10,15 +9,11 @@ import (
 const defaultMonitoringMaxHoldMinutes = 120
 
 func getMonitoringMaxHoldMinutes() int {
-	raw := strings.TrimSpace(os.Getenv("MONITORING_MAX_HOLD_MINUTES"))
-	if raw == "" {
+	minutes := getRuntimeSettings().MonitoringMaxHoldMinutes
+	if minutes <= 0 {
 		return defaultMonitoringMaxHoldMinutes
 	}
-	parsed, err := strconv.Atoi(raw)
-	if err != nil || parsed <= 0 {
-		return defaultMonitoringMaxHoldMinutes
-	}
-	return parsed
+	return minutes
 }
 
 func getMonitoringMaxHoldDuration() time.Duration {
@@ -30,27 +25,11 @@ func getMonitoringMaxHoldLabel() string {
 }
 
 func getRequireAIHighForExecute() bool {
-	raw := strings.TrimSpace(os.Getenv("REQUIRE_AI_HIGH_FOR_EXECUTE"))
-	if raw == "" {
-		return true
-	}
-	parsed, err := strconv.ParseBool(raw)
-	if err != nil {
-		return true
-	}
-	return parsed
+	return getRuntimeSettings().RequireAIHighForExecute
 }
 
 func getRequireFreshEntryForExecute() bool {
-	raw := strings.TrimSpace(os.Getenv("REQUIRE_FRESH_ENTRY_FOR_EXECUTE"))
-	if raw == "" {
-		return true
-	}
-	parsed, err := strconv.ParseBool(raw)
-	if err != nil {
-		return true
-	}
-	return parsed
+	return getRuntimeSettings().RequireFreshEntryForExecute
 }
 
 func effectiveRequiredAIConfidence(policy MarketPolicy, profile PlaybookThresholdProfile) AIConfidence {

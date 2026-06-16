@@ -164,8 +164,11 @@ func TestObservability_PerformHealthAudit(t *testing.T) {
 	ScanWorkerRunning.Store(true)
 	defer ScanWorkerRunning.Store(false)
 
-	os.Setenv("HEALTH_STORAGE_CHECK", "true")
-	defer os.Unsetenv("HEALTH_STORAGE_CHECK")
+	original := getRuntimeSettings()
+	defer SetRuntimeSettings(original)
+	settings := original
+	settings.HealthStorageCheck = true
+	SetRuntimeSettings(settings)
 
 	ctx := context.Background()
 	status, err := uc.PerformHealthAudit(ctx)

@@ -30,6 +30,17 @@ type Handler struct {
 	storageDir      string
 	scannerRunning  *atomic.Bool
 	startTime       time.Time
+	runtime         HandlerRuntimeConfig
+}
+
+type HandlerRuntimeConfig struct {
+	AppName         string
+	AppVersion      string
+	AppEnv          string
+	SwaggerEnabled  bool
+	BinanceReadOnly bool
+	LogFilePath     string
+	SafeConfig      map[string]any
 }
 
 type scannerRunner interface {
@@ -45,7 +56,35 @@ func NewHandler(
 	observabilityUC *usecase.ObservabilityUsecase,
 	storageDir string,
 	scannerRunning *atomic.Bool,
+	configs ...HandlerRuntimeConfig,
 ) *Handler {
+	runtimeCfg := HandlerRuntimeConfig{
+		AppName:         "cpbro-engine",
+		AppVersion:      "3.0.0",
+		AppEnv:          "development",
+		SwaggerEnabled:  false,
+		BinanceReadOnly: true,
+		LogFilePath:     "storage/logs/app.log",
+		SafeConfig:      map[string]any{},
+	}
+	if len(configs) > 0 {
+		runtimeCfg = configs[0]
+		if strings.TrimSpace(runtimeCfg.AppName) == "" {
+			runtimeCfg.AppName = "cpbro-engine"
+		}
+		if strings.TrimSpace(runtimeCfg.AppVersion) == "" {
+			runtimeCfg.AppVersion = "3.0.0"
+		}
+		if strings.TrimSpace(runtimeCfg.AppEnv) == "" {
+			runtimeCfg.AppEnv = "development"
+		}
+		if strings.TrimSpace(runtimeCfg.LogFilePath) == "" {
+			runtimeCfg.LogFilePath = "storage/logs/app.log"
+		}
+		if runtimeCfg.SafeConfig == nil {
+			runtimeCfg.SafeConfig = map[string]any{}
+		}
+	}
 	return &Handler{
 		scannerUC:       scannerUC,
 		feedbackUC:      feedbackUC,
@@ -55,6 +94,7 @@ func NewHandler(
 		storageDir:      storageDir,
 		scannerRunning:  scannerRunning,
 		startTime:       time.Now(),
+		runtime:         runtimeCfg,
 	}
 }
 
@@ -71,20 +111,6 @@ func (h *Handler) mapHealthResponse(status usecase.HealthStatus) dto.HealthRespo
 		websocketLastMessageStr = status.RealtimePrice.LastMessageTime.Format(time.RFC3339)
 	}
 
-	appName := os.Getenv("APP_NAME")
-	if appName == "" {
-		appName = "cpbro-engine"
-	}
-	appVersion := os.Getenv("APP_VERSION")
-	if appVersion == "" {
-		appVersion = "3.0.0"
-	}
-	appEnv := os.Getenv("APP_ENV")
-	if appEnv == "" {
-		appEnv = "development"
-	}
-
-	swaggerEnabled := os.Getenv("SWAGGER_ENABLED") == "true"
 	uptime := time.Since(h.startTime).Seconds()
 
 	storageAvailable := status.StorageWritable == "OK" || status.StorageWritable == "OK (SKIPPED)"
@@ -111,32 +137,23 @@ func (h *Handler) mapHealthResponse(status usecase.HealthStatus) dto.HealthRespo
 		healthStatus = "degraded"
 	}
 
-	safeCfg := map[string]any{
-		"binance_api_key_set":         strings.TrimSpace(os.Getenv("BINANCE_API_KEY")) != "",
-		"binance_api_secret_set":      strings.TrimSpace(os.Getenv("BINANCE_API_SECRET")) != "",
-		"gemini_api_key_set":          strings.TrimSpace(os.Getenv("GEMINI_API_KEY")) != "",
-		"telegram_bot_token_set":      strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")) != "",
-		"telegram_signal_chat_id_set": strings.TrimSpace(os.Getenv("TELEGRAM_SIGNAL_CHAT_ID")) != "" || strings.TrimSpace(os.Getenv("TELEGRAM_CHAT_ID")) != "",
-		"telegram_status_chat_id_set": strings.TrimSpace(os.Getenv("TELEGRAM_STATUS_CHAT_ID")) != "",
-	}
-
 	scannerRunning := status.ScanWorkerRunning
 	if h.scannerRunning != nil && h.scannerRunning.Load() {
 		scannerRunning = true
 	}
 
 	return dto.HealthResponse{
-		AppName:                  appName,
-		AppVersion:               appVersion,
-		AppEnv:                   appEnv,
+		AppName:                  h.runtime.AppName,
+		AppVersion:               h.runtime.AppVersion,
+		AppEnv:                   h.runtime.AppEnv,
 		Mode:                     status.Mode,
 		AlertOnly:                status.Mode == "alert-only",
-		BinanceReadOnly:          os.Getenv("BINANCE_READ_ONLY") != "false",
+		BinanceReadOnly:          h.runtime.BinanceReadOnly,
 		ScannerRunning:           scannerRunning,
 		LastScanTime:             lastScanStr,
 		LastEvaluationTime:       lastEvalStr,
 		StorageAvailable:         storageAvailable,
-		SwaggerEnabled:           swaggerEnabled,
+		SwaggerEnabled:           h.runtime.SwaggerEnabled,
 		UptimeSeconds:            uptime,
 		Status:                   healthStatus,
 		Warnings:                 warnings,
@@ -144,7 +161,7 @@ func (h *Handler) mapHealthResponse(status usecase.HealthStatus) dto.HealthRespo
 		WebsocketConnected:       status.RealtimePrice.Connected,
 		WebsocketActiveSymbols:   status.RealtimePrice.ActiveSymbols,
 		WebsocketLastMessageTime: websocketLastMessageStr,
-		SafeConfig:               safeCfg,
+		SafeConfig:               h.runtime.SafeConfig,
 	}
 }
 
@@ -914,10 +931,7 @@ func (h *Handler) GetLogs(c *gin.Context) {
 	}
 
 	// Resolve log file path
-	logFilePath := os.Getenv("LOG_FILE_PATH")
-	if logFilePath == "" {
-		logFilePath = "storage/logs/app.log"
-	}
+	logFilePath := h.runtime.LogFilePath
 
 	// Check if streaming is requested
 	stream := c.Query("stream") == "true" || c.GetHeader("Accept") == "text/event-stream"
@@ -1017,4 +1031,3 @@ func (h *Handler) GetLogs(c *gin.Context) {
 		}))
 	}
 }
-

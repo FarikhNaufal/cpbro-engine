@@ -45,6 +45,164 @@ func TestConfig_LoadDefaultsEmptyEnv(t *testing.T) {
 	if cfg.Binance.WebsocketEnabled {
 		t.Errorf("Expected Binance.WebsocketEnabled=false")
 	}
+	if cfg.Universe.TierAMinQuoteVolume != 150000000.0 || cfg.Universe.TierBMinQuoteVolume != 50000000.0 {
+		t.Errorf("unexpected universe tier defaults: %+v", cfg.Universe)
+	}
+	if cfg.Universe.DefaultHotBoost != 1.25 || cfg.Universe.MaxHotBoost != 1.5 {
+		t.Errorf("unexpected universe hot boost defaults: %+v", cfg.Universe)
+	}
+	if cfg.Strategy.CompressionMaxBBWidth != 0.10 || cfg.Strategy.FundingExtremeThreshold != 0.003 {
+		t.Errorf("unexpected strategy heuristic defaults: %+v", cfg.Strategy)
+	}
+	if cfg.Strategy.StalenessBasePctDefault != 0.35 || cfg.Strategy.StalenessLateThresholdMultiplier != 1.5 {
+		t.Errorf("unexpected staleness defaults: %+v", cfg.Strategy)
+	}
+	if cfg.Concurrency.MaxMarketDataConcurrency != cfg.Worker.MaxMarketDataConcurrency {
+		t.Errorf("expected concurrency mirror to follow worker max market data concurrency")
+	}
+	if cfg.Monitoring.MaxCandleConcurrency != cfg.Worker.MaxMonitoringCandleConcurrency {
+		t.Errorf("expected monitoring max candle concurrency mirror to follow worker")
+	}
+	if cfg.Monitoring.WatchCooldownMinutes != cfg.Strategy.WatchCooldownMinutes {
+		t.Errorf("expected monitoring watch cooldown mirror to follow strategy")
+	}
+}
+
+func TestConfig_NormalizeCompatibilityConfigAuthoritativeSectionsWin(t *testing.T) {
+	t.Setenv("STRATEGY_REQUIRE_AI_HIGH_FOR_EXECUTE", "false")
+	t.Setenv("STRATEGY_REQUIRE_FRESH_ENTRY_FOR_EXECUTE", "false")
+	t.Setenv("REQUIRE_AI_HIGH_FOR_EXECUTE", "true")
+	t.Setenv("REQUIRE_FRESH_ENTRY_FOR_EXECUTE", "true")
+	t.Setenv("WORKER_MAX_MARKETDATA_CONCURRENCY", "17")
+	t.Setenv("MAX_MARKETDATA_CONCURRENCY", "3")
+	t.Setenv("WORKER_MAX_MONITORING_CANDLE_CONCURRENCY", "9")
+	t.Setenv("MAX_MONITORING_CANDLE_CONCURRENCY", "2")
+	t.Setenv("STRATEGY_WATCH_COOLDOWN_MINUTES", "44")
+	t.Setenv("WATCH_COOLDOWN_MINUTES", "11")
+	t.Setenv("UNIVERSE_MAX_SYMBOLS_DEFAULT", "66")
+	t.Setenv("MAX_SYMBOLS_DEFAULT", "22")
+
+	cfg, err := LoadConfigFromEnv()
+	if err != nil {
+		t.Fatalf("LoadConfigFromEnv failed: %v", err)
+	}
+
+	if !cfg.Strategy.RequireAIHighForExecute || !cfg.Strategy.RequireFreshEntryForExecute {
+		t.Fatalf("expected strategy safety toggles to be normalized from safety layer: %+v", cfg.Strategy)
+	}
+	if cfg.Concurrency.MaxMarketDataConcurrency != 17 {
+		t.Fatalf("expected concurrency mirror to follow worker authoritative value, got %d", cfg.Concurrency.MaxMarketDataConcurrency)
+	}
+	if cfg.Monitoring.MaxCandleConcurrency != 9 {
+		t.Fatalf("expected monitoring concurrency mirror to follow worker authoritative value, got %d", cfg.Monitoring.MaxCandleConcurrency)
+	}
+	if cfg.Monitoring.WatchCooldownMinutes != 44 {
+		t.Fatalf("expected monitoring watch cooldown mirror to follow strategy authoritative value, got %d", cfg.Monitoring.WatchCooldownMinutes)
+	}
+	if cfg.Concurrency.MaxSymbolsDefault != 66 {
+		t.Fatalf("expected concurrency max symbols mirror to follow universe authoritative value, got %d", cfg.Concurrency.MaxSymbolsDefault)
+	}
+}
+
+func TestConfig_ValidateConfigNormalizesLegacyMirrors(t *testing.T) {
+	cfg, _ := LoadConfigFromEnv()
+	cfg.Telegram.Enabled = false
+	cfg.Worker.MaxMonitoringCandleConcurrency = 12
+	cfg.Worker.MaxMarketDataConcurrency = 13
+	cfg.Strategy.WatchCooldownMinutes = 55
+	cfg.Universe.MaxSymbolsDefault = 77
+	cfg.Safety.RequireAIHighForExecute = true
+	cfg.Safety.RequireFreshEntryForExecute = true
+	cfg.Strategy.RequireAIHighForExecute = false
+	cfg.Strategy.RequireFreshEntryForExecute = false
+	cfg.Monitoring.MaxCandleConcurrency = 1
+	cfg.Monitoring.WatchCooldownMinutes = 1
+	cfg.Concurrency.MaxMarketDataConcurrency = 1
+	cfg.Concurrency.MaxSymbolsDefault = 1
+
+	if err := ValidateConfig(cfg); err != nil {
+		t.Fatalf("expected ValidateConfig to pass after normalizing legacy mirrors, got: %v", err)
+	}
+	if cfg.Monitoring.MaxCandleConcurrency != 12 {
+		t.Fatalf("expected monitoring max candle concurrency to normalize to worker value, got %d", cfg.Monitoring.MaxCandleConcurrency)
+	}
+	if cfg.Monitoring.WatchCooldownMinutes != 55 {
+		t.Fatalf("expected monitoring watch cooldown to normalize to strategy value, got %d", cfg.Monitoring.WatchCooldownMinutes)
+	}
+	if cfg.Concurrency.MaxMarketDataConcurrency != 13 {
+		t.Fatalf("expected concurrency mirror to normalize to worker value, got %d", cfg.Concurrency.MaxMarketDataConcurrency)
+	}
+	if cfg.Concurrency.MaxSymbolsDefault != 77 {
+		t.Fatalf("expected concurrency max symbols mirror to normalize to universe value, got %d", cfg.Concurrency.MaxSymbolsDefault)
+	}
+	if !cfg.Strategy.RequireAIHighForExecute || !cfg.Strategy.RequireFreshEntryForExecute {
+		t.Fatalf("expected strategy safety flags to normalize to true, got %+v", cfg.Strategy)
+	}
+}
+
+func TestConfig_ValidationUniverseWeightsAndThresholds(t *testing.T) {
+	cfg, _ := LoadConfigFromEnv()
+	cfg.Universe.TierAMinQuoteVolume = 40000000.0
+	cfg.Universe.TierBMinQuoteVolume = 50000000.0
+
+	if err := ValidateConfig(cfg); err == nil {
+		t.Fatalf("expected validation error when tier A threshold <= tier B threshold")
+	}
+
+	cfg, _ = LoadConfigFromEnv()
+	cfg.Universe.WeightLiquidityDefault = 0.9
+	cfg.Universe.WeightActivityDefault = 0.2
+	cfg.Universe.WeightHotDefault = 0.2
+	if err := ValidateConfig(cfg); err == nil {
+		t.Fatalf("expected validation error when universe weights do not sum to 1")
+	}
+}
+
+func TestConfig_ValidationStrategyStalenessTuning(t *testing.T) {
+	cfg, _ := LoadConfigFromEnv()
+	cfg.Strategy.StalenessPolicyScaleMin = 1.3
+	cfg.Strategy.StalenessPolicyScaleMax = 1.1
+	if err := ValidateConfig(cfg); err == nil {
+		t.Fatalf("expected validation error when staleness scale min > max")
+	}
+
+	cfg, _ = LoadConfigFromEnv()
+	cfg.Strategy.StalenessLateThresholdMultiplier = 0
+	if err := ValidateConfig(cfg); err == nil {
+		t.Fatalf("expected validation error when staleness late multiplier <= 0")
+	}
+}
+
+func TestConfig_SafeConfigViewIncludesNewRuntimeSurfaces(t *testing.T) {
+	cfg, _ := LoadConfigFromEnv()
+	view := SafeConfigView(cfg)
+
+	universeMap := view["universe"].(map[string]any)
+	if universeMap["tier_a_min_quote_volume"] != cfg.Universe.TierAMinQuoteVolume {
+		t.Fatalf("expected safe universe view to expose tier_a_min_quote_volume")
+	}
+	if universeMap["weight_hot_chaos"] != cfg.Universe.WeightHotChaos {
+		t.Fatalf("expected safe universe view to expose chaos hot weight")
+	}
+
+	strategyMap := view["strategy"].(map[string]any)
+	if strategyMap["funding_extreme_threshold"] != cfg.Strategy.FundingExtremeThreshold {
+		t.Fatalf("expected safe strategy view to expose funding_extreme_threshold")
+	}
+	if strategyMap["staleness_base_pct_default"] != cfg.Strategy.StalenessBasePctDefault {
+		t.Fatalf("expected safe strategy view to expose staleness base pct default")
+	}
+	if _, ok := view["concurrency"]; ok {
+		t.Fatalf("expected legacy concurrency section to be hidden from safe config view")
+	}
+	monitoringMap := view["monitoring"].(map[string]any)
+	if _, ok := monitoringMap["watch_cooldown_minutes"]; ok {
+		t.Fatalf("expected mirrored monitoring watch fields to be hidden from safe config view")
+	}
+	geminiMap := view["gemini"].(map[string]any)
+	if _, ok := geminiMap["max_concurrency"]; ok {
+		t.Fatalf("expected worker-owned gemini concurrency mirror to be hidden from safe config view")
+	}
 }
 
 func TestConfig_ValidationSafetyAlertOnly(t *testing.T) {

@@ -3,9 +3,7 @@ package usecase
 import (
 	"context"
 	"log/slog"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -151,10 +149,8 @@ func (uc *MonitoringUsecase) preloadMonitoringCandles(ctx context.Context, activ
 	}
 
 	concurrency := minInt(len(activeSymbols), 4)
-	if val := os.Getenv("MAX_MONITORING_CANDLE_CONCURRENCY"); val != "" {
-		if limit, err := strconv.Atoi(val); err == nil && limit > 0 {
-			concurrency = minInt(len(activeSymbols), limit)
-		}
+	if limit := getRuntimeSettings().MaxMonitoringCandleConcurrency; limit > 0 {
+		concurrency = minInt(len(activeSymbols), limit)
 	}
 	if concurrency <= 0 {
 		concurrency = 1

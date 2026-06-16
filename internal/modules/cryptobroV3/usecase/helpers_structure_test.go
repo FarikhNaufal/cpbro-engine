@@ -100,11 +100,12 @@ func TestPopulateSnapshots_UsesRealBollingerWidthForContraction(t *testing.T) {
 	if tightTech.IndicatorValues[IndicatorContraction] != 1.0 {
 		t.Fatalf("expected tight series to register contraction, got %v", tightTech.IndicatorValues[IndicatorContraction])
 	}
-	if tightTech.IndicatorValues[IndicatorBBWidth] <= 0 || tightTech.IndicatorValues[IndicatorBBWidth] > compressionMaxBBWidth {
-		t.Fatalf("expected tight series to have bb width <= %0.2f, got %0.4f", compressionMaxBBWidth, tightTech.IndicatorValues[IndicatorBBWidth])
+	maxWidth := compressionMaxBBWidth()
+	if tightTech.IndicatorValues[IndicatorBBWidth] <= 0 || tightTech.IndicatorValues[IndicatorBBWidth] > maxWidth {
+		t.Fatalf("expected tight series to have bb width <= %0.2f, got %0.4f", maxWidth, tightTech.IndicatorValues[IndicatorBBWidth])
 	}
-	if wideTech.IndicatorValues[IndicatorBBWidth] <= compressionMaxBBWidth {
-		t.Fatalf("expected wide series to have bb width > %0.2f, got %0.4f", compressionMaxBBWidth, wideTech.IndicatorValues[IndicatorBBWidth])
+	if wideTech.IndicatorValues[IndicatorBBWidth] <= maxWidth {
+		t.Fatalf("expected wide series to have bb width > %0.2f, got %0.4f", maxWidth, wideTech.IndicatorValues[IndicatorBBWidth])
 	}
 	if wideTech.IndicatorValues[IndicatorContraction] == 1.0 {
 		t.Fatalf("expected wide series not to register contraction")

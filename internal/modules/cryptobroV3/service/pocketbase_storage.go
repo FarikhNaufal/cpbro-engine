@@ -968,6 +968,8 @@ func encodeSignalJournal(e usecase.SignalJournal) map[string]any {
 		"reason":                    e.Reason,
 		"notification_status":       e.NotificationStatus,
 		"notification_error":        e.NotificationError,
+		"technical_snapshot":        e.TechnicalSnapshot,
+		"structure_snapshot":        e.StructureSnapshot,
 	}
 	if e.IsHot {
 		out["hot_info"] = map[string]any{
@@ -1069,10 +1071,29 @@ func decodeSignalJournal(m map[string]any) (usecase.SignalJournal, error) {
 		}
 	}
 
+	decodeSnapshot(m["technical_snapshot"], &out.TechnicalSnapshot)
+	decodeSnapshot(m["structure_snapshot"], &out.StructureSnapshot)
+
 	if strings.TrimSpace(out.ID) == "" || strings.TrimSpace(out.Symbol) == "" {
 		return usecase.SignalJournal{}, errors.New("missing required journal fields")
 	}
 	return out, nil
+}
+
+func decodeSnapshot[T any](val any, target *T) {
+	if val == nil {
+		return
+	}
+	switch v := val.(type) {
+	case string:
+		if strings.TrimSpace(v) != "" {
+			_ = json.Unmarshal([]byte(v), target)
+		}
+	default:
+		if bytes, err := json.Marshal(v); err == nil {
+			_ = json.Unmarshal(bytes, target)
+		}
+	}
 }
 
 func encodeEvaluationRun(evaluationID string, report *usecase.EvaluationReport) map[string]any {

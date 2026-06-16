@@ -127,7 +127,11 @@ func (uc *ObservabilityUsecase) SetRealtimeStatusProvider(provider RealtimeStatu
 func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthStatus, error) {
 	// 1. Check Binance Read-Only Connection
 	binanceStatus := "OK"
-	binanceCtx, binanceCancel := context.WithTimeout(ctx, 2*time.Second)
+	healthTimeout := time.Duration(getRuntimeSettings().HealthCheckTimeoutSeconds) * time.Second
+	if healthTimeout <= 0 {
+		healthTimeout = 2 * time.Second
+	}
+	binanceCtx, binanceCancel := context.WithTimeout(ctx, healthTimeout)
 	defer binanceCancel()
 	if _, err := uc.provider.FetchLatestPrice(binanceCtx, "BTCUSDT"); err != nil {
 		binanceStatus = "ERROR: " + err.Error()
@@ -136,7 +140,7 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 	// 2. Check Gemini Availability
 	geminiStatus := "OK"
 	if pingable, ok := uc.aiService.(Pingable); ok {
-		geminiCtx, geminiCancel := context.WithTimeout(ctx, 2*time.Second)
+		geminiCtx, geminiCancel := context.WithTimeout(ctx, healthTimeout)
 		defer geminiCancel()
 		if err := pingable.Ping(geminiCtx); err != nil {
 			geminiStatus = "ERROR: " + err.Error()
@@ -148,7 +152,7 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 	// 3. Check Telegram optional availability
 	telegramStatus := "NOT_CONFIGURED"
 	if pingable, ok := uc.notifier.(TelegramPingable); ok {
-		tgCtx, tgCancel := context.WithTimeout(ctx, 2*time.Second)
+		tgCtx, tgCancel := context.WithTimeout(ctx, healthTimeout)
 		defer tgCancel()
 		if err := pingable.Ping(tgCtx); err != nil {
 			telegramStatus = "ERROR: " + err.Error()
@@ -159,7 +163,7 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 
 	// 4. Check Storage Writable (Conditional check based on HEALTH_STORAGE_CHECK env)
 	storageStatus := "OK (SKIPPED)"
-	if os.Getenv("HEALTH_STORAGE_CHECK") == "true" {
+	if getRuntimeSettings().HealthStorageCheck {
 		storageStatus = "OK"
 		testFile := filepath.Join(uc.storageDir, ".health_write_test")
 		if err := os.WriteFile(testFile, []byte("write-test"), 0644); err != nil {

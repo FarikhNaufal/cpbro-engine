@@ -631,7 +631,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 		var localCandidates []QuantResult
 		localGateMap := make(map[string]LocalGateResult)
 		for _, qResult := range selectedCandidates {
-			lgRes := uc.localGateUsecase.Evaluate(qResult, policy, closedM15)
+			lgRes := uc.localGateUsecase.EvaluateWithContext(ctx, qResult, policy, closedM15)
 			localGateMap[qResult.Symbol] = lgRes
 			if lgRes.Passed {
 				localCandidates = append(localCandidates, qResult)

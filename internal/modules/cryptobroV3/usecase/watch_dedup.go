@@ -2,8 +2,6 @@ package usecase
 
 import (
 	"math"
-	"os"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -243,19 +241,17 @@ func isClosedWatchStatus(status Status) bool {
 }
 
 func resolveWatchDurationEnv(key string, defaultMinutes int) time.Duration {
-	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
-		if minutes, err := strconv.Atoi(value); err == nil && minutes > 0 {
-			return time.Duration(minutes) * time.Minute
-		}
+	minutes := getRuntimeSettings().WatchCooldownMinutes
+	if strings.EqualFold(key, "WATCH_COOLDOWN_MINUTES") && minutes > 0 {
+		return time.Duration(minutes) * time.Minute
 	}
 	return time.Duration(defaultMinutes) * time.Minute
 }
 
 func resolveWatchPriceTolerance() float64 {
-	if value := strings.TrimSpace(os.Getenv("WATCH_DEDUP_PRICE_TOLERANCE_BPS")); value != "" {
-		if bps, err := strconv.Atoi(value); err == nil && bps > 0 {
-			return float64(bps) / 10000.0
-		}
+	bps := getRuntimeSettings().WatchDedupPriceToleranceBps
+	if bps > 0 {
+		return float64(bps) / 10000.0
 	}
 	return float64(defaultWatchPriceToleranceBps) / 10000.0
 }

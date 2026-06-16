@@ -27,136 +27,26 @@ type PlaybookThresholdProfile struct {
 	AllowBreakoutCandleEntry bool     `json:"allow_breakout_candle_entry"`
 	RequireCrowdingEvidence  bool     `json:"require_crowding_evidence"`
 	RequireAIHigh            bool     `json:"require_ai_high"`
+	RequireM5RejectionConfirm    bool     `json:"require_m5_rejection_confirm"`
+	RequireM5ContinuationConfirm bool     `json:"require_m5_continuation_confirm"`
 	Reason                   string   `json:"reason"`
+}
+
+func resolvePlaybookProfileBaseline(playbook Playbook) (PlaybookThresholdProfile, bool) {
+	reg := GetGlobalConfigRegistry()
+	if reg != nil {
+		if profile, found := reg.GetPlaybookProfile(playbook); found {
+			return profile, true
+		}
+	}
+	return GetDefaultPlaybookProfile(playbook)
 }
 
 // GetPlaybookThresholdProfile returns the customized threshold profile for a given playbook, tier, and policy.
 func GetPlaybookThresholdProfile(playbook Playbook, policy MarketPolicy, tier Tier) PlaybookThresholdProfile {
-	var profile PlaybookThresholdProfile
-	found := false
-
-	reg := GetGlobalConfigRegistry()
-	if reg != nil {
-		profile, found = reg.GetPlaybookProfile(playbook)
-	}
-
+	profile, found := resolvePlaybookProfileBaseline(playbook)
 	if !found {
-		// Set playbook specific defaults
-		switch playbook {
-		case TREND_PULLBACK:
-			profile = PlaybookThresholdProfile{
-				Playbook:                 TREND_PULLBACK,
-				MinScoreAI:               7.0,
-				MinScoreExecute:          7.3,
-				MinRR:                    1.5,
-				MinADX:                   20.0,
-				RequireADX:               true,
-				RejectADXExpansion:       false,
-				RequireVolumeConfirm:     false,
-				RequireRejection:         false,
-				RequireConfirmation:      false,
-				RequireRetest:            false,
-				AllowBreakoutCandleEntry: false,
-				StalenessATR:             0.45,
-				Reason:                   "Trend Pullback profile",
-			}
-
-		case LIQUIDITY_SWEEP_REVERSAL:
-			profile = PlaybookThresholdProfile{
-				Playbook:                 LIQUIDITY_SWEEP_REVERSAL,
-				MinScoreAI:               7.0,
-				MinScoreExecute:          7.3,
-				MinRR:                    1.7,
-				MinADX:                   0.0,
-				RequireADX:               false,
-				RejectADXExpansion:       false,
-				RequireVolumeConfirm:     true,
-				RequireRejection:         true,
-				RequireConfirmation:      true,
-				RequireRetest:            true,
-				MinVolumeRatio:           1.3,
-				MinWickRatio:             0.3,
-				AllowBreakoutCandleEntry: false,
-				StalenessATR:             0.30,
-				Reason:                   "Liquidity Sweep Reversal profile",
-			}
-
-		case COMPRESSION_BREAKOUT_RETEST:
-			profile = PlaybookThresholdProfile{
-				Playbook:                 COMPRESSION_BREAKOUT_RETEST,
-				MinScoreAI:               7.0,
-				MinScoreExecute:          7.3,
-				MinRR:                    1.6,
-				MinADX:                   0.0,
-				RequireADX:               false,
-				RejectADXExpansion:       false,
-				RequireVolumeConfirm:     true,
-				RequireRejection:         false,
-				RequireConfirmation:      true,
-				RequireRetest:            true,
-				MinVolumeRatio:           1.2,
-				MinRetestQuality:         0.5,
-				AllowBreakoutCandleEntry: false,
-				StalenessATR:             0.30,
-				Reason:                   "Compression Breakout Retest profile",
-			}
-
-		case RANGE_EDGE_REVERSAL:
-			profile = PlaybookThresholdProfile{
-				Playbook:                 RANGE_EDGE_REVERSAL,
-				MinScoreAI:               7.2,
-				MinScoreExecute:          7.5,
-				MinRR:                    1.7,
-				MinADX:                   0.0,
-				MaxADX:                   30.0,
-				RejectADXExpansion:       true,
-				RequireVolumeConfirm:     false,
-				RequireRejection:         true,
-				RequireConfirmation:      true,
-				RequireRetest:            false,
-				MinRangeClarity:          0.5,
-				AllowBreakoutCandleEntry: false,
-				StalenessATR:             0.30,
-				Reason:                   "Range Edge Reversal profile",
-			}
-
-		case CROWDED_POSITIONING_SQUEEZE:
-			profile = PlaybookThresholdProfile{
-				Playbook:                 CROWDED_POSITIONING_SQUEEZE,
-				MinScoreAI:               7.5,
-				MinScoreExecute:          7.8,
-				MinRR:                    1.8,
-				MinADX:                   0.0,
-				RequireADX:               false,
-				RequireVolumeConfirm:     false,
-				RequireRejection:         true,
-				RequireConfirmation:      true,
-				RequireCrowdingEvidence:  true,
-				MinCrowdingScore:         0.5,
-				RequireAIHigh:            true,
-				AllowBreakoutCandleEntry: false,
-				StalenessATR:             0.35,
-				Reason:                   "Crowded Positioning Squeeze profile",
-			}
-
-		default:
-			// Default defensive profile if playbook is unknown
-			profile = PlaybookThresholdProfile{
-				Playbook:                 playbook,
-				MinScoreAI:               7.2,
-				MinScoreExecute:          7.5,
-				MinRR:                    1.7,
-				MinADX:                   20.0,
-				RequireADX:               true,
-				RejectADXExpansion:       true,
-				RequireVolumeConfirm:     true,
-				RequireRejection:         true,
-				RequireConfirmation:      true,
-				AllowBreakoutCandleEntry: false,
-				StalenessATR:             0.30,
-				Reason:                   "Default defensive profile",
-			}
-		}
+		profile = GetDefaultDefensivePlaybookProfile(playbook)
 	}
 
 	// Apply policy constraints if policy is stricter, override profile

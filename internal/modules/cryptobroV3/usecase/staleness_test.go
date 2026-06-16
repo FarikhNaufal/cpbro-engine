@@ -213,6 +213,36 @@ func TestStalenessCheck_Evaluate(t *testing.T) {
 			t.Fatalf("Expected tight high-vol policy to be LATE, got %s", tight.Status)
 		}
 	})
+
+	t.Run("Runtime settings affect fallback percentage and late multiplier", func(t *testing.T) {
+		original := SnapshotRuntimeSettings()
+		t.Cleanup(func() { SetRuntimeSettings(original) })
+
+		settings := original
+		settings.StalenessBasePctDefault = 0.10
+		settings.StalenessLateThresholdMultiplier = 2.0
+		SetRuntimeSettings(settings)
+
+		quant := QuantResult{
+			Playbook: TREND_PULLBACK,
+			Tier:     TierA,
+			TradePlan: TradePlan{
+				EntryPrice: 1000.0,
+			},
+		}
+		review := PlanReview{}
+		policy := MarketPolicy{Reason: "Normal"}
+
+		late := uc.Evaluate(quant, review, policy, 1001.5)
+		if late.Status != LATE {
+			t.Fatalf("expected custom runtime settings to classify 0.15%% move as LATE, got %s", late.Status)
+		}
+
+		missed := uc.Evaluate(quant, review, policy, 1002.2)
+		if missed.Status != MISSED {
+			t.Fatalf("expected custom runtime settings to classify 0.22%% move as MISSED, got %s", missed.Status)
+		}
+	})
 }
 
 func TestStalenessCheck_IsFreshAtSupportsHistoricalBacktestClock(t *testing.T) {

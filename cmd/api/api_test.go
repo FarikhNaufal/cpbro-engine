@@ -121,6 +121,21 @@ func (m *mockAPIMarketDataProvider) FetchHistoricalCandles(ctx context.Context, 
 	return []dto.Candle{{Time: startTime, Open: 100.0, High: 101.0, Low: 99.0, Close: 100.0}}, nil
 }
 
+func TestTryStartBackgroundRunPreventsOverlap(t *testing.T) {
+	var running atomic.Bool
+
+	if ok := tryStartBackgroundRun(&running, "test worker"); !ok {
+		t.Fatal("expected first worker run to start")
+	}
+	if ok := tryStartBackgroundRun(&running, "test worker"); ok {
+		t.Fatal("expected second overlapping worker run to be blocked")
+	}
+	running.Store(false)
+	if ok := tryStartBackgroundRun(&running, "test worker"); !ok {
+		t.Fatal("expected worker run to restart after completion")
+	}
+}
+
 type mockAPITestAIAuditor struct{}
 
 func (m *mockAPITestAIAuditor) AuditCandidate(ctx context.Context, req dto.AIAuditRequest) (*dto.AIAuditResponse, error) {

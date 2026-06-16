@@ -82,6 +82,14 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 			Reason:   "SHORT direction is explicitly disabled by MarketPolicy",
 		}
 	}
+	if !ValidateDirectionalPath(policy, sel.Direction, playbook) {
+		return PlaybookEligibilityResult{
+			Playbook: playbook,
+			Eligible: false,
+			Status:   PLAYBOOK_REJECTED,
+			Reason:   modeRejectReason(policy, sel.Direction, playbook),
+		}
+	}
 
 	switch playbook {
 	case TREND_PULLBACK:
@@ -323,7 +331,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 					Reason:   "No lower liquidity sweep detected for LONG setup",
 				}
 			}
-		m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
+			m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
 			if len(m15Closed) >= 21 {
 				lowest20 := LowestLow(m15Closed[:len(m15Closed)-1], 20)
 				lastClose := m15Closed[len(m15Closed)-1].Close
@@ -467,7 +475,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 		// 1. Contraction check
 		contraction := tech.IndicatorValues["contraction"]
 		bbWidth := tech.IndicatorValues["bb_width"]
-		if contraction != 1.0 && (bbWidth <= 0 || bbWidth > compressionMaxBBWidth) {
+		if contraction != 1.0 && (bbWidth <= 0 || bbWidth > compressionMaxBBWidth()) {
 			return PlaybookEligibilityResult{
 				Playbook: playbook,
 				Eligible: false,
@@ -570,6 +578,14 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 					Reason:   "LONG range edge reversal is disabled under PULLBACK_ONLY policy mode",
 				}
 			}
+			if policy.LongMode == SWEEP_ONLY {
+				return PlaybookEligibilityResult{
+					Playbook: playbook,
+					Eligible: false,
+					Status:   PLAYBOOK_REJECTED,
+					Reason:   "LONG range edge reversal is disabled under SWEEP_ONLY policy mode",
+				}
+			}
 			if policy.LongMode == BREAKOUT_RETEST_ONLY {
 				return PlaybookEligibilityResult{
 					Playbook: playbook,
@@ -660,6 +676,14 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 					Reason:   "LONG crowded squeeze is disabled under PULLBACK_ONLY policy mode",
 				}
 			}
+			if policy.LongMode == SWEEP_ONLY {
+				return PlaybookEligibilityResult{
+					Playbook: playbook,
+					Eligible: false,
+					Status:   PLAYBOOK_REJECTED,
+					Reason:   "LONG crowded squeeze is disabled under SWEEP_ONLY policy mode",
+				}
+			}
 			if policy.LongMode == BREAKOUT_RETEST_ONLY {
 				return PlaybookEligibilityResult{
 					Playbook: playbook,
@@ -706,7 +730,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 		// 1. Funding / OI check
 		extremeFunding := tech.IndicatorValues["extreme_funding"]
 		extremeOI := tech.IndicatorValues["extreme_oi"]
-		if extremeFunding != 1.0 && extremeOI != 1.0 && math.Abs(data.FundingRate) < 0.003 {
+		if extremeFunding != 1.0 && extremeOI != 1.0 && math.Abs(data.FundingRate) < fundingExtremeThreshold() {
 			return PlaybookEligibilityResult{
 				Playbook: playbook,
 				Eligible: false,

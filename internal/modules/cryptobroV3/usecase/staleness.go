@@ -125,9 +125,22 @@ func (uc *StalenessUsecase) Evaluate(quant QuantResult, review PlanReview, polic
 	} else if isLowVol {
 		threshold = math.Min(threshold+0.05, 0.50)
 	}
+	settings := getRuntimeSettings()
 	if policy.StalenessATRMultiplier > 0 {
-		policyScale := policy.StalenessATRMultiplier / 1.5
-		policyScale = math.Max(0.50, math.Min(policyScale, 1.20))
+		scaleBase := settings.StalenessPolicyScaleBase
+		if scaleBase <= 0 {
+			scaleBase = 1.5
+		}
+		policyScale := policy.StalenessATRMultiplier / scaleBase
+		scaleMin := settings.StalenessPolicyScaleMin
+		if scaleMin <= 0 {
+			scaleMin = 0.50
+		}
+		scaleMax := settings.StalenessPolicyScaleMax
+		if scaleMax <= 0 {
+			scaleMax = 1.20
+		}
+		policyScale = math.Max(scaleMin, math.Min(policyScale, scaleMax))
 		threshold *= policyScale
 	}
 	threshold = math.Max(0.15, threshold)
@@ -135,17 +148,32 @@ func (uc *StalenessUsecase) Evaluate(quant QuantResult, review PlanReview, polic
 	// Determine Fallback Pct threshold
 	var basePct float64
 	if isChaos {
-		basePct = 0.20
+		basePct = settings.StalenessBasePctChaos
 	} else if isHighVol {
-		basePct = 0.50
+		basePct = settings.StalenessBasePctHighVol
 	} else if quant.Tier == TierC {
-		basePct = 0.25
+		basePct = settings.StalenessBasePctTierC
 	} else {
+		basePct = settings.StalenessBasePctDefault
+	}
+	if basePct <= 0 {
 		basePct = 0.35
 	}
 	if policy.StalenessATRMultiplier > 0 {
-		policyScale := policy.StalenessATRMultiplier / 1.5
-		policyScale = math.Max(0.50, math.Min(policyScale, 1.20))
+		scaleBase := settings.StalenessPolicyScaleBase
+		if scaleBase <= 0 {
+			scaleBase = 1.5
+		}
+		policyScale := policy.StalenessATRMultiplier / scaleBase
+		scaleMin := settings.StalenessPolicyScaleMin
+		if scaleMin <= 0 {
+			scaleMin = 0.50
+		}
+		scaleMax := settings.StalenessPolicyScaleMax
+		if scaleMax <= 0 {
+			scaleMax = 1.20
+		}
+		policyScale = math.Max(scaleMin, math.Min(policyScale, scaleMax))
 		basePct *= policyScale
 	}
 
@@ -156,12 +184,16 @@ func (uc *StalenessUsecase) Evaluate(quant QuantResult, review PlanReview, polic
 	var status Status
 	var isStale bool
 
+	lateMultiplier := settings.StalenessLateThresholdMultiplier
+	if lateMultiplier <= 1.0 {
+		lateMultiplier = 1.5
+	}
 	if useATR {
 		distanceATR = distance / atrVal
 		if distanceATR <= threshold {
 			status = FRESH
 			isStale = false
-		} else if distanceATR <= threshold*1.5 {
+		} else if distanceATR <= threshold*lateMultiplier {
 			status = LATE
 			isStale = true
 		} else {
@@ -172,7 +204,7 @@ func (uc *StalenessUsecase) Evaluate(quant QuantResult, review PlanReview, polic
 		if distancePct <= basePct {
 			status = FRESH
 			isStale = false
-		} else if distancePct <= basePct*1.5 {
+		} else if distancePct <= basePct*lateMultiplier {
 			status = LATE
 			isStale = true
 		} else {

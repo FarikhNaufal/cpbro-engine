@@ -66,3 +66,20 @@ func TestResolveRotationPrefetchSlots_RegimeAware(t *testing.T) {
 		t.Fatalf("expected no rotation slots below minimum prefetch size, got %d", slots)
 	}
 }
+
+func TestResolveRotationThresholds_UseRuntimeSettings(t *testing.T) {
+	original := SnapshotRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+
+	settings := original
+	settings.RotationActivityThresholdAlt = 0.33
+	settings.RotationPrefetchRatioAlt = 0.30
+	SetRuntimeSettings(settings)
+
+	if threshold := resolveRotationActivityThreshold(MarketPolicy{Regime: ALT_SUPPORTIVE}); threshold != 0.33 {
+		t.Fatalf("expected runtime rotation activity threshold 0.33, got %0.2f", threshold)
+	}
+	if slots := resolveRotationPrefetchSlots(MarketPolicy{Regime: ALT_SUPPORTIVE}, 10, 5); slots != 3 {
+		t.Fatalf("expected runtime rotation prefetch ratio to reserve 3 slots, got %d", slots)
+	}
+}

@@ -156,7 +156,11 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 	})
 
 	t.Run("Policy medium AI can execute when global HIGH override is disabled", func(t *testing.T) {
-		t.Setenv("REQUIRE_AI_HIGH_FOR_EXECUTE", "false")
+		original := getRuntimeSettings()
+		t.Cleanup(func() { SetRuntimeSettings(original) })
+		settings := original
+		settings.RequireAIHighForExecute = false
+		SetRuntimeSettings(settings)
 		pol := policy
 		pol.RequireAIConfidence = AIConfidenceMedium
 		ai := baseAI
@@ -169,7 +173,11 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 	})
 
 	t.Run("Policy allows LATE entry when global fresh override is disabled", func(t *testing.T) {
-		t.Setenv("REQUIRE_FRESH_ENTRY_FOR_EXECUTE", "false")
+		original := getRuntimeSettings()
+		t.Cleanup(func() { SetRuntimeSettings(original) })
+		settings := original
+		settings.RequireFreshEntryForExecute = false
+		SetRuntimeSettings(settings)
 		pol := policy
 		pol.RequireFreshEntry = false
 		st := baseStaleness
@@ -463,13 +471,13 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 		q := baseQuant
 		q.Playbook = LIQUIDITY_SWEEP_REVERSAL
 		q.TradePlan.EntryPrice = 0.22907
-		q.TradePlan.StopLoss = 0.226946  // SL distance = 0.002124
+		q.TradePlan.StopLoss = 0.226946 // SL distance = 0.002124
 		q.TradePlan.TakeProfit = 0.2332
 		q.TriggerPrice = 0.22907
 		q.TechnicalSnapshot = TechnicalSnapshot{
 			IndicatorValues: map[string]float64{
 				IndicatorADX:           25.0,
-				IndicatorATR:           0.0139,  // ATR = 0.0139, SL = 0.002124 = 0.15x ATR
+				IndicatorATR:           0.0139, // ATR = 0.0139, SL = 0.002124 = 0.15x ATR
 				IndicatorWickRejection: 1.0,
 				IndicatorVolumeSpike:   1.0,
 				IndicatorSweepLow:      1.0,
@@ -491,7 +499,7 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 	t.Run("Rule25 SL adequate passes", func(t *testing.T) {
 		q := baseQuant
 		q.TradePlan.EntryPrice = 50000
-		q.TradePlan.StopLoss = 49000    // SL distance = 1000
+		q.TradePlan.StopLoss = 49000 // SL distance = 1000
 		q.TradePlan.TakeProfit = 52000
 		q.TechnicalSnapshot = TechnicalSnapshot{
 			IndicatorValues: map[string]float64{
@@ -510,13 +518,13 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 
 	t.Run("Rule24 Registry Policies clamp and enforce directional check", func(t *testing.T) {
 		reg := NewDefaultConfigRegistry()
-		
+
 		// 1. BTC_CHAOS check
 		chaosPolicy, found := reg.GetMarketPolicy("BTC_CHAOS")
 		if !found {
 			t.Fatal("BTC_CHAOS policy not found in default registry")
 		}
-		
+
 		// Ensure clamp/validate worked
 		chaosPolicy = validateAndClampPolicy("BTC_CHAOS", chaosPolicy)
 		if chaosPolicy.MaxPriceMove24hLong != 0.05 {
@@ -527,7 +535,7 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 		qLong.Direction = LONG
 		qLong.TechnicalSnapshot = TechnicalSnapshot{
 			IndicatorValues: map[string]float64{IndicatorADX: 25.0},
-			PriceChange24h: -6.0, // -6% dump exceeds 5% chaos long limit
+			PriceChange24h:  -6.0, // -6% dump exceeds 5% chaos long limit
 		}
 
 		resLong := uc.Evaluate(qLong, baseLocalGate, baseAI, basePlanReview, baseStaleness, chaosPolicy, 50000, nil, nil, nil)
@@ -549,7 +557,7 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 		qRo.Direction = LONG
 		qRo.TechnicalSnapshot = TechnicalSnapshot{
 			IndicatorValues: map[string]float64{IndicatorADX: 25.0},
-			PriceChange24h: -9.0, // -9% dump exceeds 8% limit
+			PriceChange24h:  -9.0, // -9% dump exceeds 8% limit
 		}
 
 		resRo := uc.Evaluate(qRo, baseLocalGate, baseAI, basePlanReview, baseStaleness, roPolicy, 50000, nil, nil, nil)
@@ -564,7 +572,7 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 
 		q := baseQuant
 		q.TradePlan.EntryPrice = 100.0
-		q.TradePlan.StopLoss = 93.928214  // SL distance = 6.071786
+		q.TradePlan.StopLoss = 93.928214 // SL distance = 6.071786
 		q.TradePlan.TakeProfit = 110.0
 		q.TechnicalSnapshot = TechnicalSnapshot{
 			IndicatorValues: map[string]float64{

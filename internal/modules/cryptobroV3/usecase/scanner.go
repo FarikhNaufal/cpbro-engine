@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -280,11 +278,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	metrics := GetGlobalMetrics()
 
 	// Concurrency limited candle fetching
-	concurrencyLimit := 5
-	if val := os.Getenv("MAX_MARKETDATA_CONCURRENCY"); val != "" {
-		if limit, err := strconv.Atoi(val); err == nil && limit > 0 {
-			concurrencyLimit = limit
-		}
+	concurrencyLimit := getRuntimeSettings().MaxMarketDataConcurrency
+	if concurrencyLimit <= 0 {
+		concurrencyLimit = 5
 	}
 
 	type candlesCache struct {
@@ -407,10 +403,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	}
 
 	pipelineConcurrency := minInt(len(prefetchCandidates), maxInt(2, minInt(runtime.NumCPU(), 8)))
-	if val := os.Getenv("MAX_CANDIDATE_PIPELINE_CONCURRENCY"); val != "" {
-		if limit, err := strconv.Atoi(val); err == nil && limit > 0 {
-			pipelineConcurrency = minInt(len(prefetchCandidates), limit)
-		}
+	if limit := getRuntimeSettings().MaxCandidatePipelineConcurrency; limit > 0 {
+		pipelineConcurrency = minInt(len(prefetchCandidates), limit)
 	}
 	if pipelineConcurrency <= 0 {
 		pipelineConcurrency = 1
@@ -669,7 +663,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	for _, qResult := range selectedCandidates {
 		pair := qResult.Symbol
 		cache := candlesMap[pair]
-		lgRes := uc.localGateUsecase.Evaluate(qResult, policy, cache.data.M15Candles)
+		lgRes := uc.localGateUsecase.EvaluateWithContext(ctx, qResult, policy, cache.data.M15Candles)
 		localGateMap[pair] = lgRes
 		if lgRes.Passed {
 			localCandidates = append(localCandidates, qResult)
@@ -690,10 +684,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 	// Fetch Gemini Audits concurrently
 	aiConcurrencyLimit := 3
-	if val := os.Getenv("MAX_AI_CONCURRENCY"); val != "" {
-		if limit, err := strconv.Atoi(val); err == nil && limit > 0 {
-			aiConcurrencyLimit = limit
-		}
+	if limit := getRuntimeSettings().MaxAIConcurrency; limit > 0 {
+		aiConcurrencyLimit = limit
 	}
 
 	type aiAuditResult struct {
@@ -732,7 +724,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			var auditResponse dto.AIAuditResponse
 			var auditErr error
 
-			if os.Getenv("AI_AUDIT_ENABLED") == "false" {
+			if !getRuntimeSettings().AIAuditEnabled {
 				auditResponse = dto.AIAuditResponse{
 					Symbol:          pair,
 					Decision:        "WAIT",
@@ -751,7 +743,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			}
 
 			aiMu.Lock()
-			if os.Getenv("AI_AUDIT_ENABLED") == "false" {
+			if !getRuntimeSettings().AIAuditEnabled {
 				totalAIWait++
 			} else if auditErr != nil {
 				totalAIError++
@@ -1011,7 +1003,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			HypotheticalEntry:         entryPrice,
 		}
 
-		if os.Getenv("DECISION_AUDIT_ENABLED") != "false" {
+		if getRuntimeSettings().DecisionAuditEnabled {
 			decisionAudits = append(decisionAudits, audit)
 		}
 
@@ -1085,6 +1077,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				HotSource:               candidateMap[pair].HotSource,
 				HotRankType:             candidateMap[pair].HotRankType,
 				HotOverlaySelected:      candidateMap[pair].HotOverlaySelected,
+				TechnicalSnapshot:       candCtx.quantResult.TechnicalSnapshot,
+				StructureSnapshot:       candCtx.quantResult.StructureSnapshot,
 			})
 		} else if finalDecision.Status == FINAL_WATCH {
 			totalFinalWatch++
@@ -1156,6 +1150,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				HotSource:               candidateMap[pair].HotSource,
 				HotRankType:             candidateMap[pair].HotRankType,
 				HotOverlaySelected:      candidateMap[pair].HotOverlaySelected,
+				TechnicalSnapshot:       candCtx.quantResult.TechnicalSnapshot,
+				StructureSnapshot:       candCtx.quantResult.StructureSnapshot,
 			})
 		} else {
 			totalFinalReject++
@@ -1165,7 +1161,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		}
 	}
 
-	if os.Getenv("DECISION_AUDIT_ENABLED") != "false" && len(decisionAudits) > 0 {
+	if getRuntimeSettings().DecisionAuditEnabled && len(decisionAudits) > 0 {
 		if err := uc.storageUsecase.SaveDecisionAuditBatch(decisionAudits); err != nil {
 			slog.Warn("Failed to save decision audit batch", "count", len(decisionAudits), "error", err)
 		}
@@ -1377,10 +1373,8 @@ func resolveMarketDataPrefetchLimit(policy MarketPolicy, totalCandidates int) in
 		return 0
 	}
 
-	if val := strings.TrimSpace(os.Getenv("MAX_MARKETDATA_PREFETCH_SYMBOLS")); val != "" {
-		if limit, err := strconv.Atoi(val); err == nil && limit > 0 {
-			return minInt(totalCandidates, limit)
-		}
+	if limit := getRuntimeSettings().MaxMarketDataPrefetchSymbols; limit > 0 {
+		return minInt(totalCandidates, limit)
 	}
 
 	regime := policy.EffectiveRegime()
@@ -1485,10 +1479,8 @@ func resolveAdaptiveScanRequestGuard(policy MarketPolicy, totalCandidates, reque
 }
 
 func resolveScanRequestWeightBudget(policy MarketPolicy) int {
-	if val := strings.TrimSpace(os.Getenv("SCAN_REQUEST_WEIGHT_BUDGET")); val != "" {
-		if limit, err := strconv.Atoi(val); err == nil && limit > 0 {
-			return limit
-		}
+	if limit := getRuntimeSettings().ScanRequestWeightBudget; limit > 0 {
+		return limit
 	}
 
 	switch policy.EffectiveRegime() {

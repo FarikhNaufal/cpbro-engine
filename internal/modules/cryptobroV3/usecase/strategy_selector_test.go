@@ -63,9 +63,11 @@ func TestSelectPlaybooksRegimes(t *testing.T) {
 	policyRiskOff := MarketPolicy{
 		AllowLong:  true,
 		AllowShort: true,
+		LongMode:   SWEEP_ONLY,
 		AllowedPlaybooks: []Playbook{
 			LIQUIDITY_SWEEP_REVERSAL,
 			RANGE_EDGE_REVERSAL,
+			CROWDED_POSITIONING_SQUEEZE,
 		},
 		Reason: "RISK_OFF + BTC Bearish active - short bias",
 	}
@@ -85,6 +87,12 @@ func TestSelectPlaybooksRegimes(t *testing.T) {
 	}
 	if ok, _ := hasSelection(selectionsRiskOff, LIQUIDITY_SWEEP_REVERSAL, LONG); !ok {
 		t.Errorf("RISK_OFF: LONG sweep reversal should be allowed")
+	}
+	if ok, _ := hasSelection(selectionsRiskOff, RANGE_EDGE_REVERSAL, LONG); ok {
+		t.Errorf("RISK_OFF: LONG range edge reversal should be blocked by SWEEP_ONLY mode")
+	}
+	if ok, _ := hasSelection(selectionsRiskOff, CROWDED_POSITIONING_SQUEEZE, LONG); ok {
+		t.Errorf("RISK_OFF: LONG crowded squeeze should be blocked by SWEEP_ONLY mode")
 	}
 
 	// 2b. RISK_OFF with SHORT trend pullback enabled by policy

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 
 	"time"
@@ -24,7 +23,10 @@ func NewGeminiService(modelName string) (*GeminiService, error) {
 }
 
 func NewGeminiServiceWithTimeout(modelName string, requestTimeout time.Duration) (*GeminiService, error) {
-	apiKey := os.Getenv("GEMINI_API_KEY")
+	return NewGeminiServiceWithAPIKey("", modelName, requestTimeout)
+}
+
+func NewGeminiServiceWithAPIKey(apiKey, modelName string, requestTimeout time.Duration) (*GeminiService, error) {
 	if apiKey == "" {
 		return nil, fmt.Errorf("GEMINI_API_KEY environment variable is not set")
 	}

@@ -41,7 +41,7 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 		fundingRate = tech.FundingRate
 	}
 	fundingAbs := math.Abs(fundingRate)
-	fundingExtreme := extremeFunding == 1.0 || fundingAbs > 0.003
+	fundingExtreme := extremeFunding == 1.0 || fundingAbs > fundingExtremeThreshold()
 	supportsSqueezeDirection := (resolvedDirection == LONG && fundingRate < 0) || (resolvedDirection == SHORT && fundingRate > 0)
 
 	// Calculate RR (Risk-to-Reward)

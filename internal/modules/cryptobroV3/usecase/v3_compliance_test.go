@@ -167,6 +167,7 @@ func TestMarketPolicyCompliance(t *testing.T) {
 		policy := uc.EvaluatePolicy(context.Background(), "BEARISH", 40.0, 0.0, 0.2, "NORMAL", 0.2)
 		assert.Contains(t, policy.Reason, "RISK_OFF")
 		assert.Equal(t, 7.4, policy.MinScoreExecute)
+		assert.Equal(t, SWEEP_ONLY, policy.LongMode)
 	})
 
 	t.Run("AltSupportive makes ShortMode SWEEP_ONLY", func(t *testing.T) {

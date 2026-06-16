@@ -257,11 +257,24 @@ func isJournalTimingAnomalous(item SignalJournal, profile journalSanityProfile) 
 
 // getSampleGuard returns confidence, requiresMoreData, and severity based on sample size
 func getSampleGuard(sampleSize int) (confidence string, requiresMoreData bool, severity string) {
-	if sampleSize < 10 {
+	settings := getRuntimeSettings()
+	minWarning := settings.EvaluationMinSampleWarning
+	minMedium := settings.EvaluationMinSampleMedium
+	minHigh := settings.EvaluationMinSampleHigh
+	if minWarning <= 0 {
+		minWarning = 10
+	}
+	if minMedium <= minWarning {
+		minMedium = 20
+	}
+	if minHigh < minMedium {
+		minHigh = 50
+	}
+	if sampleSize < minWarning {
 		return "LOW", true, "INFO"
-	} else if sampleSize < 20 {
+	} else if sampleSize < minMedium {
 		return "LOW", false, "LOW"
-	} else if sampleSize <= 50 {
+	} else if sampleSize <= minHigh {
 		return "MEDIUM", false, "WARNING"
 	} else {
 		return "HIGH", false, "CRITICAL"
@@ -984,9 +997,13 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		rec.Severity = sev
 		rec.DoNotAutoApply = true
 
-		if sampleSize < 10 {
+		if sampleSize < getRuntimeSettings().EvaluationMinSampleWarning {
+			minSample := getRuntimeSettings().EvaluationMinSampleWarning
+			if minSample <= 0 {
+				minSample = 10
+			}
 			rec.IssueType = "INSUFFICIENT_SAMPLE"
-			rec.SuggestedAction = "HOLD TUNING: Insufficient sample size (< 10) to make recommendations."
+			rec.SuggestedAction = fmt.Sprintf("HOLD TUNING: Insufficient sample size (< %d) to make recommendations.", minSample)
 			rec.SuggestedThreshold = "KEEP_CURRENT"
 		}
 
@@ -1047,10 +1064,10 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 			MetricName:         "LONG_RISK_OFF_SL_RATE",
 			MetricValue:        safeRate(longRiskOffSLCount, longRiskOffCount),
 			CurrentThreshold:   "LongMode/ShortMode active",
-			SuggestedThreshold: "LongMode: REVERSAL_ONLY",
+			SuggestedThreshold: "LongMode: SWEEP_ONLY",
 			EvidenceSummary:    "Long signals during RISK_OFF regimes suffer high stop-out rates.",
 			Reason:             "Trend continuation longs fail when overall market is in RISK_OFF or BEARISH mode.",
-			SuggestedAction:    "Restrict LongMode to REVERSAL_ONLY during RISK_OFF regimes, allowing only high-conviction low sweeps or range edge rejections.",
+			SuggestedAction:    "Restrict LongMode to SWEEP_ONLY during RISK_OFF regimes so only lower-sweep reversal longs remain eligible.",
 		}, longRiskOffCount)
 	}
 

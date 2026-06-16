@@ -139,6 +139,40 @@ func (r *ConfigRegistry) GetPlaybookProfile(playbook Playbook) (PlaybookThreshol
 	return p, ok
 }
 
+func GetDefaultMarketPolicy(name string) (MarketPolicy, bool) {
+	policy, ok := getDefaultPolicies()[name]
+	if !ok {
+		return MarketPolicy{}, false
+	}
+	return validateAndClampPolicy(name, policy), true
+}
+
+func GetDefaultPlaybookProfile(playbook Playbook) (PlaybookThresholdProfile, bool) {
+	profile, ok := getDefaultProfiles()[playbook]
+	if !ok {
+		return PlaybookThresholdProfile{}, false
+	}
+	return validateAndClampProfile(playbook, profile), true
+}
+
+func GetDefaultDefensivePlaybookProfile(playbook Playbook) PlaybookThresholdProfile {
+	return validateAndClampProfile(playbook, PlaybookThresholdProfile{
+		Playbook:                 playbook,
+		MinScoreAI:               7.2,
+		MinScoreExecute:          7.5,
+		MinRR:                    1.7,
+		MinADX:                   20.0,
+		RequireADX:               true,
+		RejectADXExpansion:       true,
+		RequireVolumeConfirm:     true,
+		RequireRejection:         true,
+		RequireConfirmation:      true,
+		AllowBreakoutCandleEntry: false,
+		StalenessATR:             0.30,
+		Reason:                   "Default defensive profile",
+	})
+}
+
 // GetVersion returns a version and audit hash summary of the loaded configurations
 func (r *ConfigRegistry) GetVersion() string {
 	r.mu.RLock()
@@ -148,14 +182,14 @@ func (r *ConfigRegistry) GetVersion() string {
 
 // Helper: validate and clamp policy configurations to prevent weakening hard rules
 func validateAndClampPolicy(name string, policy MarketPolicy) MarketPolicy {
-	// Baseline rules: MinScoreExecute cannot drop below 7.0, MinRRExecute cannot drop below 1.5
+	// Baseline rules: MinScoreExecute cannot drop below 5.0, MinRRExecute cannot drop below 1.0
 	if policy.MinVolume <= 0 {
-		slog.Warn("Enforcing hard limit: MinVolume clamped to 1,000,000", "policy", name, "original", policy.MinVolume)
-		policy.MinVolume = 1000000.0
+		slog.Warn("Enforcing hard limit: MinVolume clamped to 100,000", "policy", name, "original", policy.MinVolume)
+		policy.MinVolume = 100000.0
 	}
 	if policy.MaxPriceMove24h <= 0 {
-		slog.Warn("Enforcing hard limit: MaxPriceMove24h clamped to 0.15", "policy", name, "original", policy.MaxPriceMove24h)
-		policy.MaxPriceMove24h = 0.15
+		slog.Warn("Enforcing hard limit: MaxPriceMove24h clamped to 0.05", "policy", name, "original", policy.MaxPriceMove24h)
+		policy.MaxPriceMove24h = 0.05
 	}
 	if policy.MaxSymbols < 1 {
 		slog.Warn("Enforcing hard limit: MaxSymbols clamped to 1", "policy", name, "original", policy.MaxSymbols)
@@ -165,13 +199,13 @@ func validateAndClampPolicy(name string, policy MarketPolicy) MarketPolicy {
 		slog.Warn("Enforcing hard limit: MaxAICandidates clamped to 1", "policy", name, "original", policy.MaxAICandidates)
 		policy.MaxAICandidates = 1
 	}
-	if policy.MinScoreExecute < 7.0 {
-		slog.Warn("Enforcing hard limit: MinScoreExecute clamped to 7.0", "policy", name, "original", policy.MinScoreExecute)
-		policy.MinScoreExecute = 7.0
+	if policy.MinScoreExecute < 5.0 {
+		slog.Warn("Enforcing hard limit: MinScoreExecute clamped to 5.0", "policy", name, "original", policy.MinScoreExecute)
+		policy.MinScoreExecute = 5.0
 	}
-	if policy.MinRRExecute < 1.5 {
-		slog.Warn("Enforcing hard limit: MinRRExecute clamped to 1.5", "policy", name, "original", policy.MinRRExecute)
-		policy.MinRRExecute = 1.5
+	if policy.MinRRExecute < 1.0 {
+		slog.Warn("Enforcing hard limit: MinRRExecute clamped to 1.0", "policy", name, "original", policy.MinRRExecute)
+		policy.MinRRExecute = 1.0
 	}
 	if policy.MaxFinalExecute < 1 {
 		slog.Warn("Enforcing hard limit: MaxFinalExecute clamped to 1", "policy", name, "original", policy.MaxFinalExecute)
@@ -228,6 +262,8 @@ func validateAndClampPolicy(name string, policy MarketPolicy) MarketPolicy {
 		policy.RequireFreshEntry = true
 	}
 	if name == "RISK_OFF" {
+		policy.LongMode = SWEEP_ONLY
+		policy.ShortMode = NORMAL
 		policy.AllowedPlaybooks = ensurePlaybook(policy.AllowedPlaybooks, TREND_PULLBACK)
 		policy.AllowedPlaybooks = ensurePlaybook(policy.AllowedPlaybooks, LIQUIDITY_SWEEP_REVERSAL)
 		policy.AllowedPlaybooks = ensurePlaybook(policy.AllowedPlaybooks, RANGE_EDGE_REVERSAL)
@@ -258,48 +294,17 @@ func ensurePlaybook(playbooks []Playbook, playbook Playbook) []Playbook {
 func validateAndClampProfile(playbook Playbook, profile PlaybookThresholdProfile) PlaybookThresholdProfile {
 	// Safety validation for Liquidity Sweep
 	if playbook == LIQUIDITY_SWEEP_REVERSAL {
-		if !profile.RequireVolumeConfirm {
-			slog.Warn("Liquidity Sweep requires volume confirm. Overriding RequireVolumeConfirm to true.")
-			profile.RequireVolumeConfirm = true
-		}
-		if profile.MinVolumeRatio < 1.1 {
-			slog.Warn("Liquidity Sweep requires a minimum volume ratio of at least 1.1. Overriding.", "original", profile.MinVolumeRatio)
-			profile.MinVolumeRatio = 1.1
-		}
-		if !profile.RequireRejection {
-			profile.RequireRejection = true
-		}
-		if !profile.RequireConfirmation {
-			profile.RequireConfirmation = true
-		}
-		if !profile.RequireRetest {
-			slog.Warn("Liquidity Sweep Reversal requires retest confirmation. Overriding RequireRetest to true.")
-			profile.RequireRetest = true
-		}
-	}
-
-	// Safety validation for Compression Breakout Retest
-	if playbook == COMPRESSION_BREAKOUT_RETEST {
-		if !profile.RequireRetest {
-			slog.Warn("Compression Breakout Retest requires a retest confirmation. Overriding RequireRetest to true.")
-			profile.RequireRetest = true
-		}
-		if !profile.RequireConfirmation {
-			profile.RequireConfirmation = true
+		if profile.MinVolumeRatio < 1.0 {
+			slog.Warn("Liquidity Sweep requires a minimum volume ratio of at least 1.0. Overriding.", "original", profile.MinVolumeRatio)
+			profile.MinVolumeRatio = 1.0
 		}
 	}
 
 	// Safety validation for Crowded Squeeze
 	if playbook == CROWDED_POSITIONING_SQUEEZE {
-		if profile.MinScoreExecute < 7.8 {
-			slog.Warn("Crowded Positioning Squeeze requires a minimum execution score of 7.8. Overriding.", "original", profile.MinScoreExecute)
-			profile.MinScoreExecute = 7.8
-		}
-		if !profile.RequireRejection {
-			profile.RequireRejection = true
-		}
-		if !profile.RequireConfirmation {
-			profile.RequireConfirmation = true
+		if profile.MinScoreExecute < 5.0 {
+			slog.Warn("Crowded Positioning Squeeze requires a minimum execution score of 5.0. Overriding.", "original", profile.MinScoreExecute)
+			profile.MinScoreExecute = 5.0
 		}
 	}
 
@@ -425,7 +430,7 @@ func getDefaultPolicies() map[string]MarketPolicy {
 			Regime:                 RISK_OFF,
 			AllowLong:              true,
 			AllowShort:             true,
-			LongMode:               REVERSAL_ONLY,
+			LongMode:               SWEEP_ONLY,
 			ShortMode:              NORMAL,
 			AllowedTiers:           []Tier{TierA, TierB},
 			AllowedPlaybooks:       []Playbook{TREND_PULLBACK, LIQUIDITY_SWEEP_REVERSAL, RANGE_EDGE_REVERSAL},
