@@ -150,6 +150,41 @@ func resolveFeedbackExecutionConfig(playbook Playbook, regimeLabel string, tier 
 	return policy, profile
 }
 
+func feedbackPolicyModeForDirection(policy MarketPolicy, direction Direction) string {
+	if direction == SHORT {
+		return string(policy.ShortMode)
+	}
+	return string(policy.LongMode)
+}
+
+func feedbackPolicyAllowsPlaybook(policy MarketPolicy, playbook Playbook) bool {
+	for _, allowed := range policy.AllowedPlaybooks {
+		if allowed == playbook {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveFeedbackSliceBlockReason(playbook Playbook, regimeLabel string, direction Direction) (bool, string, string) {
+	policy := resolveFeedbackPolicyForRegime(regimeLabel)
+	policyMode := feedbackPolicyModeForDirection(policy, direction)
+
+	if !feedbackPolicyAllowsPlaybook(policy, playbook) {
+		return true, policyMode, fmt.Sprintf("Current %s policy does not include playbook %s in AllowedPlaybooks", policy.Regime, playbook)
+	}
+	if !ValidateDirectionalPath(policy, direction, playbook) {
+		return true, policyMode, modeRejectReason(policy, direction, playbook)
+	}
+
+	canonicalRegime := canonicalRegimeLabel(regimeLabel)
+	if (canonicalRegime == "" || canonicalRegime == string(DEFAULT)) && direction == LONG && playbook == COMPRESSION_BREAKOUT_RETEST {
+		return true, policyMode, "Current selector suppresses LONG COMPRESSION_BREAKOUT_RETEST in DEFAULT regime"
+	}
+
+	return false, policyMode, ""
+}
+
 func normalizeM5ConfirmationModeLabel(value string) M5ConfirmationMode {
 	switch strings.ToUpper(strings.TrimSpace(value)) {
 	case string(M5ConfirmationWatchOnlyHint):
@@ -1229,10 +1264,29 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		if stat.WinRate >= 40.0 && stat.SLRate <= 55.0 && stat.ExpiredRate <= 50.0 && stat.WinRate+10.0 >= longBaselineWinRate {
 			continue
 		}
+		sliceBlocked, policyMode, blockReason := resolveFeedbackSliceBlockReason(Playbook(stat.Playbook), stat.MarketRegime, LONG)
+		if sliceBlocked {
+			addRec(ThresholdRecommendation{
+				IssueType:          "DIRECTIONAL_DIAGNOSTIC",
+				Playbook:           stat.Playbook,
+				MarketRegime:       stat.MarketRegime,
+				PolicyMode:         policyMode,
+				Direction:          string(LONG),
+				MetricName:         "LONG_REGIME_PLAYBOOK_WIN_RATE",
+				MetricValue:        stat.WinRate,
+				CurrentThreshold:   "Current policy/selector already blocks this slice",
+				SuggestedThreshold: "KEEP_DISABLED",
+				EvidenceSummary:    fmt.Sprintf("Historic LONG %s in %s posted %.2f%% win rate with %.2f%% SL rate across %d finalized signals, but the current engine no longer admits this slice.", stat.Playbook, stat.MarketRegime, stat.WinRate, stat.SLRate, stat.TotalSignals),
+				Reason:             fmt.Sprintf("The underperformance is real historically, but further tuning would be stale because the live policy path already blocks the slice: %s.", blockReason),
+				SuggestedAction:    "Do not retune this slice now; keep the current block in place and wait for fresh post-change data before revisiting.",
+			}, stat.TotalSignals)
+			continue
+		}
 		addRec(ThresholdRecommendation{
 			IssueType:          "DIRECTIONAL_DIAGNOSTIC",
 			Playbook:           stat.Playbook,
 			MarketRegime:       stat.MarketRegime,
+			PolicyMode:         policyMode,
 			Direction:          string(LONG),
 			MetricName:         "LONG_REGIME_PLAYBOOK_WIN_RATE",
 			MetricValue:        stat.WinRate,

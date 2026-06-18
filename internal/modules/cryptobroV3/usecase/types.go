@@ -75,6 +75,14 @@ const (
 	AIConfidenceLow    AIConfidence = "LOW"
 )
 
+const (
+	AIAuditSourceReal               = "REAL"
+	AIAuditSourceRealError          = "REAL_ERROR"
+	AIAuditSourceSyntheticLocalGate = "SYNTHETIC_LOCAL_GATE"
+	AIAuditSourceSyntheticQuota     = "SYNTHETIC_QUOTA"
+	AIAuditSourceSyntheticDisabled  = "SYNTHETIC_DISABLED"
+)
+
 // Status represents the state of candidate traversal through the execution pipelines
 type Status string
 
@@ -403,11 +411,17 @@ type FinalDecision struct {
 	Score                   float64   `json:"score"`
 	RequiredScore           float64   `json:"required_score"`
 	RR                      float64   `json:"rr"`
+	PlannedRR               float64   `json:"planned_rr,omitempty"`
+	ActualRR                float64   `json:"actual_rr,omitempty"`
 	RequiredRR              float64   `json:"required_rr"`
 	AIConfidence            string    `json:"ai_confidence"`
+	AISource                string    `json:"ai_source,omitempty"`
+	AICalled                bool      `json:"ai_called,omitempty"`
 	StalenessStatus         string    `json:"staleness_status"`
 	PolicySummary           string    `json:"policy_summary"`
 	ThresholdProfileSummary string    `json:"threshold_profile_summary"`
+	PrimaryReasonLayer      string    `json:"primary_reason_layer,omitempty"`
+	ReasonBreakdown         []string  `json:"reason_breakdown,omitempty"`
 	IsExecutable            bool      `json:"is_executable"`
 	Tier                    Tier      `json:"tier"`
 	EntryPrice              float64   `json:"entry_price"`
@@ -489,10 +503,15 @@ type DecisionAudit struct {
 	Grade                     string    `json:"grade"`
 	Score                     float64   `json:"score"`
 	RR                        float64   `json:"rr"`
+	RRPlan                    float64   `json:"rr_plan,omitempty"`
+	RRActual                  float64   `json:"rr_actual,omitempty"`
 	RequiredScore             float64   `json:"required_score"`
 	RequiredRR                float64   `json:"required_rr"`
 	LocalGateStatus           string    `json:"local_gate_status"`
 	LocalGateReason           string    `json:"local_gate_reason"`
+	EnteredAIBatch            bool      `json:"entered_ai_batch,omitempty"`
+	AICalled                  bool      `json:"ai_called,omitempty"`
+	AISource                  string    `json:"ai_source,omitempty"`
 	AIDecision                string    `json:"ai_decision"`
 	AIConfidence              string    `json:"ai_confidence"`
 	AICandleNarrative         string    `json:"ai_candle_narrative"`
@@ -508,9 +527,12 @@ type DecisionAudit struct {
 	FinalReasonAfterConflict  string    `json:"final_reason_after_conflict"`
 	FinalStatus               Status    `json:"final_status"`
 	FinalReason               string    `json:"final_reason"`
+	FinalPrimaryReasonLayer   string    `json:"final_primary_reason_layer,omitempty"`
+	FinalReasonBreakdown      []string  `json:"final_reason_breakdown,omitempty"`
 	ConflictReason            string    `json:"conflict_reason"`
 	CooldownReason            string    `json:"cooldown_reason"`
 	WasNotified               bool      `json:"was_notified"`
+	ArbiterSelectedRank       int       `json:"arbiter_selected_rank,omitempty"`
 	LatestPriceAtDecision     float64   `json:"latest_price_at_decision"`
 	EntryPrice                float64   `json:"entry"`
 	StopLoss                  float64   `json:"sl"`
@@ -677,6 +699,16 @@ type ScannerSummaryV3 struct {
 	TotalQuantCandidates            int                             `json:"total_quant_candidates"`
 	TotalArbiterSelected            int                             `json:"total_arbiter_selected"`
 	TotalLocalAICandidate           int                             `json:"total_local_ai_candidate"`
+	PrefetchLimit                   int                             `json:"prefetch_limit,omitempty"`
+	TotalPrefetchSelected           int                             `json:"total_prefetch_selected,omitempty"`
+	TotalPrefetchDeferred           int                             `json:"total_prefetch_deferred,omitempty"`
+	PrefetchHotSlots                int                             `json:"prefetch_hot_slots,omitempty"`
+	PrefetchRotationSlots           int                             `json:"prefetch_rotation_slots,omitempty"`
+	TotalAIBatchEntered             int                             `json:"total_ai_batch_entered,omitempty"`
+	TotalAICalled                   int                             `json:"total_ai_called,omitempty"`
+	TotalAISyntheticLocalGate       int                             `json:"total_ai_synthetic_local_gate,omitempty"`
+	TotalAISkippedQuota             int                             `json:"total_ai_skipped_quota,omitempty"`
+	TotalAIDisabled                 int                             `json:"total_ai_disabled,omitempty"`
 	TotalAIConfirm                  int                             `json:"total_ai_confirm"`
 	TotalAIWait                     int                             `json:"total_ai_wait"`
 	TotalAIReject                   int                             `json:"total_ai_reject"`

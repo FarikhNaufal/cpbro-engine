@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
+	"strings"
 	"testing"
 	"time"
 )
@@ -95,6 +96,27 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 		}
 	})
 
+	t.Run("Trend Pullback allows H1 SIDEWAYS when H4 remains aligned", func(t *testing.T) {
+		q := baseQuant
+		q.H1Trend = "SIDEWAYS"
+
+		res := uc.Evaluate(
+			q,
+			baseLocalGate,
+			baseAI,
+			basePlanReview,
+			baseStaleness,
+			policy,
+			50000,
+			nil,
+			nil,
+			nil,
+		)
+		if res.Status != FINAL_EXECUTE {
+			t.Errorf("expected status %s, got %s (reason: %s)", FINAL_EXECUTE, res.Status, res.Reason)
+		}
+	})
+
 	t.Run("Fail LocalGate Status", func(t *testing.T) {
 		lg := baseLocalGate
 		lg.Status = LOCAL_REJECT
@@ -112,6 +134,28 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 		res := uc.Evaluate(baseQuant, baseLocalGate, ai, basePlanReview, baseStaleness, policy, 50000, nil, nil, nil)
 		if res.Status != FINAL_REJECT {
 			t.Errorf("expected status %s, got %s", FINAL_REJECT, res.Status)
+		}
+	})
+
+	t.Run("Synthetic local gate rejection does not blame AI", func(t *testing.T) {
+		lg := baseLocalGate
+		lg.Passed = false
+		lg.Status = LOCAL_REJECT
+		lg.Reason = "Risk-to-Reward ratio 1.10 is below requirement 1.80"
+
+		ai := baseAI
+		ai.Decision = "REJECT"
+		ai.Source = AIAuditSourceSyntheticLocalGate
+
+		res := uc.Evaluate(baseQuant, lg, ai, basePlanReview, baseStaleness, policy, 50000, nil, nil, nil)
+		if res.Status != FINAL_REJECT {
+			t.Fatalf("expected status %s, got %s", FINAL_REJECT, res.Status)
+		}
+		if res.PrimaryReasonLayer != "LOCAL_GATE" {
+			t.Fatalf("expected primary layer LOCAL_GATE, got %s", res.PrimaryReasonLayer)
+		}
+		if strings.Contains(res.Reason, "AI decision is REJECT") {
+			t.Fatalf("expected no synthetic AI blame in reason, got %s", res.Reason)
 		}
 	})
 

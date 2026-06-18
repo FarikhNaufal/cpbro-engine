@@ -1034,6 +1034,66 @@ func TestFeedback_LongDirectionalDiagnosticRecommendation(t *testing.T) {
 	t.Fatal("expected DIRECTIONAL_DIAGNOSTIC recommendation for weak LONG CHOP_RANGE TREND_PULLBACK slice")
 }
 
+func TestFeedback_DisabledLongSliceRecommendationStaysKeepDisabled(t *testing.T) {
+	journal := make([]usecase.SignalJournal, 0, 24)
+	for i := 0; i < 12; i++ {
+		journal = append(journal, usecase.SignalJournal{
+			ID:            "long_default_compression_sl",
+			Playbook:      "COMPRESSION_BREAKOUT_RETEST",
+			Direction:     usecase.LONG,
+			Status:        usecase.SL_HIT,
+			MarketRegime:  string(usecase.DEFAULT),
+			AIConfidence:  "HIGH",
+			RR:            2.0,
+			MAE:           1.1,
+			MFE:           0.4,
+			PnlPercentage: -1.0,
+		})
+	}
+	for i := 0; i < 12; i++ {
+		journal = append(journal, usecase.SignalJournal{
+			ID:            "short_default_sweep_win",
+			Playbook:      "LIQUIDITY_SWEEP_REVERSAL",
+			Direction:     usecase.SHORT,
+			Status:        usecase.TP2_HIT,
+			MarketRegime:  string(usecase.DEFAULT),
+			AIConfidence:  "HIGH",
+			RR:            2.0,
+			MAE:           0.5,
+			MFE:           2.0,
+			PnlPercentage: 1.2,
+		})
+	}
+
+	repo := &mockFeedbackStorageRepo{journal: journal}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	for _, rec := range repo.report.Recommendations {
+		if rec.IssueType == "DIRECTIONAL_DIAGNOSTIC" &&
+			rec.Direction == string(usecase.LONG) &&
+			rec.Playbook == "COMPRESSION_BREAKOUT_RETEST" &&
+			rec.MarketRegime == string(usecase.DEFAULT) {
+			if rec.SuggestedThreshold != "KEEP_DISABLED" {
+				t.Fatalf("expected KEEP_DISABLED for already blocked slice, got %s", rec.SuggestedThreshold)
+			}
+			if !strings.Contains(strings.ToLower(rec.SuggestedAction), "keep the current block") {
+				t.Fatalf("expected action to preserve current block, got %s", rec.SuggestedAction)
+			}
+			if rec.PolicyMode != string(usecase.NORMAL) {
+				t.Fatalf("expected policy mode NORMAL for DEFAULT regime, got %s", rec.PolicyMode)
+			}
+			return
+		}
+	}
+
+	t.Fatal("expected disabled-slice diagnostic recommendation for DEFAULT LONG COMPRESSION_BREAKOUT_RETEST")
+}
+
 func TestFeedback_GateBugDetectsBlockingM5ExecutionViolation(t *testing.T) {
 	audits := make([]usecase.DecisionAudit, 12)
 	for i := 0; i < 12; i++ {

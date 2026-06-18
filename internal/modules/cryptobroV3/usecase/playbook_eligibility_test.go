@@ -99,6 +99,137 @@ func TestPlaybookEligibility_TrendPullback(t *testing.T) {
 	}
 }
 
+func TestPlaybookEligibility_TrendPullback_AllowsSidewaysH1AndValueAreaTouch(t *testing.T) {
+	uc := NewPlaybookEligibilityUsecase()
+
+	sel := StrategySelection{
+		StrategyName: string(TREND_PULLBACK),
+		Direction:    LONG,
+		Tier:         TierA,
+	}
+
+	policy := MarketPolicy{
+		AllowLong:    true,
+		AllowShort:   true,
+		AllowedTiers: []Tier{TierA},
+		Regime:       DEFAULT,
+	}
+
+	h4Candles := make([]dto.Candle, 200)
+	for i := 0; i < 200; i++ {
+		h4Candles[i] = dto.Candle{Close: 100.0}
+	}
+	h4Candles[199].Close = 105.0
+
+	h1Candles := make([]dto.Candle, 50)
+	for i := 0; i < 50; i++ {
+		h1Candles[i] = dto.Candle{Close: 100.0}
+	}
+
+	m15Candles := make([]dto.Candle, 60)
+	for i := 0; i < 60; i++ {
+		m15Candles[i] = dto.Candle{
+			Open:  100.0,
+			High:  100.5,
+			Low:   99.5,
+			Close: 100.0,
+		}
+	}
+	for i := 50; i < 59; i++ {
+		m15Candles[i] = dto.Candle{
+			Open:  109.0,
+			High:  110.5,
+			Low:   108.5,
+			Close: 110.0,
+		}
+	}
+	m15Candles[59] = dto.Candle{
+		Open:  106.0,
+		High:  107.0,
+		Low:   103.5,
+		Close: 106.0,
+	}
+
+	data := MarketData{
+		Symbol:     "BTCUSDT",
+		H4Candles:  h4Candles,
+		H1Candles:  h1Candles,
+		M15Candles: m15Candles,
+	}
+
+	tech := &TechnicalSnapshot{
+		RSI: 50.0,
+		IndicatorValues: map[string]float64{
+			IndicatorADX: 25.0,
+		},
+	}
+
+	res := uc.CheckEligibility(sel, policy, data, tech, &StructureSnapshot{})
+	if !res.Eligible {
+		t.Fatalf("Expected Trend Pullback to pass with H1 SIDEWAYS and wick touch into value area, but got rejected: %s", res.Reason)
+	}
+}
+
+func TestPlaybookEligibility_TrendPullback_RejectsOppositeH1InNormalRegime(t *testing.T) {
+	uc := NewPlaybookEligibilityUsecase()
+
+	sel := StrategySelection{
+		StrategyName: string(TREND_PULLBACK),
+		Direction:    LONG,
+		Tier:         TierA,
+	}
+
+	policy := MarketPolicy{
+		AllowLong:    true,
+		AllowShort:   true,
+		AllowedTiers: []Tier{TierA},
+		Regime:       DEFAULT,
+	}
+
+	h4Candles := make([]dto.Candle, 200)
+	for i := 0; i < 200; i++ {
+		h4Candles[i] = dto.Candle{Close: 100.0}
+	}
+	h4Candles[199].Close = 105.0
+
+	h1Candles := make([]dto.Candle, 50)
+	for i := 0; i < 50; i++ {
+		h1Candles[i] = dto.Candle{Close: 100.0}
+	}
+	h1Candles[49].Close = 95.0
+
+	m15Candles := make([]dto.Candle, 60)
+	for i := 0; i < 60; i++ {
+		m15Candles[i] = dto.Candle{Close: 100.0}
+	}
+	for i := 50; i < 58; i++ {
+		m15Candles[i].Close = 110.0
+	}
+	m15Candles[59].Close = 104.0
+
+	data := MarketData{
+		Symbol:     "BTCUSDT",
+		H4Candles:  h4Candles,
+		H1Candles:  h1Candles,
+		M15Candles: m15Candles,
+	}
+
+	tech := &TechnicalSnapshot{
+		RSI: 50.0,
+		IndicatorValues: map[string]float64{
+			IndicatorADX: 25.0,
+		},
+	}
+
+	res := uc.CheckEligibility(sel, policy, data, tech, &StructureSnapshot{})
+	if res.Eligible {
+		t.Fatal("Expected Trend Pullback to be rejected when H1 trend is opposite in normal regime, but it passed")
+	}
+	if !strings.Contains(res.Reason, "Trend alignment failed") {
+		t.Fatalf("Expected trend alignment rejection reason, got: %s", res.Reason)
+	}
+}
+
 func TestPlaybookEligibility_LiquiditySweepReversal(t *testing.T) {
 	uc := NewPlaybookEligibilityUsecase()
 

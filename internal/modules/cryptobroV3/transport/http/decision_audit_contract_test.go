@@ -168,3 +168,61 @@ func TestDecisionAudit_SortedDescendingByTime(t *testing.T) {
 		t.Errorf("expected 3rd item to be scan_id 3, got %v", items[2].(map[string]any)["scan_id"])
 	}
 }
+
+func TestDecisionAudit_NewTruthFields_AreExposed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir := t.TempDir()
+
+	raw := []byte(`[
+		{
+			"scan_id":"scan-1",
+			"symbol":"BTCUSDT",
+			"rr_plan":2.1,
+			"rr_actual":1.9,
+			"ai_called":true,
+			"ai_source":"REAL",
+			"final_primary_reason_layer":"RR_ACTUAL",
+			"final_reason_breakdown":["RR_ACTUAL: Actual RR 1.90 below minimum required RR 2.00"],
+			"created_at":"2026-06-18T09:30:00Z"
+		}
+	]`)
+	_ = os.WriteFile(filepath.Join(dir, "decision_audit.json"), raw, 0644)
+
+	st, _ := service.NewJSONStorageService(dir)
+	h := &Handler{storageUC: usecase.NewStorageUsecase(st)}
+
+	r := gin.New()
+	r.GET("/decision-audit", h.GetDecisionAudit)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/decision-audit", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp APIResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	dataBytes, _ := json.Marshal(resp.Data)
+	var d map[string]any
+	_ = json.Unmarshal(dataBytes, &d)
+
+	items := d["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	row := items[0].(map[string]any)
+	if row["ai_source"] != "REAL" {
+		t.Fatalf("expected ai_source=REAL, got %v", row["ai_source"])
+	}
+	if row["final_primary_reason_layer"] != "RR_ACTUAL" {
+		t.Fatalf("expected final_primary_reason_layer=RR_ACTUAL, got %v", row["final_primary_reason_layer"])
+	}
+	breakdown, ok := row["final_reason_breakdown"].([]any)
+	if !ok || len(breakdown) != 1 {
+		t.Fatalf("expected final_reason_breakdown with 1 item, got %T len=%d", row["final_reason_breakdown"], len(breakdown))
+	}
+	if breakdown[0] != "RR_ACTUAL: Actual RR 1.90 below minimum required RR 2.00" {
+		t.Fatalf("unexpected breakdown item: %v", breakdown[0])
+	}
+}

@@ -289,12 +289,14 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	}
 	prefetchCandidates := candidates
 	prefetchDeferredSummary := []string{}
+	prefetchDebug := prefetchSelectionDebug{}
 	prefetchLimit := resolveMarketDataPrefetchLimit(policy, len(candidates))
 	requestGuard := resolveAdaptiveScanRequestGuard(policy, len(candidates), prefetchLimit, concurrencyLimit)
 	prefetchLimit = requestGuard.PrefetchLimit
 	concurrencyLimit = requestGuard.MarketDataConcurrency
 	if prefetchLimit > 0 && prefetchLimit < len(candidates) {
 		selected, deferred, selectionDebug := selectPrefetchCandidates(candidates, prefetchLimit, policy)
+		prefetchDebug = selectionDebug
 		var debugCand, debugHot, debugRotation, debugSel []string
 		for _, c := range candidates {
 			debugCand = append(debugCand, fmt.Sprintf("%s(IsHot:%v,Act:%0.2f,Liq:%0.2f,Comp:%0.2f)", c.Symbol, c.IsHot, c.ActivityScore, c.LiquidityScore, c.CompositeScore))
@@ -634,9 +636,11 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	selectedCandidates, arbiterRejected := uc.candidateArbiterUsecase.Arbitrate(allCandidates, policy)
 	slog.Info("Candidate arbiter completed", "scan_id", scanID, "selected_candidates", len(selectedCandidates), "rejected_candidates", len(arbiterRejected))
 	activeWatchSignals, _ := uc.storageUsecase.LoadWatchJournal()
+	arbiterSelectedRankMap := make(map[string]int, len(selectedCandidates))
 	selectedSymbols := make([]string, 0, len(selectedCandidates))
-	for _, candidate := range selectedCandidates {
+	for index, candidate := range selectedCandidates {
 		selectedSymbols = append(selectedSymbols, candidate.Symbol)
+		arbiterSelectedRankMap[candidate.Symbol] = index + 1
 	}
 	activeSymbols := collectActiveJournalSymbols(activeSignals, activeWatchSignals)
 	_ = uc.stalenessUsecase.SyncSymbols(unionActiveSymbols(activeSymbols, selectedSymbols))
@@ -680,6 +684,10 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	// Select AI Candidates based on MaxAICandidates quota limit
 	slog.Info("Selecting AI candidates based on policy MaxAICandidates quota limit...", "scan_id", scanID, "passed_local", len(localCandidates), "max_ai_candidates", policy.MaxAICandidates)
 	aiCandidates, skippedCandidates := uc.aiCandidateSelectorUsecase.SelectCandidates(localCandidates, policy)
+	enteredAIBatchMap := make(map[string]struct{}, len(aiCandidates))
+	for _, candidate := range aiCandidates {
+		enteredAIBatchMap[candidate.Symbol] = struct{}{}
+	}
 	_ = skippedCandidates
 
 	// Fetch Gemini Audits concurrently
@@ -703,6 +711,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	totalAIWait := 0
 	totalAIReject := 0
 	totalAIError := 0
+	totalAICalled := 0
+	totalAIDisabled := 0
 
 	GetGlobalMetrics().AddAICandidateCount(uint64(len(aiCandidates)))
 
@@ -735,9 +745,11 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 					Reasoning:       "AI_AUDIT_DISABLED: AI audit disabled by configuration; forcing non-executable WATCH verdict",
 					Reason:          "AI_AUDIT_DISABLED",
 					SuggestedAction: "WATCH_ONLY",
+					Source:          AIAuditSourceSyntheticDisabled,
 				}
 			} else {
 				auditResponse, auditErr = uc.aiAuditorUsecase.Audit(ctx, qr, policy, cache.data.M15Candles, cache.data.H1Candles, cache.data.H4Candles, localGateMap[pair].M5Summary)
+				auditResponse.Source = NormalizeAIAuditSource(auditResponse.Source)
 				aiDuration := time.Since(aiStart)
 				GetGlobalMetrics().AddAILatency(aiDuration)
 			}
@@ -745,7 +757,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			aiMu.Lock()
 			if !getRuntimeSettings().AIAuditEnabled {
 				totalAIWait++
+				totalAIDisabled++
 			} else if auditErr != nil {
+				totalAICalled++
 				totalAIError++
 				if ctx.Err() == context.DeadlineExceeded || strings.Contains(strings.ToLower(auditErr.Error()), "timeout") || strings.Contains(strings.ToLower(auditErr.Error()), "deadline exceeded") {
 					GetGlobalMetrics().IncrementAITimeoutCount()
@@ -756,8 +770,13 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 					Sentiment:  "NEUTRAL",
 					Reasoning:  "AI_ERROR: " + auditErr.Error(),
 					Reason:     "AI_ERROR",
+					Source:     AIAuditSourceRealError,
 				}
 			} else {
+				totalAICalled++
+				if auditResponse.Source == "" {
+					auditResponse.Source = AIAuditSourceReal
+				}
 				if auditResponse.Decision == "CONFIRM" {
 					totalAIConfirm++
 				} else if auditResponse.Decision == "WAIT" {
@@ -789,6 +808,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		aiSkipped       bool
 	}
 	ctxMap := make(map[string]candContext)
+	totalAISyntheticLocalGate := 0
+	totalAISkippedQuota := 0
 
 	slog.Info("Evaluating final execution gates and resolving conflicts...", "scan_id", scanID, "candidates_count", len(selectedCandidates))
 	finalGateStart := time.Now()
@@ -813,7 +834,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				Sentiment:  "NEUTRAL",
 				Reasoning:  "Local gate failed: " + lgRes.Reason,
 				Reason:     reason,
+				Source:     AIAuditSourceSyntheticLocalGate,
 			}
+			totalAISyntheticLocalGate++
 		} else {
 			resp, audited := aiAuditsMap[pair]
 			if audited {
@@ -840,9 +863,11 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 					Sentiment:  "NEUTRAL",
 					Reasoning:  "AI_SKIPPED: Exceeded policy MaxAICandidates quota limit",
 					Reason:     "AI_SKIPPED",
+					Source:     AIAuditSourceSyntheticQuota,
 				}
 				funnelSummary.Add(funnelStageAIWait, auditResponse.Reason)
 				playbookBlockers.Add(qResult.Playbook, funnelStageAIWait, auditResponse.Reason)
+				totalAISkippedQuota++
 			}
 		}
 
@@ -951,6 +976,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				tp1 = entryPrice - (entryPrice-tp2)*0.5
 			}
 		}
+		_, enteredAIBatch := enteredAIBatchMap[pair]
 
 		audit := DecisionAudit{
 			ScanID:                    scanID,
@@ -964,10 +990,15 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			Grade:                     getGrade(finalDecision.Score),
 			Score:                     finalDecision.Score,
 			RR:                        finalDecision.RR,
+			RRPlan:                    finalDecision.PlannedRR,
+			RRActual:                  finalDecision.ActualRR,
 			RequiredScore:             finalDecision.RequiredScore,
 			RequiredRR:                finalDecision.RequiredRR,
 			LocalGateStatus:           localGateStatus,
 			LocalGateReason:           candCtx.localGateResult.Reason,
+			EnteredAIBatch:            enteredAIBatch,
+			AICalled:                  finalDecision.AICalled,
+			AISource:                  finalDecision.AISource,
 			AIDecision:                candCtx.auditResponse.Decision,
 			AIConfidence:              finalDecision.AIConfidence,
 			AICandleNarrative:         candCtx.auditResponse.CandleNarrative,
@@ -983,9 +1014,12 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			FinalReasonAfterConflict:  finalDecision.Reason,
 			FinalStatus:               finalDecision.Status,
 			FinalReason:               finalDecision.Reason,
+			FinalPrimaryReasonLayer:   finalDecision.PrimaryReasonLayer,
+			FinalReasonBreakdown:      append([]string(nil), finalDecision.ReasonBreakdown...),
 			ConflictReason:            conflictReason,
 			CooldownReason:            cooldownReason,
 			WasNotified:               finalDecision.Status == FINAL_EXECUTE && finalDecision.IsExecutable,
+			ArbiterSelectedRank:       arbiterSelectedRankMap[pair],
 			LatestPriceAtDecision:     candCtx.latestPrice,
 			EntryPrice:                entryPrice,
 			StopLoss:                  finalDecision.StopLoss,
@@ -1200,6 +1234,16 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		TotalQuantCandidates:            len(allCandidates),
 		TotalArbiterSelected:            len(selectedCandidates),
 		TotalLocalAICandidate:           len(localCandidates),
+		PrefetchLimit:                   prefetchLimit,
+		TotalPrefetchSelected:           len(prefetchCandidates),
+		TotalPrefetchDeferred:           len(candidates) - len(prefetchCandidates),
+		PrefetchHotSlots:                prefetchDebug.HotSlots,
+		PrefetchRotationSlots:           prefetchDebug.RotationSlots,
+		TotalAIBatchEntered:             len(aiCandidates),
+		TotalAICalled:                   totalAICalled,
+		TotalAISyntheticLocalGate:       totalAISyntheticLocalGate,
+		TotalAISkippedQuota:             totalAISkippedQuota,
+		TotalAIDisabled:                 totalAIDisabled,
 		TotalAIConfirm:                  totalAIConfirm,
 		TotalAIWait:                     totalAIWait,
 		TotalAIReject:                   totalAIReject,
@@ -1268,6 +1312,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			Direction:       string(dec.Direction),
 			LocalGateStatus: localGateStatus,
 			AIDecision:      candCtx.auditResponse.Decision,
+			AIConfidence:    candCtx.auditResponse.Confidence,
 			StalenessStatus: string(candCtx.stalenessRes.Status),
 			FinalStatus:     string(dec.Status),
 			FinalReason:     dec.Reason,
@@ -1294,6 +1339,16 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		TotalQuantCandidates:            len(allCandidates),
 		TotalArbiterSelected:            len(selectedCandidates),
 		TotalLocalAICandidate:           len(localCandidates),
+		PrefetchLimit:                   prefetchLimit,
+		TotalPrefetchSelected:           len(prefetchCandidates),
+		TotalPrefetchDeferred:           len(candidates) - len(prefetchCandidates),
+		PrefetchHotSlots:                prefetchDebug.HotSlots,
+		PrefetchRotationSlots:           prefetchDebug.RotationSlots,
+		TotalAIBatchEntered:             len(aiCandidates),
+		TotalAICalled:                   totalAICalled,
+		TotalAISyntheticLocalGate:       totalAISyntheticLocalGate,
+		TotalAISkippedQuota:             totalAISkippedQuota,
+		TotalAIDisabled:                 totalAIDisabled,
 		TotalAIConfirm:                  totalAIConfirm,
 		TotalAIWait:                     totalAIWait,
 		TotalAIReject:                   totalAIReject,
@@ -1389,36 +1444,41 @@ func resolveMarketDataPrefetchLimit(policy MarketPolicy, totalCandidates int) in
 	regime := policy.EffectiveRegime()
 	base := maxInt(policy.MaxAICandidates*6, policy.MaxFinalExecute*3)
 	floor := 14
-	ceiling := 20
+	hardCeiling := 0
 
 	switch regime {
 	case BTC_CHAOS:
 		floor = 8
-		ceiling = 10
+		hardCeiling = 10
 	case LOW_VOL:
 		floor = 10
-		ceiling = 14
 	case HIGH_VOL:
 		floor = 10
-		ceiling = 16
+		hardCeiling = 18
 	case CHOP_RANGE:
 		floor = 12
-		ceiling = 16
 	case BTC_DOMINANCE:
 		floor = 12
-		ceiling = 18
 	case RISK_OFF:
 		floor = 14
-		ceiling = 20
 	case COMPRESSION:
 		floor = 12
-		ceiling = 18
 	case ALT_SUPPORTIVE:
 		floor = 16
-		ceiling = 24
+	}
+
+	ceiling := resolveBudgetDrivenPrefetchCap(policy)
+	if hardCeiling > 0 && (ceiling <= 0 || hardCeiling < ceiling) {
+		ceiling = hardCeiling
+	}
+	if ceiling < 1 {
+		ceiling = 1
 	}
 
 	recommended := maxInt(base, floor)
+	if shouldBroadenPrefetchSampling(policy, totalCandidates) && ceiling > recommended {
+		recommended = ceiling
+	}
 	if recommended > ceiling {
 		recommended = ceiling
 	}
@@ -1430,6 +1490,44 @@ func resolveMarketDataPrefetchLimit(policy MarketPolicy, totalCandidates int) in
 	}
 
 	return minInt(totalCandidates, recommended)
+}
+
+func resolveBudgetDrivenPrefetchCap(policy MarketPolicy) int {
+	baseWeight := estimateScanRequestWeight(0, 0)
+	perCandidateWeight := estimateScanRequestWeight(1, 1) - baseWeight
+	if perCandidateWeight <= 0 {
+		perCandidateWeight = 1
+	}
+
+	budgetHeadroom := resolveScanRequestWeightBudget(policy) - baseWeight
+	if budgetHeadroom <= 0 {
+		return 1
+	}
+
+	cap := budgetHeadroom / perCandidateWeight
+	if cap < 1 {
+		return 1
+	}
+	return cap
+}
+
+func shouldBroadenPrefetchSampling(policy MarketPolicy, totalCandidates int) bool {
+	switch policy.EffectiveRegime() {
+	case CHOP_RANGE, COMPRESSION, LOW_VOL:
+	default:
+		return false
+	}
+
+	if totalCandidates < 10 {
+		return false
+	}
+
+	if policy.MaxSymbols <= 0 {
+		return totalCandidates >= 30
+	}
+
+	saturationThreshold := maxInt(10, ((policy.MaxSymbols*4)+4)/5)
+	return totalCandidates >= saturationThreshold
 }
 
 func resolveAdaptiveScanRequestGuard(policy MarketPolicy, totalCandidates, requestedPrefetch, marketConcurrency int) scanRequestGuardProfile {

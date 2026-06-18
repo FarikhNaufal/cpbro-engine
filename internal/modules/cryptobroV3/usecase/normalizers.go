@@ -91,6 +91,16 @@ func NormalizeLatestResultForFrontend(res *entity.LatestResult) dto.LatestResult
 	out.TotalQuantCandidates = res.TotalQuantCandidates
 	out.TotalArbiterSelected = res.TotalArbiterSelected
 	out.TotalLocalAICandidate = res.TotalLocalAICandidate
+	out.PrefetchLimit = res.PrefetchLimit
+	out.TotalPrefetchSelected = res.TotalPrefetchSelected
+	out.TotalPrefetchDeferred = res.TotalPrefetchDeferred
+	out.PrefetchHotSlots = res.PrefetchHotSlots
+	out.PrefetchRotationSlots = res.PrefetchRotationSlots
+	out.TotalAIBatchEntered = res.TotalAIBatchEntered
+	out.TotalAICalled = res.TotalAICalled
+	out.TotalAISyntheticLocalGate = res.TotalAISyntheticLocalGate
+	out.TotalAISkippedQuota = res.TotalAISkippedQuota
+	out.TotalAIDisabled = res.TotalAIDisabled
 	out.TotalAIConfirm = res.TotalAIConfirm
 	out.TotalAIWait = res.TotalAIWait
 	out.TotalAIReject = res.TotalAIReject
@@ -196,7 +206,7 @@ func NormalizeLatestResultForFrontend(res *entity.LatestResult) dto.LatestResult
 			Direction:       detail.Direction,
 			LocalGateStatus: detail.LocalGateStatus,
 			AIDecision:      detail.AIDecision,
-			AIConfidence:    "",
+			AIConfidence:    detail.AIConfidence,
 			StalenessStatus: detail.StalenessStatus,
 			FinalStatus:     detail.FinalStatus,
 			FinalReason:     detail.FinalReason,
@@ -533,6 +543,8 @@ func NormalizeDecisionAuditForFrontend(audits []DecisionAudit, limit, offset int
 		if !item.CreatedAt.IsZero() {
 			createdStr = item.CreatedAt.Format(time.RFC3339)
 		}
+		reasonBreakdown := make([]string, 0, len(item.FinalReasonBreakdown))
+		reasonBreakdown = append(reasonBreakdown, item.FinalReasonBreakdown...)
 
 		outItems = append(outItems, dto.DecisionAuditRow{
 			SchemaVersion:             item.SchemaVersion,
@@ -547,10 +559,15 @@ func NormalizeDecisionAuditForFrontend(audits []DecisionAudit, limit, offset int
 			Grade:                     item.Grade,
 			Score:                     item.Score,
 			RR:                        item.RR,
+			RRPlan:                    item.RRPlan,
+			RRActual:                  item.RRActual,
 			RequiredScore:             item.RequiredScore,
 			RequiredRR:                item.RequiredRR,
 			LocalGateStatus:           item.LocalGateStatus,
 			LocalGateReason:           item.LocalGateReason,
+			EnteredAIBatch:            item.EnteredAIBatch,
+			AICalled:                  item.AICalled,
+			AISource:                  item.AISource,
 			AIDecision:                item.AIDecision,
 			AIConfidence:              item.AIConfidence,
 			AICandleNarrative:         item.AICandleNarrative,
@@ -566,9 +583,12 @@ func NormalizeDecisionAuditForFrontend(audits []DecisionAudit, limit, offset int
 			FinalReasonAfterConflict:  item.FinalReasonAfterConflict,
 			FinalStatus:               string(item.FinalStatus),
 			FinalReason:               item.FinalReason,
+			FinalPrimaryReasonLayer:   item.FinalPrimaryReasonLayer,
+			FinalReasonBreakdown:      reasonBreakdown,
 			ConflictReason:            item.ConflictReason,
 			CooldownReason:            item.CooldownReason,
 			WasNotified:               item.WasNotified,
+			ArbiterSelectedRank:       item.ArbiterSelectedRank,
 			LatestPriceAtDecision:     item.LatestPriceAtDecision,
 			EntryPrice:                item.EntryPrice,
 			StopLoss:                  item.StopLoss,

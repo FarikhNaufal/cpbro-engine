@@ -103,86 +103,120 @@ func (uc *FinalGateUsecase) Evaluate(
 	profile := GetPlaybookThresholdProfile(quant.Playbook, policy, quant.Tier)
 	minScoreExecute := math.Max(policy.MinScoreExecute, profile.MinScoreExecute)
 	minRRExecute := math.Max(policy.MinRRExecute, profile.MinRR)
+	plannedRR := CalculateDirectionalRR(quant.Direction, quant.TradePlan.EntryPrice, quant.TradePlan.TakeProfit, quant.TradePlan.StopLoss)
 
 	// Keep track of check failures
 	var rejectReasons []string
 	var watchReasons []string
+	var rejectBreakdown []string
+	var watchBreakdown []string
+	primaryRejectLayer := ""
+	primaryWatchLayer := ""
 	requiredAIConfidence := effectiveRequiredAIConfidence(policy, profile)
 	requireFreshEntry := effectiveRequireFreshEntry(policy)
+	aiSource := NormalizeAIAuditSource(aiAudit.Source)
+	aiCalled := WasAIAuditCalled(aiSource)
+
+	addReject := func(layer string, reason string) {
+		rejectReasons = append(rejectReasons, reason)
+		rejectBreakdown = append(rejectBreakdown, FormatReasonBreakdown(layer, reason))
+		if primaryRejectLayer == "" {
+			primaryRejectLayer = layer
+		}
+	}
+
+	addWatch := func(layer string, reason string) {
+		watchReasons = append(watchReasons, reason)
+		watchBreakdown = append(watchBreakdown, FormatReasonBreakdown(layer, reason))
+		if primaryWatchLayer == "" {
+			primaryWatchLayer = layer
+		}
+	}
 
 	// Detect AI Error Policy
 	isAIError := strings.Contains(strings.ToUpper(aiAudit.Reasoning), "AI_ERROR") ||
 		strings.Contains(strings.ToUpper(aiAudit.Reason), "AI_ERROR") ||
 		strings.Contains(strings.ToUpper(aiAudit.Sentiment), "AI_ERROR") ||
 		(aiAudit.Decision == "" && aiAudit.Reasoning == "")
+	usePlanReview := aiCalled && !isAIError
 
 	// 1. LocalGate status check
 	if localGate.Status != AI_CANDIDATE {
 		if localGate.Status == LOCAL_WATCH {
-			watchReasons = append(watchReasons, "Local gate status is LOCAL_WATCH")
+			addWatch("LOCAL_GATE", "Local gate status is LOCAL_WATCH")
 		} else {
-			rejectReasons = append(rejectReasons, fmt.Sprintf("LocalGate status %s is not AI_CANDIDATE", localGate.Status))
+			addReject("LOCAL_GATE", fmt.Sprintf("LocalGate status %s is not AI_CANDIDATE", localGate.Status))
 		}
 	}
 
 	// 2. AI Decision check
-	if aiAudit.Decision == "REJECT" {
-		rejectReasons = append(rejectReasons, "AI decision is REJECT")
-	} else if aiAudit.Decision == "WAIT" {
-		watchReasons = append(watchReasons, "AI decision is WAIT")
-	} else if aiAudit.Decision != "CONFIRM" {
-		watchReasons = append(watchReasons, fmt.Sprintf("AI decision %s is not CONFIRM", aiAudit.Decision))
+	switch aiSource {
+	case AIAuditSourceSyntheticLocalGate:
+	case AIAuditSourceSyntheticQuota:
+		addWatch("AI_QUOTA", "AI candidate skipped due policy MaxAICandidates quota")
+	case AIAuditSourceSyntheticDisabled:
+		addWatch("AI_DISABLED", "AI audit disabled by configuration")
+	default:
+		if aiAudit.Decision == "REJECT" {
+			addReject("AI_VERDICT", "AI decision is REJECT")
+		} else if aiAudit.Decision == "WAIT" {
+			addWatch("AI_VERDICT", "AI decision is WAIT")
+		} else if aiAudit.Decision != "CONFIRM" {
+			addWatch("AI_VERDICT", fmt.Sprintf("AI decision %s is not CONFIRM", aiAudit.Decision))
+		}
 	}
 
 	// 3. AI Confidence check
-	if strings.ToUpper(aiAudit.Confidence) == string(AIConfidenceLow) {
-		rejectReasons = append(rejectReasons, "AI confidence is LOW")
-	} else if !meetsRequiredAIConfidence(aiAudit.Confidence, requiredAIConfidence) {
-		watchReasons = append(watchReasons, fmt.Sprintf("AI confidence %s is below required %s", aiAudit.Confidence, requiredAIConfidence))
+	if aiCalled {
+		if strings.ToUpper(aiAudit.Confidence) == string(AIConfidenceLow) {
+			addReject("AI_CONFIDENCE", "AI confidence is LOW")
+		} else if !meetsRequiredAIConfidence(aiAudit.Confidence, requiredAIConfidence) {
+			addWatch("AI_CONFIDENCE", fmt.Sprintf("AI confidence %s is below required %s", aiAudit.Confidence, requiredAIConfidence))
+		}
 	}
 
 	// 4. AI conflict_with_bot check
-	if aiAudit.ConflictWithBot {
-		rejectReasons = append(rejectReasons, "AI conflict with bot is true")
+	if aiCalled && aiAudit.ConflictWithBot {
+		addReject("AI_CONFLICT", "AI conflict with bot is true")
 	}
 
 	// 5. PlanReview.EntryStillValid check
-	if !planReview.EntryStillValid {
-		rejectReasons = append(rejectReasons, "PlanReview EntryStillValid is false")
+	if usePlanReview && !planReview.EntryStillValid {
+		addReject("PLAN_RECON", "PlanReview EntryStillValid is false")
 	}
 
 	// 6. PlanReview.PlanConflict check
-	if planReview.Conflicted {
+	if usePlanReview && planReview.Conflicted {
 		if planReview.NeedRetest {
 			reasonStr := "SOFT_PLAN_CONFLICT / NEED_RETEST: " + planReview.Reason
 			if aiAudit.Decision == "WAIT" {
-				watchReasons = append(watchReasons, reasonStr)
+				addWatch("PLAN_RECON", reasonStr)
 			} else {
-				rejectReasons = append(rejectReasons, reasonStr)
+				addReject("PLAN_RECON", reasonStr)
 			}
 		} else {
 			reasonStr := "HARD_PLAN_CONFLICT: " + planReview.Reason
-			rejectReasons = append(rejectReasons, reasonStr)
+			addReject("PLAN_RECON", reasonStr)
 		}
 	}
 
 	// 7. Staleness check
 	if staleness.Status == LATE {
 		if requireFreshEntry {
-			watchReasons = append(watchReasons, "Staleness status is LATE")
+			addWatch("STALENESS", "Staleness status is LATE")
 		}
 	} else if staleness.Status == MISSED {
-		rejectReasons = append(rejectReasons, "Staleness status is MISSED")
+		addReject("STALENESS", "Staleness status is MISSED")
 	} else if requireFreshEntry && staleness.Status != FRESH {
-		rejectReasons = append(rejectReasons, fmt.Sprintf("Staleness status %s is not FRESH", staleness.Status))
+		addReject("STALENESS", fmt.Sprintf("Staleness status %s is not FRESH", staleness.Status))
 	}
 
 	// 8. MarketPolicy direction permissions
 	if quant.Direction == LONG && !policy.AllowLong {
-		rejectReasons = append(rejectReasons, "LONG direction disallowed by policy")
+		addReject("POLICY", "LONG direction disallowed by policy")
 	}
 	if quant.Direction == SHORT && !policy.AllowShort {
-		rejectReasons = append(rejectReasons, "SHORT direction disallowed by policy")
+		addReject("POLICY", "SHORT direction disallowed by policy")
 	}
 
 	// 9. Playbook eligibility check
@@ -194,7 +228,7 @@ func (uc *FinalGateUsecase) Evaluate(
 		}
 	}
 	if !playbookAllowed {
-		rejectReasons = append(rejectReasons, fmt.Sprintf("Playbook %s not in allowed playbooks list", quant.Playbook))
+		addReject("POLICY", fmt.Sprintf("Playbook %s not in allowed playbooks list", quant.Playbook))
 	}
 
 	// 10. Tier eligibility check
@@ -206,15 +240,15 @@ func (uc *FinalGateUsecase) Evaluate(
 		}
 	}
 	if !tierAllowed {
-		rejectReasons = append(rejectReasons, fmt.Sprintf("Tier %s not in allowed tiers list", quant.Tier))
+		addReject("POLICY", fmt.Sprintf("Tier %s not in allowed tiers list", quant.Tier))
 	}
 
 	// 11. Score check
 	if quant.Score < minScoreExecute {
 		if aiAudit.Decision == "WAIT" {
-			watchReasons = append(watchReasons, fmt.Sprintf("Quant score %0.1f below minimum execute score %0.1f", quant.Score, minScoreExecute))
+			addWatch("SCORE", fmt.Sprintf("Quant score %0.1f below minimum execute score %0.1f", quant.Score, minScoreExecute))
 		} else {
-			rejectReasons = append(rejectReasons, fmt.Sprintf("Quant score %0.1f below minimum execute score %0.1f", quant.Score, minScoreExecute))
+			addReject("SCORE", fmt.Sprintf("Quant score %0.1f below minimum execute score %0.1f", quant.Score, minScoreExecute))
 		}
 	}
 
@@ -256,9 +290,9 @@ func (uc *FinalGateUsecase) Evaluate(
 
 	if rrActual < minRRExecute {
 		if aiAudit.Decision == "WAIT" {
-			watchReasons = append(watchReasons, fmt.Sprintf("Actual RR %0.2f below minimum required RR %0.2f", rrActual, minRRExecute))
+			addWatch("RR_ACTUAL", fmt.Sprintf("Actual RR %0.2f below minimum required RR %0.2f", rrActual, minRRExecute))
 		} else {
-			rejectReasons = append(rejectReasons, fmt.Sprintf("Actual RR %0.2f below minimum required RR %0.2f", rrActual, minRRExecute))
+			addReject("RR_ACTUAL", fmt.Sprintf("Actual RR %0.2f below minimum required RR %0.2f", rrActual, minRRExecute))
 		}
 	}
 
@@ -267,7 +301,7 @@ func (uc *FinalGateUsecase) Evaluate(
 	minADX := math.Max(policy.MinADXExecute, profile.MinADX)
 
 	if profile.RequireADX && adxVal < minADX {
-		watchReasons = append(watchReasons, fmt.Sprintf("ADX %0.1f below required threshold %0.1f", adxVal, minADX))
+		addWatch("ADX", fmt.Sprintf("ADX %0.1f below required threshold %0.1f", adxVal, minADX))
 	}
 	if profile.RejectADXExpansion {
 		maxADX := profile.MaxADX
@@ -275,7 +309,7 @@ func (uc *FinalGateUsecase) Evaluate(
 			maxADX = 30.0
 		}
 		if adxVal > maxADX {
-			watchReasons = append(watchReasons, fmt.Sprintf("High trend expansion detected (ADX = %0.1f > %0.1f)", adxVal, maxADX))
+			addWatch("ADX", fmt.Sprintf("High trend expansion detected (ADX = %0.1f > %0.1f)", adxVal, maxADX))
 		}
 	}
 
@@ -289,9 +323,9 @@ func (uc *FinalGateUsecase) Evaluate(
 	if profile.RequireRejection || quant.Playbook == LIQUIDITY_SWEEP_REVERSAL || quant.Playbook == RANGE_EDGE_REVERSAL || quant.Playbook == CROWDED_POSITIONING_SQUEEZE {
 		if !hasRejection {
 			if aiAudit.Decision == "WAIT" {
-				watchReasons = append(watchReasons, "Rejection wick or price action evidence missing")
+				addWatch("PRICE_ACTION", "Rejection wick or price action evidence missing")
 			} else {
-				rejectReasons = append(rejectReasons, "Rejection wick or price action evidence missing")
+				addReject("PRICE_ACTION", "Rejection wick or price action evidence missing")
 			}
 		}
 	}
@@ -303,13 +337,13 @@ func (uc *FinalGateUsecase) Evaluate(
 
 	if profile.RequireConfirmation || quant.Playbook == LIQUIDITY_SWEEP_REVERSAL || quant.Playbook == RANGE_EDGE_REVERSAL || quant.Playbook == CROWDED_POSITIONING_SQUEEZE {
 		if !hasConfirmation {
-			watchReasons = append(watchReasons, "Confirmation candle / structure missing")
+			addWatch("CONFIRMATION", "Confirmation candle / structure missing")
 		}
 	}
 
 	// 16. Retest requirement checks
 	isBreakoutPlaybook := quant.Playbook == COMPRESSION_BREAKOUT_RETEST
-	needsRetest := planReview.NeedRetest || aiAudit.SuggestedAction == "WAIT_RETEST"
+	needsRetest := (usePlanReview && planReview.NeedRetest) || aiAudit.SuggestedAction == "WAIT_RETEST"
 	isFirstBreakoutCandle := false
 	if isBreakoutPlaybook {
 		isFirstBreakoutCandle = strings.Contains(strings.ToUpper(quant.SetupType), "BREAKOUT") && !strings.Contains(strings.ToUpper(quant.SetupType), "RETEST")
@@ -317,7 +351,7 @@ func (uc *FinalGateUsecase) Evaluate(
 
 	if profile.RequireRetest || isBreakoutPlaybook {
 		retestFailed := false
-		if planReview.Conflicted && (strings.Contains(strings.ToLower(planReview.Reason), "retest") || strings.Contains(strings.ToLower(planReview.Reason), "breakout")) {
+		if usePlanReview && planReview.Conflicted && (strings.Contains(strings.ToLower(planReview.Reason), "retest") || strings.Contains(strings.ToLower(planReview.Reason), "breakout")) {
 			retestFailed = true
 		}
 		if aiAudit.Decision == "REJECT" && strings.Contains(strings.ToLower(aiAudit.Reason), "retest") {
@@ -325,9 +359,9 @@ func (uc *FinalGateUsecase) Evaluate(
 		}
 
 		if retestFailed {
-			rejectReasons = append(rejectReasons, "Retest failed")
+			addReject("RETEST", "Retest failed")
 		} else if needsRetest || isFirstBreakoutCandle {
-			watchReasons = append(watchReasons, "Retest required / breakout is on first candle")
+			addWatch("RETEST", "Retest required / breakout is on first candle")
 		}
 	}
 
@@ -356,9 +390,9 @@ func (uc *FinalGateUsecase) Evaluate(
 	}
 	if !hasVolumeConfirm {
 		if aiAudit.Decision == "WAIT" {
-			watchReasons = append(watchReasons, "Volume / OI confirmation missing")
+			addWatch("VOLUME", "Volume / OI confirmation missing")
 		} else {
-			rejectReasons = append(rejectReasons, "Volume / OI confirmation missing")
+			addReject("VOLUME", "Volume / OI confirmation missing")
 		}
 	}
 
@@ -369,9 +403,9 @@ func (uc *FinalGateUsecase) Evaluate(
 	if profile.RequireCrowdingEvidence || quant.Playbook == CROWDED_POSITIONING_SQUEEZE {
 		if !hasCrowdingEvidence {
 			if aiAudit.Decision == "WAIT" {
-				watchReasons = append(watchReasons, "Crowded funding/OI positioning evidence missing")
+				addWatch("CROWDING", "Crowded funding/OI positioning evidence missing")
 			} else {
-				rejectReasons = append(rejectReasons, "Crowded funding/OI positioning evidence missing")
+				addReject("CROWDING", "Crowded funding/OI positioning evidence missing")
 			}
 		}
 	}
@@ -387,7 +421,7 @@ func (uc *FinalGateUsecase) Evaluate(
 		}
 	}
 	if hasOppositeActive {
-		rejectReasons = append(rejectReasons, "Opposite active signal currently open for symbol")
+		addReject("ACTIVE_SIGNAL", "Opposite active signal currently open for symbol")
 	}
 
 	// 20. Concurrent active signal limit check
@@ -398,7 +432,7 @@ func (uc *FinalGateUsecase) Evaluate(
 		}
 	}
 	if activeCount >= policy.MaxFinalExecute {
-		rejectReasons = append(rejectReasons, fmt.Sprintf("Concurrent active signals count %d exceeds policy limit %d", activeCount, policy.MaxFinalExecute))
+		addReject("POSITION_LIMIT", fmt.Sprintf("Concurrent active signals count %d exceeds policy limit %d", activeCount, policy.MaxFinalExecute))
 	}
 
 	// 21. Symbol cooldown check
@@ -422,7 +456,7 @@ func (uc *FinalGateUsecase) Evaluate(
 		}
 	}
 	if cooldownActive {
-		rejectReasons = append(rejectReasons, "Symbol cooldown is active")
+		addReject("COOLDOWN", "Symbol cooldown is active")
 	}
 
 	// 22. Setup/playbook blacklist checked via AllowedPlaybooks in localGate.Evaluate,
@@ -433,7 +467,7 @@ func (uc *FinalGateUsecase) Evaluate(
 		((quant.Direction == LONG && sl < entry && tp > entry) ||
 			(quant.Direction == SHORT && sl > entry && tp < entry))
 	if !tpValid {
-		rejectReasons = append(rejectReasons, "TradePlan parameters invalid (e.g. SL or TP reversed)")
+		addReject("TRADE_PLAN", "TradePlan parameters invalid (e.g. SL or TP reversed)")
 	}
 
 	// 24. Symbol-level directional price move guard
@@ -447,7 +481,7 @@ func (uc *FinalGateUsecase) Evaluate(
 		}
 		// Dump = negative price change. Abs of negative change exceeding limit = block LONG
 		if symbolPriceChange < 0 && math.Abs(symbolPriceChange) > maxMoveLong {
-			rejectReasons = append(rejectReasons,
+			addReject("DIRECTIONAL_MOVE",
 				fmt.Sprintf("Symbol 24h dump %0.1f%% exceeds directional LONG limit %0.1f%%",
 					symbolPriceChange*100, maxMoveLong*100))
 		}
@@ -458,7 +492,7 @@ func (uc *FinalGateUsecase) Evaluate(
 		}
 		// Pump = positive price change. Abs of positive change exceeding limit = block SHORT
 		if symbolPriceChange > 0 && math.Abs(symbolPriceChange) > maxMoveShort {
-			rejectReasons = append(rejectReasons,
+			addReject("DIRECTIONAL_MOVE",
 				fmt.Sprintf("Symbol 24h pump %0.1f%% exceeds directional SHORT limit %0.1f%%",
 					symbolPriceChange*100, maxMoveShort*100))
 		}
@@ -490,7 +524,7 @@ func (uc *FinalGateUsecase) Evaluate(
 			}
 		}
 		if slDistance < atrFromSnapshot*(minSLMultiplier-0.01) {
-			watchReasons = append(watchReasons,
+			addWatch("SL_ATR",
 				fmt.Sprintf("SL distance %0.6f is only %0.2fx ATR (%0.6f), minimum required %0.1fx ATR",
 					slDistance, slDistance/atrFromSnapshot, atrFromSnapshot, minSLMultiplier))
 		}
@@ -498,28 +532,12 @@ func (uc *FinalGateUsecase) Evaluate(
 
 	// Playbook-specific execution safety rules
 	if quant.Playbook == TREND_PULLBACK {
-		trendAligned := false
 		regime := policy.EffectiveRegime()
-		if regime == HIGH_VOL || regime == BTC_CHAOS {
-			// Relaxed check: only require macro H4 trend alignment
-			if quant.Direction == LONG && quant.H4Trend == "BULLISH" {
-				trendAligned = true
-			} else if quant.Direction == SHORT && quant.H4Trend == "BEARISH" {
-				trendAligned = true
-			}
-		} else {
-			// Normal strict check: both H4 and H1 must match
-			if quant.Direction == LONG && quant.H4Trend == "BULLISH" && quant.H1Trend == "BULLISH" {
-				trendAligned = true
-			} else if quant.Direction == SHORT && quant.H4Trend == "BEARISH" && quant.H1Trend == "BEARISH" {
-				trendAligned = true
-			}
-		}
-		if !trendAligned {
-			rejectReasons = append(rejectReasons, "Trend pullback lacks H1/H4 trend alignment")
+		if !isTrendPullbackTrendAligned(quant.Direction, quant.H4Trend, quant.H1Trend, regime) {
+			addReject("PLAYBOOK_SAFETY", "Trend pullback lacks H1/H4 trend alignment")
 		}
 		if aiAudit.CandleNarrative == "EXHAUSTED" || strings.Contains(strings.ToLower(aiAudit.Reason), "overextended") {
-			rejectReasons = append(rejectReasons, "Trend pullback is overextended")
+			addReject("PLAYBOOK_SAFETY", "Trend pullback is overextended")
 		}
 	}
 
@@ -529,9 +547,9 @@ func (uc *FinalGateUsecase) Evaluate(
 			quant.TechnicalSnapshot.IndicatorValues[IndicatorSweepHigh] == 1.0
 		if !isSweep {
 			if aiAudit.Decision == "WAIT" {
-				watchReasons = append(watchReasons, "Liquidity sweep setup lacks high/low breakout and reclaim evidence")
+				addWatch("PLAYBOOK_SAFETY", "Liquidity sweep setup lacks high/low breakout and reclaim evidence")
 			} else {
-				rejectReasons = append(rejectReasons, "Liquidity sweep setup lacks high/low breakout and reclaim evidence")
+				addReject("PLAYBOOK_SAFETY", "Liquidity sweep setup lacks high/low breakout and reclaim evidence")
 			}
 		}
 	}
@@ -541,25 +559,25 @@ func (uc *FinalGateUsecase) Evaluate(
 			strings.Contains(strings.ToLower(quant.Reason), "range")
 		if !nearEdge {
 			if aiAudit.Decision == "WAIT" {
-				watchReasons = append(watchReasons, "Not close enough to range edge bounds")
+				addWatch("PLAYBOOK_SAFETY", "Not close enough to range edge bounds")
 			} else {
-				rejectReasons = append(rejectReasons, "Not close enough to range edge bounds")
+				addReject("PLAYBOOK_SAFETY", "Not close enough to range edge bounds")
 			}
 		}
 		if aiAudit.CandleNarrative == "CONTINUATION" || strings.Contains(strings.ToLower(aiAudit.Reason), "breaking range") {
-			rejectReasons = append(rejectReasons, "Range edge candle narrative is CONTINUATION (breakout threat)")
+			addReject("PLAYBOOK_SAFETY", "Range edge candle narrative is CONTINUATION (breakout threat)")
 		}
 	}
 
 	if quant.Playbook == CROWDED_POSITIONING_SQUEEZE {
 		if quant.Score < 7.8 {
-			rejectReasons = append(rejectReasons, fmt.Sprintf("Crowded squeeze score %0.1f is below mandatory 7.8", quant.Score))
+			addReject("PLAYBOOK_SAFETY", fmt.Sprintf("Crowded squeeze score %0.1f is below mandatory 7.8", quant.Score))
 		}
 		if quant.TechnicalSnapshot.IndicatorValues[IndicatorExtremeFunding] == 1.0 && !hasConfirmation {
 			if aiAudit.Decision == "WAIT" {
-				watchReasons = append(watchReasons, "Crowded squeeze has extreme funding but lacks confirmation candle")
+				addWatch("PLAYBOOK_SAFETY", "Crowded squeeze has extreme funding but lacks confirmation candle")
 			} else {
-				rejectReasons = append(rejectReasons, "Crowded squeeze has extreme funding but lacks confirmation candle")
+				addReject("PLAYBOOK_SAFETY", "Crowded squeeze has extreme funding but lacks confirmation candle")
 			}
 		}
 	}
@@ -567,16 +585,24 @@ func (uc *FinalGateUsecase) Evaluate(
 	// Final Status & Reason Resolution
 	var status Status
 	var reason string
+	var primaryReasonLayer string
+	var reasonBreakdown []string
 
 	if isAIError {
 		status = AI_ERROR_REVIEW
 		reason = "AI_ERROR: " + aiAudit.Reasoning
+		primaryReasonLayer = "AI_TRANSPORT"
+		reasonBreakdown = []string{FormatReasonBreakdown(primaryReasonLayer, reason)}
 	} else if len(rejectReasons) > 0 {
 		status = FINAL_REJECT
 		reason = strings.Join(rejectReasons, "; ")
+		primaryReasonLayer = primaryRejectLayer
+		reasonBreakdown = append([]string(nil), rejectBreakdown...)
 	} else if len(watchReasons) > 0 {
 		status = FINAL_WATCH
 		reason = strings.Join(watchReasons, "; ")
+		primaryReasonLayer = primaryWatchLayer
+		reasonBreakdown = append([]string(nil), watchBreakdown...)
 	} else {
 		status = FINAL_EXECUTE
 		reason = "All final execution criteria met successfully"
@@ -607,11 +633,17 @@ func (uc *FinalGateUsecase) Evaluate(
 		Score:                   quant.Score,
 		RequiredScore:           minScoreExecute,
 		RR:                      rrActual,
+		PlannedRR:               plannedRR,
+		ActualRR:                rrActual,
 		RequiredRR:              minRRExecute,
 		AIConfidence:            aiAudit.Confidence,
+		AISource:                aiSource,
+		AICalled:                aiCalled,
 		StalenessStatus:         string(staleness.Status),
 		PolicySummary:           policySummary,
 		ThresholdProfileSummary: profileSummary,
+		PrimaryReasonLayer:      primaryReasonLayer,
+		ReasonBreakdown:         reasonBreakdown,
 		IsExecutable:            isExecutable,
 		Tier:                    quant.Tier,
 		EntryPrice:              quant.TradePlan.EntryPrice,

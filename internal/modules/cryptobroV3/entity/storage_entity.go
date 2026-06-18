@@ -11,6 +11,7 @@ type ArbiterSelectedDetail struct {
 	Direction       string `json:"direction"`
 	LocalGateStatus string `json:"local_gate_status"`
 	AIDecision      string `json:"ai_decision"`
+	AIConfidence    string `json:"ai_confidence,omitempty"`
 	StalenessStatus string `json:"staleness_status"`
 	FinalStatus     string `json:"final_status"`
 	FinalReason     string `json:"final_reason"`
@@ -53,6 +54,16 @@ type LatestResult struct {
 	TotalQuantCandidates            int                      `json:"total_quant_candidates"`
 	TotalArbiterSelected            int                      `json:"total_arbiter_selected"`
 	TotalLocalAICandidate           int                      `json:"total_local_ai_candidate"`
+	PrefetchLimit                   int                      `json:"prefetch_limit,omitempty"`
+	TotalPrefetchSelected           int                      `json:"total_prefetch_selected,omitempty"`
+	TotalPrefetchDeferred           int                      `json:"total_prefetch_deferred,omitempty"`
+	PrefetchHotSlots                int                      `json:"prefetch_hot_slots,omitempty"`
+	PrefetchRotationSlots           int                      `json:"prefetch_rotation_slots,omitempty"`
+	TotalAIBatchEntered             int                      `json:"total_ai_batch_entered,omitempty"`
+	TotalAICalled                   int                      `json:"total_ai_called,omitempty"`
+	TotalAISyntheticLocalGate       int                      `json:"total_ai_synthetic_local_gate,omitempty"`
+	TotalAISkippedQuota             int                      `json:"total_ai_skipped_quota,omitempty"`
+	TotalAIDisabled                 int                      `json:"total_ai_disabled,omitempty"`
 	TotalAIConfirm                  int                      `json:"total_ai_confirm"`
 	TotalAIWait                     int                      `json:"total_ai_wait"`
 	TotalAIReject                   int                      `json:"total_ai_reject"`

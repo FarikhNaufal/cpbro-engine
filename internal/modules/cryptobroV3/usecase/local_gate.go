@@ -634,20 +634,5 @@ func recentM5DirectionalWickConfirmation(candles []dto.Candle, direction Directi
 
 // calculateRR extracts Risk-to-Reward ratio from TradePlan parameters
 func (uc *LocalGateUsecase) calculateRR(cand QuantResult) float64 {
-	entry := cand.TradePlan.EntryPrice
-	tp := cand.TradePlan.TakeProfit
-	sl := cand.TradePlan.StopLoss
-	if entry <= 0 || tp <= 0 || sl <= 0 {
-		return 0.0
-	}
-	if cand.Direction == LONG {
-		if entry > sl {
-			return (tp - entry) / (entry - sl)
-		}
-	} else if cand.Direction == SHORT {
-		if sl > entry {
-			return (entry - tp) / (sl - entry)
-		}
-	}
-	return 0.0
+	return CalculateDirectionalRR(cand.Direction, cand.TradePlan.EntryPrice, cand.TradePlan.TakeProfit, cand.TradePlan.StopLoss)
 }

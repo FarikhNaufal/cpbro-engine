@@ -11,6 +11,54 @@ import (
 
 type UsecaseHelpers struct{}
 
+func CalculateDirectionalRR(direction Direction, entry, takeProfit, stopLoss float64) float64 {
+	if entry <= 0 || takeProfit <= 0 || stopLoss <= 0 {
+		return 0.0
+	}
+	switch direction {
+	case LONG:
+		if entry > stopLoss {
+			return (takeProfit - entry) / (entry - stopLoss)
+		}
+	case SHORT:
+		if stopLoss > entry {
+			return (entry - takeProfit) / (stopLoss - entry)
+		}
+	}
+	return 0.0
+}
+
+func NormalizeAIAuditSource(source string) string {
+	normalized := strings.ToUpper(strings.TrimSpace(source))
+	if normalized == "" {
+		return AIAuditSourceReal
+	}
+	return normalized
+}
+
+func IsRealAIAuditSource(source string) bool {
+	switch NormalizeAIAuditSource(source) {
+	case AIAuditSourceReal, AIAuditSourceRealError:
+		return true
+	default:
+		return false
+	}
+}
+
+func WasAIAuditCalled(source string) bool {
+	return IsRealAIAuditSource(source)
+}
+
+func FormatReasonBreakdown(layer, reason string) string {
+	if strings.TrimSpace(layer) == "" {
+		return strings.TrimSpace(reason)
+	}
+	if strings.TrimSpace(reason) == "" {
+		return strings.TrimSpace(layer)
+	}
+	return fmt.Sprintf("%s: %s", strings.TrimSpace(layer), strings.TrimSpace(reason))
+}
+
 // RoundToDecimalPlaces rounds a float64 to precision.
 func RoundToDecimalPlaces(val float64, precision int) float64 {
 	ratio := math.Pow(10, float64(precision))
@@ -62,6 +110,136 @@ func CalculateH4Trend(h4Candles []dto.Candle, emaPeriod int) string {
 		return "BEARISH"
 	}
 	return "SIDEWAYS"
+}
+
+func isTrendPullbackTrendAligned(direction Direction, h4Trend, h1Trend string, regime MarketRegime) bool {
+	expectedTrend := "BULLISH"
+	if direction == SHORT {
+		expectedTrend = "BEARISH"
+	}
+
+	if regime == HIGH_VOL || regime == BTC_CHAOS {
+		return h4Trend == expectedTrend
+	}
+
+	if h4Trend != expectedTrend {
+		return false
+	}
+
+	switch h1Trend {
+	case expectedTrend, "SIDEWAYS":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateTrendPullbackValueArea(m15Closed []dto.Candle, direction Direction) (bool, string) {
+	if len(m15Closed) < 50 {
+		return true, ""
+	}
+
+	ema20s := CalculateEMA(m15Closed, 20)
+	ema50s := CalculateEMA(m15Closed, 50)
+	if len(ema20s) == 0 || len(ema50s) == 0 {
+		return true, ""
+	}
+
+	ema20 := ema20s[len(ema20s)-1]
+	ema50 := ema50s[len(ema50s)-1]
+	lowerEMA := math.Min(ema20, ema50)
+	upperEMA := math.Max(ema20, ema50)
+
+	lastCandle := m15Closed[len(m15Closed)-1]
+	lastClose := lastCandle.Close
+	lastLow, lastHigh := effectiveCandleBounds(lastCandle)
+
+	tolerance := lastClose * 0.001
+	if hasUsableHighLowRange(m15Closed, 14) {
+		if atr := CalculateATR(m15Closed, 14); atr > 0 {
+			tolerance = math.Max(tolerance, atr*0.20)
+		}
+	}
+
+	lowerBound := lowerEMA - tolerance
+	upperBound := upperEMA + tolerance
+	overlapsValueArea := lastHigh >= lowerBound && lastLow <= upperBound
+	if !overlapsValueArea {
+		return false, fmt.Sprintf(
+			"Price %f is outside the value area EMA band [%f - %f] with tolerance %f (candle range [%f - %f])",
+			lastClose, lowerEMA, upperEMA, tolerance, lastLow, lastHigh,
+		)
+	}
+
+	if direction == LONG && lastClose < lowerBound {
+		return false, fmt.Sprintf(
+			"Price %f is outside the value area EMA band [%f - %f] because LONG close failed to hold above %f",
+			lastClose, lowerEMA, upperEMA, lowerBound,
+		)
+	}
+	if direction == SHORT && lastClose > upperBound {
+		return false, fmt.Sprintf(
+			"Price %f is outside the value area EMA band [%f - %f] because SHORT close failed to hold below %f",
+			lastClose, lowerEMA, upperEMA, upperBound,
+		)
+	}
+
+	return true, ""
+}
+
+func effectiveCandleBounds(candle dto.Candle) (low float64, high float64) {
+	high = candle.High
+	low = candle.Low
+
+	if high <= 0 && low <= 0 {
+		referenceHigh := math.Max(candle.Open, candle.Close)
+		referenceLow := math.Min(candle.Open, candle.Close)
+		if referenceHigh <= 0 && referenceLow <= 0 {
+			return candle.Close, candle.Close
+		}
+		return referenceLow, referenceHigh
+	}
+
+	if high <= 0 {
+		high = math.Max(candle.Open, candle.Close)
+		if high <= 0 {
+			high = candle.Close
+		}
+	}
+	if low <= 0 {
+		low = math.Min(candle.Open, candle.Close)
+		if low <= 0 {
+			low = candle.Close
+		}
+	}
+	if high < low {
+		high, low = low, high
+	}
+	return low, high
+}
+
+func hasUsableHighLowRange(candles []dto.Candle, lookback int) bool {
+	if len(candles) == 0 {
+		return false
+	}
+	if lookback <= 0 || lookback > len(candles) {
+		lookback = len(candles)
+	}
+
+	valid := 0
+	start := len(candles) - lookback
+	for i := start; i < len(candles); i++ {
+		candle := candles[i]
+		if candle.High > 0 && candle.Low > 0 && candle.High >= candle.Low {
+			valid++
+		}
+	}
+
+	minValid := 3
+	if lookback < minValid {
+		minValid = lookback
+	}
+	return valid >= minValid
 }
 
 // 2. ValidateBreakoutLevels enforces that breakouts use matching timeframe levels.

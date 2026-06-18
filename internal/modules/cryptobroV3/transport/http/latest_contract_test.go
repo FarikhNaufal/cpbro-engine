@@ -218,3 +218,95 @@ func TestLatest_PolicyRejectedSummary_Deduped(t *testing.T) {
 		t.Fatalf("expected deduped length 2, got %d", len(items))
 	}
 }
+
+func TestLatest_NewTelemetryFields_AreExposed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir := t.TempDir()
+	st, err := service.NewJSONStorageService(dir)
+	if err != nil {
+		t.Fatalf("NewJSONStorageService: %v", err)
+	}
+
+	raw := []byte(`{
+  "scan_id":"20260618093000",
+  "prefetch_limit":14,
+  "total_prefetch_selected":14,
+  "total_prefetch_deferred":6,
+  "prefetch_hot_slots":4,
+  "prefetch_rotation_slots":10,
+  "total_ai_batch_entered":8,
+  "total_ai_called":6,
+  "total_ai_synthetic_local_gate":2,
+  "total_ai_skipped_quota":1,
+  "total_ai_disabled":0,
+  "compression_zero_eligible_streak":3,
+  "compression_low_vol_fallback_active":true,
+  "arbiter_selected_details":[
+    {
+      "symbol":"SOLUSDT",
+      "playbook":"TREND_PULLBACK",
+      "direction":"LONG",
+      "local_gate_status":"PASSED",
+      "ai_decision":"CONFIRM",
+      "ai_confidence":"HIGH",
+      "staleness_status":"FRESH",
+      "final_status":"FINAL_EXECUTE",
+      "final_reason":"All checks passed"
+    }
+  ]
+}`)
+	if err := os.WriteFile(filepath.Join(dir, "latest_result.json"), raw, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	h := &Handler{storageUC: usecase.NewStorageUsecase(st)}
+	r := gin.New()
+	r.GET("/latest", h.GetLatest)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/latest", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp APIResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	dataBytes, _ := json.Marshal(resp.Data)
+	var latest map[string]any
+	_ = json.Unmarshal(dataBytes, &latest)
+
+	for key, want := range map[string]float64{
+		"prefetch_limit":                   14,
+		"total_prefetch_selected":          14,
+		"total_prefetch_deferred":          6,
+		"prefetch_hot_slots":               4,
+		"prefetch_rotation_slots":          10,
+		"total_ai_batch_entered":           8,
+		"total_ai_called":                  6,
+		"total_ai_synthetic_local_gate":    2,
+		"total_ai_skipped_quota":           1,
+		"total_ai_disabled":                0,
+		"compression_zero_eligible_streak": 3,
+	} {
+		got, ok := latest[key].(float64)
+		if !ok {
+			t.Fatalf("expected %s to be numeric, got %T", key, latest[key])
+		}
+		if got != want {
+			t.Fatalf("expected %s=%v, got %v", key, want, got)
+		}
+	}
+	if latest["compression_low_vol_fallback_active"] != true {
+		t.Fatalf("expected compression_low_vol_fallback_active=true, got %v", latest["compression_low_vol_fallback_active"])
+	}
+
+	arbiter := latest["arbiter_selected_details"].([]any)
+	if len(arbiter) != 1 {
+		t.Fatalf("expected 1 arbiter detail, got %d", len(arbiter))
+	}
+	row := arbiter[0].(map[string]any)
+	if row["ai_confidence"] != "HIGH" {
+		t.Fatalf("expected ai_confidence=HIGH, got %v", row["ai_confidence"])
+	}
+}

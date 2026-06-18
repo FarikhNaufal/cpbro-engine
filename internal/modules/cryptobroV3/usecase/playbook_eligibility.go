@@ -166,22 +166,8 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 		h4Trend := CalculateH4Trend(GetClosedCandlesOnly(data.H4Candles, 4*time.Hour), 200)
 		h1Trend := CalculateH4Trend(GetClosedCandlesOnly(data.H1Candles, time.Hour), 50)
 
-		expectedTrend := "BULLISH"
-		if sel.Direction == SHORT {
-			expectedTrend = "BEARISH"
-		}
-
-		trendAligned := false
 		regime := policy.EffectiveRegime()
-		if regime == HIGH_VOL || regime == BTC_CHAOS {
-			// Relaxed check: only require macro H4 trend alignment
-			trendAligned = (h4Trend == expectedTrend)
-		} else {
-			// Normal strict check: both H4 and H1 must match
-			trendAligned = (h4Trend == expectedTrend && h1Trend == expectedTrend)
-		}
-
-		if !trendAligned {
+		if !isTrendPullbackTrendAligned(sel.Direction, h4Trend, h1Trend, regime) {
 			return PlaybookEligibilityResult{
 				Playbook: playbook,
 				Eligible: false,
@@ -192,26 +178,12 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 
 		// 1.5. Pullback to value area
 		m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
-		if len(m15Closed) >= 50 {
-			ema20s := CalculateEMA(m15Closed, 20)
-			ema50s := CalculateEMA(m15Closed, 50)
-			if len(ema20s) > 0 && len(ema50s) > 0 {
-				ema20 := ema20s[len(ema20s)-1]
-				ema50 := ema50s[len(ema50s)-1]
-				lastClose := m15Closed[len(m15Closed)-1].Close
-
-				minEMA := math.Min(ema20, ema50)
-				maxEMA := math.Max(ema20, ema50)
-
-				// Value area band with a tiny 0.1% buffer
-				if lastClose < minEMA*0.999 || lastClose > maxEMA*1.001 {
-					return PlaybookEligibilityResult{
-						Playbook: playbook,
-						Eligible: false,
-						Status:   PLAYBOOK_REJECTED,
-						Reason:   fmt.Sprintf("Price %f is outside the value area EMA band [%f - %f]", lastClose, minEMA, maxEMA),
-					}
-				}
+		if ok, reason := validateTrendPullbackValueArea(m15Closed, sel.Direction); !ok {
+			return PlaybookEligibilityResult{
+				Playbook: playbook,
+				Eligible: false,
+				Status:   PLAYBOOK_REJECTED,
+				Reason:   reason,
 			}
 		}
 

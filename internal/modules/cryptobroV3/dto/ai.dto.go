@@ -159,4 +159,5 @@ type AIAuditResponse struct {
 	PlanFeedback     string `json:"plan_feedback"`
 	Reason           string `json:"reason"`
 	Risk             string `json:"risk"`
+	Source           string `json:"source,omitempty"`
 }

@@ -1075,6 +1075,63 @@ func TestResolveMarketDataPrefetchLimit_AltSupportiveAllowsBroaderPrefetch(t *te
 	}
 }
 
+func TestResolveMarketDataPrefetchLimit_CHOPRangeSaturatedUniverseUsesBudgetCap(t *testing.T) {
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.MaxMarketDataPrefetchSymbols = 0
+	settings.ScanRequestWeightBudget = 0
+	SetRuntimeSettings(settings)
+
+	limit := resolveMarketDataPrefetchLimit(MarketPolicy{
+		Regime:          CHOP_RANGE,
+		MaxSymbols:      50,
+		MaxAICandidates: 2,
+		MaxFinalExecute: 5,
+	}, 50)
+	if limit != 20 {
+		t.Fatalf("expected CHOP_RANGE saturated prefetch limit 20, got %d", limit)
+	}
+}
+
+func TestResolveMarketDataPrefetchLimit_CHOPRangeSparseUniverseKeepsBaseline(t *testing.T) {
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.MaxMarketDataPrefetchSymbols = 0
+	settings.ScanRequestWeightBudget = 0
+	SetRuntimeSettings(settings)
+
+	limit := resolveMarketDataPrefetchLimit(MarketPolicy{
+		Regime:          CHOP_RANGE,
+		MaxSymbols:      50,
+		MaxAICandidates: 2,
+		MaxFinalExecute: 5,
+	}, 35)
+	if limit != 15 {
+		t.Fatalf("expected CHOP_RANGE sparse prefetch limit 15, got %d", limit)
+	}
+}
+
+func TestResolveMarketDataPrefetchLimit_CHOPRangeBroadSamplingRespectsBudgetOverride(t *testing.T) {
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.MaxMarketDataPrefetchSymbols = 0
+	settings.ScanRequestWeightBudget = 120
+	SetRuntimeSettings(settings)
+
+	limit := resolveMarketDataPrefetchLimit(MarketPolicy{
+		Regime:          CHOP_RANGE,
+		MaxSymbols:      50,
+		MaxAICandidates: 2,
+		MaxFinalExecute: 5,
+	}, 50)
+	if limit != 14 {
+		t.Fatalf("expected CHOP_RANGE budget-capped prefetch limit 14, got %d", limit)
+	}
+}
+
 func TestEstimateScanRequestWeight(t *testing.T) {
 	weight := estimateScanRequestWeight(20, 8)
 	expected := 40 + 10 + 20 + (8 * 4)
