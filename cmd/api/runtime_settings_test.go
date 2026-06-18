@@ -91,7 +91,7 @@ func TestBuildRuntimeSettingsMapsConfigSurfaces(t *testing.T) {
 	cfg.Safety.HealthStorageCheck = false
 	cfg.Safety.HealthCheckTimeoutSeconds = 501
 
-	got := buildRuntimeSettings(cfg)
+	got := usecase.BuildRuntimeSettings(cfg)
 	want := usecase.RuntimeSettings{
 		MonitoringMaxHoldMinutes:                 321,
 		RequireAIHighForExecute:                  false,
@@ -172,11 +172,11 @@ func TestBuildRuntimeSettingsMapsConfigSurfaces(t *testing.T) {
 	}
 
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("buildRuntimeSettings() mismatch\nwant: %#v\ngot:  %#v", want, got)
+		t.Fatalf("BuildRuntimeSettings() mismatch\nwant: %#v\ngot:  %#v", want, got)
 	}
 
 	got.UniverseDefaultSymbols[0] = "CHANGED"
 	if cfg.Universe.DefaultSymbols[0] != "AAAUSDT" {
-		t.Fatal("buildRuntimeSettings should not alias universe default symbols slice")
+		t.Fatal("BuildRuntimeSettings should not alias universe default symbols slice")
 	}
 }

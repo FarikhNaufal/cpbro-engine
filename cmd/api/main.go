@@ -63,7 +63,7 @@ func main() {
 
 	slog.Info("Configuration loaded successfully", "env", cfg.App.Env, "version", cfg.App.Version)
 
-	usecase.SetRuntimeSettings(buildRuntimeSettings(cfg))
+	usecase.SetRuntimeSettings(usecase.BuildRuntimeSettings(cfg))
 
 	// 2. Initialize Storage from config
 	jsonStorage, err := service.NewJSONStorageService(cfg.Storage.StoragePath)

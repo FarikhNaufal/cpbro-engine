@@ -1,12 +1,9 @@
-package main
+package usecase
 
-import (
-	"cpbro-engine/internal/modules/cryptobroV3/config"
-	"cpbro-engine/internal/modules/cryptobroV3/usecase"
-)
+import "cpbro-engine/internal/modules/cryptobroV3/config"
 
-func buildRuntimeSettings(cfg *config.Config) usecase.RuntimeSettings {
-	return usecase.RuntimeSettings{
+func BuildRuntimeSettings(cfg *config.Config) RuntimeSettings {
+	return RuntimeSettings{
 		MonitoringMaxHoldMinutes:                 cfg.Monitoring.MaxHoldMinutes,
 		RequireAIHighForExecute:                  cfg.Strategy.RequireAIHighForExecute,
 		RequireFreshEntryForExecute:              cfg.Strategy.RequireFreshEntryForExecute,
