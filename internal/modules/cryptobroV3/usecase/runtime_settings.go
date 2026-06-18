@@ -59,6 +59,8 @@ type RuntimeSettings struct {
 	CompressionNeutralBreadthLower           float64
 	CompressionNeutralBreadthUpper           float64
 	CompressionMaxBBWidth                    float64
+	CompressionBBWidthPercentile             float64
+	CompressionBBWidthLookback               int
 	CompressionZeroEligibleFallbackThreshold int
 	BroaderVolatilitySampleFloor             int
 	FundingExtremeThreshold                  float64
@@ -140,6 +142,8 @@ var (
 		CompressionNeutralBreadthLower:           0.35,
 		CompressionNeutralBreadthUpper:           0.65,
 		CompressionMaxBBWidth:                    0.10,
+		CompressionBBWidthPercentile:             0.25,
+		CompressionBBWidthLookback:               100,
 		CompressionZeroEligibleFallbackThreshold: 2,
 		BroaderVolatilitySampleFloor:             6,
 		FundingExtremeThreshold:                  0.003,

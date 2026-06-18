@@ -3,6 +3,7 @@ package usecase
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
@@ -776,9 +777,34 @@ func populateSnapshotsFromClosedCandles(m15Closed []dto.Candle, h1Closed []dto.C
 			if lastIdx >= 0 && lastIdx < len(basis) && basis[lastIdx] > 0 {
 				bbWidth := (upper[lastIdx] - lower[lastIdx]) / basis[lastIdx]
 				tech.IndicatorValues[IndicatorBBWidth] = bbWidth
-				if bbWidth <= compressionMaxBBWidth() {
+				
+				// Adaptive: use rolling percentile if configured, fallback to absolute threshold
+				contractionDetected := false
+				pctThreshold := 0.0
+				lookback := compressionBBWidthLookback()
+				pct := compressionBBWidthPercentile()
+				if lookback > 0 && pct > 0 {
+					pctThreshold = CalculateBBWidthPercentileThreshold(m15Closed, lookback, pct)
+					if pctThreshold > 0 {
+						maxBB := compressionMaxBBWidth()
+						if pctThreshold > maxBB {
+							pctThreshold = maxBB
+						} else if pctThreshold < 0.02 {
+							pctThreshold = 0.02
+						}
+					}
+				}
+				if pctThreshold > 0 {
+					contractionDetected = bbWidth <= pctThreshold
+				} else {
+					// Fallback to absolute threshold (legacy behavior)
+					contractionDetected = bbWidth <= compressionMaxBBWidth()
+				}
+				if contractionDetected {
 					tech.IndicatorValues[IndicatorContraction] = 1.0
 				}
+				// Store percentile threshold for debugging/observability
+				tech.IndicatorValues["bb_width_percentile_threshold"] = pctThreshold
 			}
 		}
 
@@ -965,4 +991,49 @@ func NormalizeBaseSymbol(sym string) string {
 		return exc
 	}
 	return sym
+}
+
+// CalculateBBWidthPercentileThreshold computes the Nth percentile of BBWidth values
+// over the last `lookback` closed candles. Used for adaptive compression detection.
+// Returns 0 if insufficient candles.
+func CalculateBBWidthPercentileThreshold(candles []dto.Candle, lookback int, percentile float64) float64 {
+	if lookback < 20 || len(candles) < 20 {
+		return 0
+	}
+	// Use up to `lookback` candles, but at least 20
+	start := 0
+	if len(candles) > lookback {
+		start = len(candles) - lookback
+	}
+	window := candles[start:]
+
+	basis, upper, lower := CalculateBollingerBands(window, 20, 2.0)
+	if len(basis) == 0 {
+		return 0
+	}
+
+	var widths []float64
+	for i := 19; i < len(window); i++ { // skip first 19 where BB not computed
+		if basis[i] > 0 {
+			w := (upper[i] - lower[i]) / basis[i]
+			if w > 0 {
+				widths = append(widths, w)
+			}
+		}
+	}
+	if len(widths) == 0 {
+		return 0
+	}
+
+	sorted := append([]float64(nil), widths...)
+	sort.Float64s(sorted)
+
+	idx := int(math.Floor(percentile * float64(len(sorted))))
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	return sorted[idx]
 }

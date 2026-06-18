@@ -106,6 +106,8 @@ type StrategyRuntimeConfig struct {
 	CompressionNeutralBreadthLower           float64 `json:"compression_neutral_breadth_lower"`
 	CompressionNeutralBreadthUpper           float64 `json:"compression_neutral_breadth_upper"`
 	CompressionMaxBBWidth                    float64 `json:"compression_max_bb_width"`
+	CompressionBBWidthPercentile             float64 `json:"compression_bb_width_percentile"`
+	CompressionBBWidthLookback               int     `json:"compression_bb_width_lookback"`
 	CompressionZeroEligibleFallbackThreshold int     `json:"compression_zero_eligible_fallback_threshold"`
 	BroaderVolatilitySampleFloor             int     `json:"broader_volatility_sample_floor"`
 	FundingExtremeThreshold                  float64 `json:"funding_extreme_threshold"`
@@ -397,6 +399,8 @@ func LoadConfigFromEnv() (*Config, error) {
 			CompressionNeutralBreadthLower:           getEnvFloat("STRATEGY_COMPRESSION_NEUTRAL_BREADTH_LOWER", 0.35),
 			CompressionNeutralBreadthUpper:           getEnvFloat("STRATEGY_COMPRESSION_NEUTRAL_BREADTH_UPPER", 0.65),
 			CompressionMaxBBWidth:                    getEnvFloat("STRATEGY_COMPRESSION_MAX_BB_WIDTH", 0.10),
+			CompressionBBWidthPercentile:             getEnvFloat("STRATEGY_COMPRESSION_BB_WIDTH_PERCENTILE", 0.25),
+			CompressionBBWidthLookback:               getEnvInt("STRATEGY_COMPRESSION_BB_WIDTH_LOOKBACK", 100),
 			CompressionZeroEligibleFallbackThreshold: getEnvInt("STRATEGY_COMPRESSION_ZERO_ELIGIBLE_FALLBACK_THRESHOLD", 2),
 			BroaderVolatilitySampleFloor:             getEnvInt("STRATEGY_BROADER_VOLATILITY_SAMPLE_FLOOR", 6),
 			FundingExtremeThreshold:                  getEnvFloat("STRATEGY_FUNDING_EXTREME_THRESHOLD", 0.003),
@@ -757,6 +761,12 @@ func ValidateConfig(cfg *Config) error {
 	}
 	if cfg.Strategy.CompressionMaxBBWidth <= 0 || cfg.Strategy.CompressionMaxBBWidth > 1 {
 		return fmt.Errorf("STRATEGY_COMPRESSION_MAX_BB_WIDTH must be within (0,1]")
+	}
+	if cfg.Strategy.CompressionBBWidthPercentile < 0 || cfg.Strategy.CompressionBBWidthPercentile > 1 {
+		return fmt.Errorf("STRATEGY_COMPRESSION_BB_WIDTH_PERCENTILE must be within [0,1]")
+	}
+	if cfg.Strategy.CompressionBBWidthLookback < 0 {
+		return fmt.Errorf("STRATEGY_COMPRESSION_BB_WIDTH_LOOKBACK must be >= 0")
 	}
 	if cfg.Strategy.CompressionZeroEligibleFallbackThreshold < 1 {
 		return fmt.Errorf("STRATEGY_COMPRESSION_ZERO_ELIGIBLE_FALLBACK_THRESHOLD must be at least 1")

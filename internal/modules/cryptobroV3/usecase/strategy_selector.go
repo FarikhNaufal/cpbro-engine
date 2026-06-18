@@ -128,7 +128,7 @@ func (uc *StrategySelectorUsecase) SelectPlaybooks(
 
 	// 2. COMPRESSION regime
 	if regime == COMPRESSION {
-		compressionEvidence := tech != nil && hasCompressionEvidence(tech.IndicatorValues)
+		compressionEvidence := tech != nil && hasCompressionEvidence(tech.IndicatorValues, prelimData.M15Candles)
 		// Prefer breakout retests only when the symbol itself is actually compressed.
 		// Otherwise fall back to low-volatility reversal playbooks so the regime does not deadlock the pipeline.
 		if compressionEvidence && isPlaybookAllowed(COMPRESSION_BREAKOUT_RETEST) {

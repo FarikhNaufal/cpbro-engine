@@ -35,9 +35,39 @@ func isCompressionMacroContext(breadth float64) bool {
 	return breadth >= compressionNeutralBreadthLower() && breadth <= compressionNeutralBreadthUpper()
 }
 
-func hasCompressionEvidence(indicators map[string]float64) bool {
+func compressionBBWidthPercentile() float64 {
+	return getRuntimeSettings().CompressionBBWidthPercentile
+}
+
+func compressionBBWidthLookback() int {
+	return getRuntimeSettings().CompressionBBWidthLookback
+}
+
+func hasCompressionEvidence(indicators map[string]float64, m15Closed []dto.Candle) bool {
+	if GetIndicator(indicators, IndicatorContraction) == 1.0 {
+		return true
+	}
 	bbWidth := GetIndicator(indicators, IndicatorBBWidth)
-	return GetIndicator(indicators, IndicatorContraction) == 1.0 || (bbWidth > 0 && bbWidth <= compressionMaxBBWidth())
+	if bbWidth <= 0 {
+		return false
+	}
+	if len(m15Closed) > 0 {
+		lookback := compressionBBWidthLookback()
+		pct := compressionBBWidthPercentile()
+		if lookback > 0 && pct > 0 {
+			threshold := CalculateBBWidthPercentileThreshold(m15Closed, lookback, pct)
+			if threshold > 0 {
+				maxBB := compressionMaxBBWidth()
+				if threshold > maxBB {
+					threshold = maxBB
+				} else if threshold < 0.02 {
+					threshold = 0.02
+				}
+				return bbWidth <= threshold
+			}
+		}
+	}
+	return bbWidth <= compressionMaxBBWidth()
 }
 
 func resolveConfiguredMinVolumeRatio(playbook Playbook, policy MarketPolicy, tier Tier) float64 {

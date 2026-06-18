@@ -58,6 +58,8 @@ func BuildRuntimeSettings(cfg *config.Config) RuntimeSettings {
 		CompressionNeutralBreadthLower:           cfg.Strategy.CompressionNeutralBreadthLower,
 		CompressionNeutralBreadthUpper:           cfg.Strategy.CompressionNeutralBreadthUpper,
 		CompressionMaxBBWidth:                    cfg.Strategy.CompressionMaxBBWidth,
+		CompressionBBWidthPercentile:             cfg.Strategy.CompressionBBWidthPercentile,
+		CompressionBBWidthLookback:               cfg.Strategy.CompressionBBWidthLookback,
 		CompressionZeroEligibleFallbackThreshold: cfg.Strategy.CompressionZeroEligibleFallbackThreshold,
 		BroaderVolatilitySampleFloor:             cfg.Strategy.BroaderVolatilitySampleFloor,
 		FundingExtremeThreshold:                  cfg.Strategy.FundingExtremeThreshold,
