@@ -737,7 +737,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 					SuggestedAction: "WATCH_ONLY",
 				}
 			} else {
-				auditResponse, auditErr = uc.aiAuditorUsecase.Audit(ctx, qr, policy, cache.data.M15Candles, cache.data.H1Candles, cache.data.H4Candles)
+				auditResponse, auditErr = uc.aiAuditorUsecase.Audit(ctx, qr, policy, cache.data.M15Candles, cache.data.H1Candles, cache.data.H4Candles, localGateMap[pair].M5Summary)
 				aiDuration := time.Since(aiStart)
 				GetGlobalMetrics().AddAILatency(aiDuration)
 			}
@@ -1001,6 +1001,15 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			RejectOrWatchReason:       finalDecision.Reason,
 			CreatedAt:                 time.Now(),
 			HypotheticalEntry:         entryPrice,
+		}
+		if candCtx.localGateResult.M5Summary != nil {
+			audit.M5ConfirmationUsed = candCtx.localGateResult.M5Summary.Used
+			audit.M5ConfirmationMode = string(candCtx.localGateResult.M5Summary.Mode)
+			audit.M5ConfirmationStatus = string(candCtx.localGateResult.M5Summary.Status)
+			audit.M5ConfirmationReason = candCtx.localGateResult.M5Summary.Reason
+			audit.M5ConfirmationType = candCtx.localGateResult.M5Summary.ConfirmationType
+			audit.M5Confirmed = candCtx.localGateResult.M5Summary.Confirmed
+			audit.M5EarlyInvalidation = candCtx.localGateResult.M5Summary.EarlyInvalidation
 		}
 
 		if getRuntimeSettings().DecisionAuditEnabled {

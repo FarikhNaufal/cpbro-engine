@@ -139,7 +139,7 @@ func TestAIAuditor_SuccessFlow(t *testing.T) {
 
 	m15 := []dto.Candle{{Vol: 100}}
 
-	res, err := auditor.Audit(context.Background(), quant, policy, m15, nil, nil)
+	res, err := auditor.Audit(context.Background(), quant, policy, m15, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -188,7 +188,7 @@ func TestAIAuditor_ConflictRejection(t *testing.T) {
 	policy := MarketPolicy{Reason: "Normal"}
 	m15 := []dto.Candle{{Vol: 100}}
 
-	res, err := auditor.Audit(context.Background(), quant, policy, m15, nil, nil)
+	res, err := auditor.Audit(context.Background(), quant, policy, m15, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -231,7 +231,7 @@ func TestAIAuditor_NormalizesConfirmWatchOnlyToWait(t *testing.T) {
 		Score:     8.2,
 	}
 
-	res, err := auditor.Audit(context.Background(), quant, MarketPolicy{Reason: "Normal"}, []dto.Candle{{Vol: 100}}, nil, nil)
+	res, err := auditor.Audit(context.Background(), quant, MarketPolicy{Reason: "Normal"}, []dto.Candle{{Vol: 100}}, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -314,13 +314,30 @@ func TestAIAuditor_UsesStructuredH1ContextInPayload(t *testing.T) {
 		{Time: time.Now().Add(-15 * time.Minute), Open: 5.1, High: 5.25, Low: 5.05, Close: 5.2, Vol: 130},
 	}
 
-	_, err := auditor.Audit(context.Background(), quant, policy, m15, nil, nil)
+	m5Summary := &M5ConfirmationSummary{
+		Used:             true,
+		Mode:             M5ConfirmationWatchOnlyHint,
+		Status:           M5ConfirmationConfirmed,
+		Reason:           "M5 aligned",
+		ConfirmationType: "CONTINUATION",
+		Confirmed:        true,
+		LastClose:        5.2,
+		EMA9:             5.1,
+	}
+
+	_, err := auditor.Audit(context.Background(), quant, policy, m15, nil, nil, m5Summary)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
 
 	if mockService.lastRequest.Payload.Structure.H1Structure != "H1_RANGE_BOUND" {
 		t.Fatalf("expected AI payload to use StructureSnapshot.H1Structure, got %q", mockService.lastRequest.Payload.Structure.H1Structure)
+	}
+	if mockService.lastRequest.Payload.M5Confirmation == nil {
+		t.Fatalf("expected AI payload to include M5 confirmation context")
+	}
+	if mockService.lastRequest.Payload.M5Confirmation.Status != string(M5ConfirmationConfirmed) {
+		t.Fatalf("expected M5 confirmation status %s, got %s", M5ConfirmationConfirmed, mockService.lastRequest.Payload.M5Confirmation.Status)
 	}
 }
 
@@ -339,7 +356,7 @@ func TestAIAuditor_APIFailure(t *testing.T) {
 	policy := MarketPolicy{Reason: "Normal"}
 	m15 := []dto.Candle{{Vol: 100}}
 
-	res, err := auditor.Audit(context.Background(), quant, policy, m15, nil, nil)
+	res, err := auditor.Audit(context.Background(), quant, policy, m15, nil, nil, nil)
 	if err == nil {
 		t.Fatalf("Expected error calling Gemini API, got nil")
 	}

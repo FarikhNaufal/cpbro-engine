@@ -106,6 +106,20 @@ type GeminiTradePlanContext struct {
 	InvalidationReason string  `json:"invalidation_reason"`
 }
 
+type GeminiM5ConfirmationContext struct {
+	Used              bool    `json:"used"`
+	Mode              string  `json:"mode"`
+	Status            string  `json:"status"`
+	Reason            string  `json:"reason,omitempty"`
+	ConfirmationType  string  `json:"confirmation_type,omitempty"`
+	Confirmed         bool    `json:"confirmed"`
+	EarlyInvalidation bool    `json:"early_invalidation"`
+	LastClose         float64 `json:"last_close,omitempty"`
+	EMA9              float64 `json:"ema9,omitempty"`
+	WickRatio         float64 `json:"wick_ratio,omitempty"`
+	Threshold         float64 `json:"threshold,omitempty"`
+}
+
 type GeminiKlineContext struct {
 	M15Candles []Candle `json:"m15_candles"`
 	H1Candles  []Candle `json:"h1_candles"`
@@ -113,12 +127,13 @@ type GeminiKlineContext struct {
 }
 
 type GeminiAuditPayload struct {
-	Candidate GeminiCandidateContext `json:"candidate"`
-	Policy    GeminiPolicyContext    `json:"policy"`
-	Technical GeminiTechnicalContext `json:"technical"`
-	Structure GeminiStructureContext `json:"structure"`
-	TradePlan GeminiTradePlanContext `json:"trade_plan"`
-	Klines    GeminiKlineContext     `json:"klines"`
+	Candidate      GeminiCandidateContext       `json:"candidate"`
+	Policy         GeminiPolicyContext          `json:"policy"`
+	Technical      GeminiTechnicalContext       `json:"technical"`
+	Structure      GeminiStructureContext       `json:"structure"`
+	TradePlan      GeminiTradePlanContext       `json:"trade_plan"`
+	M5Confirmation *GeminiM5ConfirmationContext `json:"m5_confirmation,omitempty"`
+	Klines         GeminiKlineContext           `json:"klines"`
 }
 
 type AIAuditResponse struct {

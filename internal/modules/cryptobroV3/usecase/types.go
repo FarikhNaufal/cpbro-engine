@@ -118,6 +118,25 @@ const (
 	VIRTUAL_EXPIRED   Status = "VIRTUAL_EXPIRED"
 )
 
+type M5ConfirmationMode string
+
+const (
+	M5ConfirmationDisabled      M5ConfirmationMode = "DISABLED"
+	M5ConfirmationWatchOnlyHint M5ConfirmationMode = "WATCH_ONLY_HINT"
+	M5ConfirmationSoftConfirm   M5ConfirmationMode = "SOFT_CONFIRM"
+	M5ConfirmationHardConfirm   M5ConfirmationMode = "HARD_CONFIRM"
+)
+
+type M5ConfirmationStatus string
+
+const (
+	M5ConfirmationNotUsed     M5ConfirmationStatus = "NOT_USED"
+	M5ConfirmationUnavailable M5ConfirmationStatus = "UNAVAILABLE"
+	M5ConfirmationConfirmed   M5ConfirmationStatus = "CONFIRMED"
+	M5ConfirmationFailed      M5ConfirmationStatus = "FAILED"
+	M5ConfirmationInvalidated M5ConfirmationStatus = "INVALIDATED"
+)
+
 // Struct Definitions
 
 type MarketContextData struct {
@@ -327,9 +346,24 @@ type CandidateArbiterResult struct {
 }
 
 type LocalGateResult struct {
-	Passed bool   `json:"passed"`
-	Status Status `json:"status"`
-	Reason string `json:"reason"`
+	Passed    bool                   `json:"passed"`
+	Status    Status                 `json:"status"`
+	Reason    string                 `json:"reason"`
+	M5Summary *M5ConfirmationSummary `json:"m5_summary,omitempty"`
+}
+
+type M5ConfirmationSummary struct {
+	Used              bool                 `json:"used"`
+	Mode              M5ConfirmationMode   `json:"mode"`
+	Status            M5ConfirmationStatus `json:"status"`
+	Reason            string               `json:"reason,omitempty"`
+	ConfirmationType  string               `json:"confirmation_type,omitempty"`
+	Confirmed         bool                 `json:"confirmed"`
+	EarlyInvalidation bool                 `json:"early_invalidation"`
+	LastClose         float64              `json:"last_close,omitempty"`
+	EMA9              float64              `json:"ema9,omitempty"`
+	WickRatio         float64              `json:"wick_ratio,omitempty"`
+	Threshold         float64              `json:"threshold,omitempty"`
 }
 
 type AIAuditVerdict struct {
@@ -434,8 +468,8 @@ type SignalJournal struct {
 	NotificationStatus string    `json:"notification_status,omitempty"`
 	NotificationError  string    `json:"notification_error,omitempty"`
 
-	TechnicalSnapshot  TechnicalSnapshot `json:"technical_snapshot,omitempty"`
-	StructureSnapshot  StructureSnapshot `json:"structure_snapshot,omitempty"`
+	TechnicalSnapshot TechnicalSnapshot `json:"technical_snapshot,omitempty"`
+	StructureSnapshot StructureSnapshot `json:"structure_snapshot,omitempty"`
 }
 
 // WatchJournal intentionally reuses the same persistence shape as SignalJournal,
@@ -491,6 +525,13 @@ type DecisionAudit struct {
 	HasDerivativesEvidence    bool      `json:"has_derivatives_evidence,omitempty"`
 	RejectOrWatchReason       string    `json:"reject_or_watch_reason"`
 	CreatedAt                 time.Time `json:"created_at"`
+	M5ConfirmationUsed        bool      `json:"m5_confirmation_used,omitempty"`
+	M5ConfirmationMode        string    `json:"m5_confirmation_mode,omitempty"`
+	M5ConfirmationStatus      string    `json:"m5_confirmation_status,omitempty"`
+	M5ConfirmationReason      string    `json:"m5_confirmation_reason,omitempty"`
+	M5ConfirmationType        string    `json:"m5_confirmation_type,omitempty"`
+	M5Confirmed               bool      `json:"m5_confirmed,omitempty"`
+	M5EarlyInvalidation       bool      `json:"m5_early_invalidation,omitempty"`
 
 	// Backward compatibility
 	HypotheticalEntry float64 `json:"hypothetical_entry"`

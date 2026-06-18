@@ -595,8 +595,8 @@ func (uc *FinalGateUsecase) Evaluate(
 
 	policySummary := fmt.Sprintf("AllowLong=%v, AllowShort=%v, MinScore=%0.1f, MinRR=%0.1f, MaxExecute=%d",
 		policy.AllowLong, policy.AllowShort, policy.MinScoreExecute, policy.MinRRExecute, policy.MaxFinalExecute)
-	profileSummary := fmt.Sprintf("Playbook=%s, MinScore=%0.1f, MinRR=%0.1f, RequireADX=%v, RequireVolumeConfirm=%v, RequireRejection=%v, RequireConfirmation=%v, RequireRetest=%v",
-		profile.Playbook, profile.MinScoreExecute, profile.MinRR, profile.RequireADX, profile.RequireVolumeConfirm, profile.RequireRejection, profile.RequireConfirmation, profile.RequireRetest)
+	profileSummary := fmt.Sprintf("Playbook=%s, MinScore=%0.1f, MinRR=%0.1f, RequireADX=%v, RequireVolumeConfirm=%v, RequireRejection=%v, RequireConfirmation=%v, RequireRetest=%v, RequireAIConfidence=%s, RequireFreshEntry=%v, RequireM5RejectionConfirm=%v, RequireM5ContinuationConfirm=%v, M5ConfirmationMode=%s",
+		profile.Playbook, profile.MinScoreExecute, profile.MinRR, profile.RequireADX, profile.RequireVolumeConfirm, profile.RequireRejection, profile.RequireConfirmation, profile.RequireRetest, requiredAIConfidence, requireFreshEntry, profile.RequireM5RejectionConfirm, profile.RequireM5ContinuationConfirm, profile.M5ConfirmationMode)
 
 	return FinalDecision{
 		Symbol:                  quant.Symbol,

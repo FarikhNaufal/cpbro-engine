@@ -583,6 +583,13 @@ func NormalizeDecisionAuditForFrontend(audits []DecisionAudit, limit, offset int
 			HasDerivativesEvidence:    item.HasDerivativesEvidence,
 			RejectOrWatchReason:       item.RejectOrWatchReason,
 			CreatedAt:                 createdStr,
+			M5ConfirmationUsed:        item.M5ConfirmationUsed,
+			M5ConfirmationMode:        item.M5ConfirmationMode,
+			M5ConfirmationStatus:      item.M5ConfirmationStatus,
+			M5ConfirmationReason:      item.M5ConfirmationReason,
+			M5ConfirmationType:        item.M5ConfirmationType,
+			M5Confirmed:               item.M5Confirmed,
+			M5EarlyInvalidation:       item.M5EarlyInvalidation,
 			HypotheticalEntry:         item.HypotheticalEntry,
 		})
 	}

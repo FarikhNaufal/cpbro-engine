@@ -463,97 +463,33 @@ func (uc *LocalGateUsecase) EvaluateWithContext(ctx context.Context, quant Quant
 		}
 	}
 
-	// M5 confirmations logic
-	if (profile.RequireM5RejectionConfirm || profile.RequireM5ContinuationConfirm) && uc.marketData != nil {
-		m5Candles, err := uc.marketData.FetchM5Candles(ctx, quant.Symbol, 30)
-		if err != nil {
-			slog.Warn("Failed to fetch M5 candles for confirmation", "symbol", quant.Symbol, "error", err)
+	// Optional M5 micro-confirmation; M15 remains the primary execution timeframe.
+	m5Summary := uc.evaluateM5Confirmation(ctx, quant, profile, sl)
+	if m5Summary != nil {
+		switch m5Summary.Status {
+		case M5ConfirmationInvalidated:
 			return LocalGateResult{
-				Passed: false,
-				Status: LOCAL_WATCH,
-				Reason: fmt.Sprintf("M5 confirmation skipped: failed to fetch M5 candles: %v", err),
+				Passed:    false,
+				Status:    LOCAL_REJECT,
+				Reason:    m5Summary.Reason,
+				M5Summary: m5Summary,
 			}
-		}
-
-		if len(m5Candles) == 0 {
-			return LocalGateResult{
-				Passed: false,
-				Status: LOCAL_WATCH,
-				Reason: "M5 confirmation failed: no M5 candles returned",
-			}
-		}
-
-		lastM5 := m5Candles[len(m5Candles)-1]
-
-		// Early Invalidation Check
-		if quant.Direction == LONG && lastM5.Close <= sl {
-			return LocalGateResult{
-				Passed: false,
-				Status: LOCAL_REJECT,
-				Reason: fmt.Sprintf("M5 early invalidation: last M5 close %0.4f crossed M15 stop loss level %0.4f", lastM5.Close, sl),
-			}
-		}
-		if quant.Direction == SHORT && lastM5.Close >= sl {
-			return LocalGateResult{
-				Passed: false,
-				Status: LOCAL_REJECT,
-				Reason: fmt.Sprintf("M5 early invalidation: last M5 close %0.4f crossed M15 stop loss level %0.4f", lastM5.Close, sl),
-			}
-		}
-
-		// Sweep Rejection Check
-		if profile.RequireM5RejectionConfirm {
-			m5Len := len(m5Candles)
-			checkCount := 3
-			if m5Len < 3 {
-				checkCount = m5Len
-			}
-			hasConfirm := false
-			var wickRatioVal float64
-			for i := 0; i < checkCount; i++ {
-				candle := m5Candles[m5Len-1-i]
-				if wr, ok := calculateDirectionalWickRatio([]dto.Candle{candle}, quant.Direction); ok {
-					if wr >= 0.35 {
-						hasConfirm = true
-						wickRatioVal = wr
-						break
-					} else {
-						wickRatioVal = wr
-					}
+		case M5ConfirmationUnavailable:
+			if m5Summary.Mode == M5ConfirmationHardConfirm {
+				return LocalGateResult{
+					Passed:    false,
+					Status:    LOCAL_WATCH,
+					Reason:    m5Summary.Reason,
+					M5Summary: m5Summary,
 				}
 			}
-			if !hasConfirm {
+		case M5ConfirmationFailed:
+			if m5Summary.Mode == M5ConfirmationHardConfirm || m5Summary.Mode == M5ConfirmationSoftConfirm {
 				return LocalGateResult{
-					Passed: false,
-					Status: LOCAL_WATCH,
-					Reason: fmt.Sprintf("M5 sweep rejection confirmation failed: no recent M5 candle had wick ratio >= 0.35 (last checked wick ratio: %0.2f)", wickRatioVal),
-				}
-			}
-		}
-
-		// Pullback Continuation Check
-		if profile.RequireM5ContinuationConfirm {
-			ema9Series := CalculateEMA(m5Candles, 9)
-			if len(ema9Series) == 0 || ema9Series[len(ema9Series)-1] == 0 {
-				return LocalGateResult{
-					Passed: false,
-					Status: LOCAL_WATCH,
-					Reason: "M5 continuation confirmation failed: insufficient candles for M5 EMA9 calculation",
-				}
-			}
-			ema9Val := ema9Series[len(ema9Series)-1]
-			if quant.Direction == LONG && lastM5.Close <= ema9Val {
-				return LocalGateResult{
-					Passed: false,
-					Status: LOCAL_WATCH,
-					Reason: fmt.Sprintf("M5 pullback continuation confirmation failed: last M5 close %0.4f is not above EMA9 %0.4f", lastM5.Close, ema9Val),
-				}
-			}
-			if quant.Direction == SHORT && lastM5.Close >= ema9Val {
-				return LocalGateResult{
-					Passed: false,
-					Status: LOCAL_WATCH,
-					Reason: fmt.Sprintf("M5 pullback continuation confirmation failed: last M5 close %0.4f is not below EMA9 %0.4f", lastM5.Close, ema9Val),
+					Passed:    false,
+					Status:    LOCAL_WATCH,
+					Reason:    m5Summary.Reason,
+					M5Summary: m5Summary,
 				}
 			}
 		}
@@ -561,10 +497,139 @@ func (uc *LocalGateUsecase) EvaluateWithContext(ctx context.Context, quant Quant
 
 	// Pass all checks
 	return LocalGateResult{
-		Passed: true,
-		Status: AI_CANDIDATE,
-		Reason: "All local quality gate criteria met successfully",
+		Passed:    true,
+		Status:    AI_CANDIDATE,
+		Reason:    "All local quality gate criteria met successfully",
+		M5Summary: m5Summary,
 	}
+}
+
+func (uc *LocalGateUsecase) evaluateM5Confirmation(ctx context.Context, quant QuantResult, profile PlaybookThresholdProfile, stopLoss float64) *M5ConfirmationSummary {
+	if !usesM5Confirmation(profile) {
+		return nil
+	}
+
+	summary := &M5ConfirmationSummary{
+		Used:             true,
+		Mode:             resolveM5ConfirmationMode(profile),
+		Status:           M5ConfirmationNotUsed,
+		ConfirmationType: m5ConfirmationType(profile),
+	}
+
+	if uc.marketData == nil {
+		summary.Status = M5ConfirmationUnavailable
+		summary.Reason = "M5 confirmation unavailable: market data usecase is not configured"
+		return summary
+	}
+
+	m5Candles, err := uc.marketData.FetchM5Candles(ctx, quant.Symbol, 30)
+	if err != nil {
+		slog.Warn("Failed to fetch M5 candles for confirmation", "symbol", quant.Symbol, "error", err)
+		summary.Status = M5ConfirmationUnavailable
+		summary.Reason = fmt.Sprintf("M5 confirmation unavailable: failed to fetch M5 candles: %v", err)
+		return summary
+	}
+	if len(m5Candles) == 0 {
+		summary.Status = M5ConfirmationUnavailable
+		summary.Reason = "M5 confirmation unavailable: no M5 candles returned"
+		return summary
+	}
+
+	lastM5 := m5Candles[len(m5Candles)-1]
+	summary.LastClose = lastM5.Close
+
+	if quant.Direction == LONG && lastM5.Close <= stopLoss {
+		summary.Status = M5ConfirmationInvalidated
+		summary.EarlyInvalidation = true
+		summary.Reason = fmt.Sprintf("M5 early invalidation: last M5 close %0.4f crossed M15 stop loss level %0.4f", lastM5.Close, stopLoss)
+		return summary
+	}
+	if quant.Direction == SHORT && lastM5.Close >= stopLoss {
+		summary.Status = M5ConfirmationInvalidated
+		summary.EarlyInvalidation = true
+		summary.Reason = fmt.Sprintf("M5 early invalidation: last M5 close %0.4f crossed M15 stop loss level %0.4f", lastM5.Close, stopLoss)
+		return summary
+	}
+
+	if profile.RequireM5RejectionConfirm {
+		threshold := profile.MinWickRatio
+		if threshold <= 0 {
+			threshold = 0.35
+		}
+		summary.Threshold = threshold
+
+		confirmed, wickRatio := recentM5DirectionalWickConfirmation(m5Candles, quant.Direction, threshold)
+		summary.WickRatio = wickRatio
+		if !confirmed {
+			summary.Status = M5ConfirmationFailed
+			summary.Reason = fmt.Sprintf("M5 sweep rejection confirmation failed: no recent M5 candle had wick ratio >= %0.2f (best recent wick ratio: %0.2f)", threshold, wickRatio)
+			return summary
+		}
+	}
+
+	if profile.RequireM5ContinuationConfirm {
+		ema9Series := CalculateEMA(m5Candles, 9)
+		if len(ema9Series) == 0 || ema9Series[len(ema9Series)-1] == 0 {
+			summary.Status = M5ConfirmationUnavailable
+			summary.Reason = "M5 continuation confirmation unavailable: insufficient candles for M5 EMA9 calculation"
+			return summary
+		}
+
+		ema9Val := ema9Series[len(ema9Series)-1]
+		summary.EMA9 = ema9Val
+		if quant.Direction == LONG && lastM5.Close <= ema9Val {
+			summary.Status = M5ConfirmationFailed
+			summary.Reason = fmt.Sprintf("M5 pullback continuation confirmation failed: last M5 close %0.4f is not above EMA9 %0.4f", lastM5.Close, ema9Val)
+			return summary
+		}
+		if quant.Direction == SHORT && lastM5.Close >= ema9Val {
+			summary.Status = M5ConfirmationFailed
+			summary.Reason = fmt.Sprintf("M5 pullback continuation confirmation failed: last M5 close %0.4f is not below EMA9 %0.4f", lastM5.Close, ema9Val)
+			return summary
+		}
+	}
+
+	summary.Status = M5ConfirmationConfirmed
+	summary.Confirmed = true
+	summary.Reason = "M5 micro-confirmation aligned with the M15 setup"
+	return summary
+}
+
+func m5ConfirmationType(profile PlaybookThresholdProfile) string {
+	switch {
+	case profile.RequireM5RejectionConfirm && profile.RequireM5ContinuationConfirm:
+		return "REJECTION+CONTINUATION"
+	case profile.RequireM5RejectionConfirm:
+		return "REJECTION"
+	case profile.RequireM5ContinuationConfirm:
+		return "CONTINUATION"
+	default:
+		return ""
+	}
+}
+
+func recentM5DirectionalWickConfirmation(candles []dto.Candle, direction Direction, threshold float64) (bool, float64) {
+	checkCount := 3
+	if len(candles) < checkCount {
+		checkCount = len(candles)
+	}
+
+	bestWickRatio := 0.0
+	for idx := 0; idx < checkCount; idx++ {
+		candle := candles[len(candles)-1-idx]
+		wickRatio, ok := calculateDirectionalWickRatio([]dto.Candle{candle}, direction)
+		if !ok {
+			continue
+		}
+		if wickRatio > bestWickRatio {
+			bestWickRatio = wickRatio
+		}
+		if wickRatio >= threshold {
+			return true, wickRatio
+		}
+	}
+
+	return false, bestWickRatio
 }
 
 // calculateRR extracts Risk-to-Reward ratio from TradePlan parameters

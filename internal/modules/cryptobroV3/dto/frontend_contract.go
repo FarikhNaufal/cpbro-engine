@@ -388,6 +388,13 @@ type DecisionAuditRow struct {
 	HasDerivativesEvidence    bool    `json:"has_derivatives_evidence,omitempty"`
 	RejectOrWatchReason       string  `json:"reject_or_watch_reason"`
 	CreatedAt                 string  `json:"created_at"`
+	M5ConfirmationUsed        bool    `json:"m5_confirmation_used,omitempty"`
+	M5ConfirmationMode        string  `json:"m5_confirmation_mode,omitempty"`
+	M5ConfirmationStatus      string  `json:"m5_confirmation_status,omitempty"`
+	M5ConfirmationReason      string  `json:"m5_confirmation_reason,omitempty"`
+	M5ConfirmationType        string  `json:"m5_confirmation_type,omitempty"`
+	M5Confirmed               bool    `json:"m5_confirmed,omitempty"`
+	M5EarlyInvalidation       bool    `json:"m5_early_invalidation,omitempty"`
 	HypotheticalEntry         float64 `json:"hypothetical_entry"`
 }
 

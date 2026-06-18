@@ -206,11 +206,12 @@ func TestLocalGate_RuleChecks(t *testing.T) {
 
 type mockLocalGateMarketDataProvider struct {
 	m5Candles []dto.Candle
+	m5Err     error
 }
 
 func (m *mockLocalGateMarketDataProvider) FetchClosedCandles(ctx context.Context, symbol string, interval string, limit int) ([]dto.Candle, error) {
 	if interval == "5m" {
-		return m.m5Candles, nil
+		return m.m5Candles, m.m5Err
 	}
 	return nil, fmt.Errorf("unexpected interval: %s", interval)
 }
@@ -306,6 +307,7 @@ func TestLocalGate_M5Confirmation(t *testing.T) {
 	reg.profiles[LIQUIDITY_SWEEP_REVERSAL] = PlaybookThresholdProfile{
 		Playbook:                  LIQUIDITY_SWEEP_REVERSAL,
 		RequireM5RejectionConfirm: true,
+		M5ConfirmationMode:        M5ConfirmationHardConfirm,
 		MinRR:                     1.0,
 	}
 	reg.mu.Unlock()
@@ -328,6 +330,9 @@ func TestLocalGate_M5Confirmation(t *testing.T) {
 	if !res.Passed || res.Status != AI_CANDIDATE {
 		t.Errorf("Expected pass for Sweep Rejection Confirmation, got status %s reason %s", res.Status, res.Reason)
 	}
+	if res.M5Summary == nil || res.M5Summary.Status != M5ConfirmationConfirmed {
+		t.Fatalf("Expected confirmed M5 summary, got %+v", res.M5Summary)
+	}
 
 	// C. Sweep Rejection Confirmation (fails)
 	// Candle: Open: 4.8, Close: 4.7, Low: 4.68. Range: 5.0 - 4.68 = 0.32
@@ -344,6 +349,7 @@ func TestLocalGate_M5Confirmation(t *testing.T) {
 	reg.profiles[LIQUIDITY_SWEEP_REVERSAL] = PlaybookThresholdProfile{
 		Playbook:                     LIQUIDITY_SWEEP_REVERSAL,
 		RequireM5ContinuationConfirm: true,
+		M5ConfirmationMode:           M5ConfirmationSoftConfirm,
 		MinRR:                        1.0,
 	}
 	reg.mu.Unlock()
@@ -383,5 +389,91 @@ func TestLocalGate_M5Confirmation(t *testing.T) {
 	})
 	if res.Passed || res.Status != LOCAL_WATCH || !strings.Contains(res.Reason, "M5 pullback continuation confirmation failed") {
 		t.Errorf("Expected LOCAL_WATCH for failed Pullback Continuation Confirmation, got status %s reason %s", res.Status, res.Reason)
+	}
+}
+
+func TestLocalGate_M5WatchOnlyHintDoesNotBlockOnUnavailableOrFailedConfirmation(t *testing.T) {
+	policy := MarketPolicy{
+		AllowLong:        true,
+		AllowShort:       true,
+		LongMode:         NORMAL,
+		ShortMode:        NORMAL,
+		AllowedTiers:     []Tier{TierA},
+		AllowedPlaybooks: []Playbook{TREND_PULLBACK},
+		MinScoreAI:       7.0,
+		MinScoreExecute:  7.0,
+	}
+
+	quant := QuantResult{
+		Symbol:       "NEARUSDT",
+		Direction:    LONG,
+		Playbook:     TREND_PULLBACK,
+		Score:        8.0,
+		Tier:         TierA,
+		IndicatorMet: true,
+		TechnicalSnapshot: TechnicalSnapshot{
+			IndicatorValues: map[string]float64{
+				IndicatorADX: 25.0,
+			},
+		},
+		TradePlan: TradePlan{
+			EntryPrice: 5.0,
+			TakeProfit: 6.0,
+			StopLoss:   4.5,
+		},
+	}
+
+	reg := GetGlobalConfigRegistry()
+	originalProfile, exists := reg.GetPlaybookProfile(TREND_PULLBACK)
+	if !exists {
+		originalProfile = PlaybookThresholdProfile{Playbook: TREND_PULLBACK}
+	}
+	defer func() {
+		reg.mu.Lock()
+		reg.profiles[TREND_PULLBACK] = originalProfile
+		reg.mu.Unlock()
+	}()
+
+	reg.mu.Lock()
+	reg.profiles[TREND_PULLBACK] = PlaybookThresholdProfile{
+		Playbook:                     TREND_PULLBACK,
+		RequireADX:                   true,
+		MinADX:                       20,
+		RequireM5ContinuationConfirm: true,
+		M5ConfirmationMode:           M5ConfirmationWatchOnlyHint,
+		MinRR:                        1.0,
+	}
+	reg.mu.Unlock()
+
+	gate := NewLocalGateUsecase()
+	m15 := []dto.Candle{{Vol: 100}}
+
+	gate.SetMarketData(NewMarketDataUsecase(&mockLocalGateMarketDataProvider{m5Err: fmt.Errorf("network down")}))
+	res := gate.Evaluate(quant, policy, m15)
+	if !res.Passed || res.Status != AI_CANDIDATE {
+		t.Fatalf("Expected pass with unavailable M5 in watch-only mode, got status %s reason %s", res.Status, res.Reason)
+	}
+	if res.M5Summary == nil || res.M5Summary.Status != M5ConfirmationUnavailable {
+		t.Fatalf("Expected unavailable M5 summary, got %+v", res.M5Summary)
+	}
+
+	gate.SetMarketData(NewMarketDataUsecase(&mockLocalGateMarketDataProvider{m5Candles: []dto.Candle{
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 5.0, High: 5.0, Low: 5.0},
+		{Open: 5.0, Close: 4.9, High: 5.0, Low: 4.8},
+	}}))
+	res = gate.Evaluate(quant, policy, m15)
+	if !res.Passed || res.Status != AI_CANDIDATE {
+		t.Fatalf("Expected pass with failed M5 in watch-only mode, got status %s reason %s", res.Status, res.Reason)
+	}
+	if res.M5Summary == nil || res.M5Summary.Status != M5ConfirmationFailed {
+		t.Fatalf("Expected failed M5 summary, got %+v", res.M5Summary)
 	}
 }

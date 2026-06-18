@@ -95,6 +95,99 @@ func formatFloatThreshold(name string, value float64) string {
 	return fmt.Sprintf("%s: %.2f", name, value)
 }
 
+func resolveFeedbackPolicyForRegime(label string) MarketPolicy {
+	canonical := canonicalRegimeLabel(label)
+
+	switch canonical {
+	case string(BTC_CHAOS):
+		policy := mustResolvePolicyBaseline("BTC_CHAOS")
+		policy.Regime = BTC_CHAOS
+		return policy
+	case string(BTC_DOMINANCE):
+		policy := mustResolvePolicyBaseline("BTC_DOMINANCE")
+		policy.Regime = BTC_DOMINANCE
+		return policy
+	case string(ALT_SUPPORTIVE):
+		policy := mustResolvePolicyBaseline("ALT_SUPPORTIVE")
+		policy.Regime = ALT_SUPPORTIVE
+		return policy
+	case string(RISK_OFF):
+		policy := mustResolvePolicyBaseline("RISK_OFF")
+		policy.Regime = RISK_OFF
+		return policy
+	case string(CHOP_RANGE):
+		policy := mustResolvePolicyBaseline("CHOP_RANGE")
+		policy.Regime = CHOP_RANGE
+		return policy
+	case string(COMPRESSION):
+		return normalizeCompressionPolicy(mustResolvePolicyBaseline("COMPRESSION"), "")
+	case string(LOW_VOL):
+		return normalizeLowVolPolicy(mustResolvePolicyBaseline("DEFAULT"), "", "LOW_VOL active - reversal/watch mode")
+	case string(HIGH_VOL):
+		policy := mustResolvePolicyBaseline("DEFAULT")
+		policy.Regime = HIGH_VOL
+		policy.MinVolume = 10000000.0
+		policy.AllowedTiers = []Tier{TierA, TierB}
+		policy.MaxFinalExecute = 2
+		policy.StalenessATRMultiplier = 0.8
+		policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, TREND_PULLBACK}
+		policy.RequireAIConfidence = AIConfidenceHigh
+		policy.RequireFreshEntry = true
+		policy.MaxPriceMove24hLong = 0.08
+		policy.MaxPriceMove24hShort = 0.10
+		policy.Reason = "HIGH_VOL active - strict risk reduction mode"
+		return policy
+	default:
+		policy := mustResolvePolicyBaseline("DEFAULT")
+		policy.Regime = DEFAULT
+		return policy
+	}
+}
+
+func resolveFeedbackExecutionConfig(playbook Playbook, regimeLabel string, tier Tier) (MarketPolicy, PlaybookThresholdProfile) {
+	policy := resolveFeedbackPolicyForRegime(regimeLabel)
+	profile := GetPlaybookThresholdProfile(playbook, policy, tier)
+	return policy, profile
+}
+
+func normalizeM5ConfirmationModeLabel(value string) M5ConfirmationMode {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case string(M5ConfirmationWatchOnlyHint):
+		return M5ConfirmationWatchOnlyHint
+	case string(M5ConfirmationSoftConfirm):
+		return M5ConfirmationSoftConfirm
+	case string(M5ConfirmationHardConfirm):
+		return M5ConfirmationHardConfirm
+	default:
+		return M5ConfirmationDisabled
+	}
+}
+
+func normalizeM5ConfirmationStatusLabel(value string) M5ConfirmationStatus {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case string(M5ConfirmationUnavailable):
+		return M5ConfirmationUnavailable
+	case string(M5ConfirmationConfirmed):
+		return M5ConfirmationConfirmed
+	case string(M5ConfirmationFailed):
+		return M5ConfirmationFailed
+	case string(M5ConfirmationInvalidated):
+		return M5ConfirmationInvalidated
+	default:
+		return M5ConfirmationNotUsed
+	}
+}
+
+func m5ExecutionViolatesMode(mode M5ConfirmationMode, status M5ConfirmationStatus) bool {
+	if status == M5ConfirmationInvalidated {
+		return true
+	}
+	if mode == M5ConfirmationSoftConfirm || mode == M5ConfirmationHardConfirm {
+		return status == M5ConfirmationFailed || status == M5ConfirmationUnavailable
+	}
+	return false
+}
+
 func isFinalizedSignalJournalForEvaluation(item SignalJournal, now time.Time) bool {
 	switch item.Status {
 	case TP2_HIT, SL_HIT, EXPIRED, BREAKEVEN:
@@ -901,6 +994,15 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	// Conflict & Cooldown stats count from decision audits
 	conflictStats := make(map[string]int)
 	cooldownStats := make(map[string]int)
+	m5UsedAuditCount := 0
+	m5ConfirmedAuditCount := 0
+	m5FailedAuditCount := 0
+	m5UnavailableAuditCount := 0
+	m5InvalidatedAuditCount := 0
+	m5SoftHardAuditCount := 0
+	m5SoftHardUnavailableCount := 0
+	m5SoftHardFailedCount := 0
+	m5ExecutionViolationCount := 0
 	if hasAudits {
 		for _, a := range audits {
 			if a.ConflictReason != "" {
@@ -908,6 +1010,38 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 			}
 			if a.CooldownReason != "" {
 				cooldownStats[a.CooldownReason]++
+			}
+			if !a.M5ConfirmationUsed {
+				continue
+			}
+
+			mode := normalizeM5ConfirmationModeLabel(a.M5ConfirmationMode)
+			status := normalizeM5ConfirmationStatusLabel(a.M5ConfirmationStatus)
+			m5UsedAuditCount++
+
+			switch status {
+			case M5ConfirmationConfirmed:
+				m5ConfirmedAuditCount++
+			case M5ConfirmationFailed:
+				m5FailedAuditCount++
+			case M5ConfirmationUnavailable:
+				m5UnavailableAuditCount++
+			case M5ConfirmationInvalidated:
+				m5InvalidatedAuditCount++
+			}
+
+			if mode == M5ConfirmationSoftConfirm || mode == M5ConfirmationHardConfirm {
+				m5SoftHardAuditCount++
+				if status == M5ConfirmationUnavailable {
+					m5SoftHardUnavailableCount++
+				}
+				if status == M5ConfirmationFailed {
+					m5SoftHardFailedCount++
+				}
+			}
+
+			if a.FinalStatus == FINAL_EXECUTE && m5ExecutionViolatesMode(mode, status) {
+				m5ExecutionViolationCount++
 			}
 		}
 	}
@@ -928,14 +1062,16 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		if item.Status == TP1_HIT || item.Status == TP2_HIT || item.Status == SL_HIT {
 			// Sinyal tereksekusi (FINAL_EXECUTE)
 			pb := string(item.Playbook)
+			policy, profile := resolveFeedbackExecutionConfig(item.Playbook, item.MarketRegime, item.Tier)
 
-			// 1. AI confidence not HIGH
-			if item.AIConfidence != "" && item.AIConfidence != "HIGH" {
-				addGateBug(pb, "GATE_BUG: AI confidence was "+item.AIConfidence+" but signal was executed on "+item.Symbol)
+			// 1. AI confidence below required policy/profile confidence.
+			requiredAIConfidence := effectiveRequiredAIConfidence(policy, profile)
+			if item.AIConfidence != "" && !meetsRequiredAIConfidence(item.AIConfidence, requiredAIConfidence) {
+				addGateBug(pb, "GATE_BUG: AI confidence was "+item.AIConfidence+" but execution required "+string(requiredAIConfidence)+" on "+item.Symbol)
 			}
 
-			// 2. Staleness not FRESH
-			if item.EntryTiming == "LATE" || strings.Contains(strings.ToLower(item.ThresholdProfileSummary), "staleness: late") {
+			// 2. Staleness not FRESH only when fresh entry is actually required.
+			if effectiveRequireFreshEntry(policy) && (item.EntryTiming == "LATE" || strings.Contains(strings.ToLower(item.ThresholdProfileSummary), "staleness: late")) {
 				addGateBug(pb, "GATE_BUG: Staleness was not FRESH but signal was executed on "+item.Symbol)
 			}
 
@@ -960,11 +1096,13 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		for _, a := range audits {
 			if a.FinalStatus == FINAL_EXECUTE {
 				pb := string(a.Playbook)
+				policy, profile := resolveFeedbackExecutionConfig(a.Playbook, a.MarketRegime, a.Tier)
+				requiredAIConfidence := effectiveRequiredAIConfidence(policy, profile)
 
-				if a.AIConfidence != "HIGH" {
-					addGateBug(pb, "GATE_BUG: AI confidence was "+a.AIConfidence+" but final status is FINAL_EXECUTE on "+a.Symbol)
+				if a.AIConfidence != "" && !meetsRequiredAIConfidence(a.AIConfidence, requiredAIConfidence) {
+					addGateBug(pb, "GATE_BUG: AI confidence was "+a.AIConfidence+" but final status is FINAL_EXECUTE while required confidence is "+string(requiredAIConfidence)+" on "+a.Symbol)
 				}
-				if a.StalenessStatus == "LATE" {
+				if effectiveRequireFreshEntry(policy) && a.StalenessStatus == "LATE" {
 					addGateBug(pb, "GATE_BUG: Staleness was LATE but final status is FINAL_EXECUTE on "+a.Symbol)
 				}
 
@@ -980,6 +1118,12 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 				}
 				if a.Playbook == "CROWDED_POSITIONING_SQUEEZE" && (strings.Contains(summary, "weak crowding") || strings.Contains(summary, "no crowding evidence")) {
 					addGateBug(pb, "GATE_BUG: CROWDED_POSITIONING_SQUEEZE executed without crowding evidence on "+a.Symbol)
+				}
+
+				mode := normalizeM5ConfirmationModeLabel(a.M5ConfirmationMode)
+				status := normalizeM5ConfirmationStatusLabel(a.M5ConfirmationStatus)
+				if a.M5ConfirmationUsed && m5ExecutionViolatesMode(mode, status) {
+					addGateBug(pb, "GATE_BUG: "+string(a.Playbook)+" reached FINAL_EXECUTE with M5 mode "+string(mode)+" and status "+string(status)+" on "+a.Symbol)
 				}
 			}
 		}
@@ -1314,9 +1458,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		}, aiHighCount)
 	}
 
-	// Recommendation 10: AI WAIT atau AI MEDIUM sering kemudian harga mencapai TP
-	// We check decision audits to see if AI MEDIUM or AI WAIT signals exist.
-	// If decision audits are missing, we output an INSUFFICIENT_SAMPLE warning indicating we need decision audit logs.
+	// Recommendation 10: watch/AI WAIT semantics need observability before prompt tuning.
 	if !hasAudits {
 		addRec(ThresholdRecommendation{
 			IssueType:        "INSUFFICIENT_SAMPLE",
@@ -1332,24 +1474,28 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 			Severity:         "INFO",
 		}, 0)
 	} else {
-		aiMediumCount := 0
+		aiWatchCount := 0
 		for _, a := range audits {
-			if a.AIConfidence == "MEDIUM" || a.FinalStatus == FINAL_WATCH {
-				aiMediumCount++
+			if strings.EqualFold(a.AIDecision, "WAIT") || strings.EqualFold(a.AIConfidence, string(AIConfidenceMedium)) || a.FinalStatus == FINAL_WATCH {
+				aiWatchCount++
 			}
 		}
-		if aiMediumCount > 0 {
+		if aiWatchCount > 0 {
+			evidenceSummary := fmt.Sprintf("%d AI WAIT / medium-confidence / FINAL_WATCH decisions recorded.", aiWatchCount)
+			if watchFinalizedCount > 0 {
+				evidenceSummary = fmt.Sprintf("%d AI WAIT / medium-confidence / FINAL_WATCH decisions and %d finalized virtual watch outcomes recorded.", aiWatchCount, watchFinalizedCount)
+			}
 			addRec(ThresholdRecommendation{
-				IssueType:          "AI_PROMPT_TUNING",
+				IssueType:          "OBSERVABILITY_TUNING",
 				Playbook:           "ALL",
-				MetricName:         "AI_MEDIUM_WATCH_COUNT",
-				MetricValue:        float64(aiMediumCount),
-				CurrentThreshold:   "AI MEDIUM -> watch list",
-				SuggestedThreshold: "Evaluate WATCH_RETEST alert",
-				EvidenceSummary:    "Significant count of AI Medium/Watch decisions recorded.",
-				Reason:             "AI Medium decisions can be evaluated to determine if they frequently hit profit targets.",
-				SuggestedAction:    "Evaluate WATCH_RETEST alerts and do not immediately execute AI Medium setups.",
-			}, aiMediumCount)
+				MetricName:         "AI_WATCH_DECISION_COUNT",
+				MetricValue:        float64(aiWatchCount),
+				CurrentThreshold:   "AI MEDIUM / WAIT remains non-executable",
+				SuggestedThreshold: "Correlate watch outcomes before any prompt tightening",
+				EvidenceSummary:    evidenceSummary,
+				Reason:             "Current evaluation can count watch decisions, but it does not yet attribute each virtual TP/SL outcome back to the precise AI WAIT rationale with certainty.",
+				SuggestedAction:    "Review watch_journal outcomes before changing prompt, selector, or promoting AI MEDIUM setups to execute; keep AI MEDIUM non-executable until per-decision attribution is proven.",
+			}, maxInt(aiWatchCount, watchFinalizedCount))
 		}
 	}
 
@@ -1561,6 +1707,20 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		}, highVolCount)
 	}
 
+	if m5SoftHardAuditCount > 0 && safeRate(m5SoftHardUnavailableCount, m5SoftHardAuditCount) > 25 {
+		addRec(ThresholdRecommendation{
+			IssueType:          "OBSERVABILITY_TUNING",
+			Playbook:           "ALL",
+			MetricName:         "M5_SOFT_HARD_UNAVAILABLE_RATE",
+			MetricValue:        safeRate(m5SoftHardUnavailableCount, m5SoftHardAuditCount),
+			CurrentThreshold:   "Soft/Hard M5 confirmation active",
+			SuggestedThreshold: "Stabilize M5 data path before tightening thresholds",
+			EvidenceSummary:    fmt.Sprintf("%d of %d soft/hard M5 confirmations were unavailable in decision audits.", m5SoftHardUnavailableCount, m5SoftHardAuditCount),
+			Reason:             "When soft/hard M5 gating is blocked by missing M5 data, evaluation and tuning become noisy because misses are infra-driven rather than market-driven.",
+			SuggestedAction:    "Audit M5 fetch/cache/retry reliability first and keep WATCH_ONLY_HINT rollout until unavailable rate normalizes.",
+		}, m5SoftHardAuditCount)
+	}
+
 	// Recommendation 20: Low volatility banyak expired
 	lowVolCount := 0
 	lowVolExpCount := 0
@@ -1681,6 +1841,15 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 			"excluded_watch_anomaly_count":     float64(excludedWatchAnomalies),
 			"long_regime_playbook_slice_count": float64(len(longRegimePlaybookStats)),
 			"weak_long_setup_count":            float64(len(weakLongSetups)),
+			"m5_used_audit_count":              float64(m5UsedAuditCount),
+			"m5_confirmed_audit_count":         float64(m5ConfirmedAuditCount),
+			"m5_failed_audit_count":            float64(m5FailedAuditCount),
+			"m5_unavailable_audit_count":       float64(m5UnavailableAuditCount),
+			"m5_invalidated_audit_count":       float64(m5InvalidatedAuditCount),
+			"m5_soft_hard_audit_count":         float64(m5SoftHardAuditCount),
+			"m5_soft_hard_unavailable_count":   float64(m5SoftHardUnavailableCount),
+			"m5_soft_hard_failed_count":        float64(m5SoftHardFailedCount),
+			"m5_execution_violation_count":     float64(m5ExecutionViolationCount),
 		},
 		PlaybookStats:             playbookStats,
 		RegimeStats:               regimeStats,

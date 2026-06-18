@@ -219,6 +219,79 @@ func TestFeedback_GateBugLiquiditySweepNoVolume(t *testing.T) {
 	}
 }
 
+func TestFeedback_GateBugAIConfidenceRespectsCurrentRequirement(t *testing.T) {
+	original := usecase.SnapshotRuntimeSettings()
+	t.Cleanup(func() { usecase.SetRuntimeSettings(original) })
+	settings := original
+	settings.RequireAIHighForExecute = false
+	usecase.SetRuntimeSettings(settings)
+
+	journal := make([]usecase.SignalJournal, 12)
+	for i := 0; i < 12; i++ {
+		journal[i] = usecase.SignalJournal{
+			ID:           "med_conf_exec",
+			Playbook:     usecase.TREND_PULLBACK,
+			Status:       usecase.TP2_HIT,
+			MarketRegime: string(usecase.ALT_SUPPORTIVE),
+			AIConfidence: "MEDIUM",
+			EntryPrice:   100,
+			TP1:          103,
+			TP2:          106,
+		}
+	}
+
+	repo := &mockFeedbackStorageRepo{journal: journal}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	for _, rec := range repo.report.Recommendations {
+		if rec.IssueType == "GATE_BUG" && strings.Contains(rec.EvidenceSummary, "AI confidence was MEDIUM") {
+			t.Fatalf("did not expect MEDIUM confidence gate bug when current regime only requires MEDIUM: %+v", rec)
+		}
+	}
+}
+
+func TestFeedback_GateBugStalenessRespectsFreshRequirement(t *testing.T) {
+	original := usecase.SnapshotRuntimeSettings()
+	t.Cleanup(func() { usecase.SetRuntimeSettings(original) })
+	settings := original
+	settings.RequireFreshEntryForExecute = false
+	usecase.SetRuntimeSettings(settings)
+
+	journal := make([]usecase.SignalJournal, 12)
+	for i := 0; i < 12; i++ {
+		journal[i] = usecase.SignalJournal{
+			ID:           "late_but_allowed",
+			Playbook:     usecase.TREND_PULLBACK,
+			Status:       usecase.TP2_HIT,
+			MarketRegime: string(usecase.ALT_SUPPORTIVE),
+			AIConfidence: "HIGH",
+			EntryTiming:  "LATE",
+			EntryPrice:   100,
+			TP1:          103,
+			TP2:          106,
+		}
+	}
+
+	repo := &mockFeedbackStorageRepo{journal: journal}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	for _, rec := range repo.report.Recommendations {
+		if rec.IssueType == "GATE_BUG" && strings.Contains(rec.EvidenceSummary, "Staleness was not FRESH") {
+			t.Fatalf("did not expect stale-entry gate bug when fresh entry is not required: %+v", rec)
+		}
+	}
+}
+
 // 4. Test AI MEDIUM evaluation without decision_audit.json
 func TestFeedback_AIMediumNoDecisionAudit(t *testing.T) {
 	// Create sufficient sample journal, but audits is nil
@@ -259,6 +332,44 @@ func TestFeedback_AIMediumNoDecisionAudit(t *testing.T) {
 	}
 	if !foundAIMediumWarning {
 		t.Error("Expected warning about missing decision audit file")
+	}
+}
+
+func TestFeedback_AIMediumWatchRecommendationBecomesObservabilityReview(t *testing.T) {
+	audits := make([]usecase.DecisionAudit, 12)
+	for i := 0; i < 12; i++ {
+		audits[i] = usecase.DecisionAudit{
+			Symbol:       "BTCUSDT",
+			Playbook:     usecase.TREND_PULLBACK,
+			MarketRegime: string(usecase.ALT_SUPPORTIVE),
+			AIConfidence: "MEDIUM",
+			AIDecision:   "WAIT",
+			FinalStatus:  usecase.FINAL_WATCH,
+		}
+	}
+
+	repo := &mockFeedbackStorageRepo{audits: audits}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	found := false
+	for _, rec := range repo.report.Recommendations {
+		if rec.MetricName == "AI_WATCH_DECISION_COUNT" {
+			found = true
+			if rec.IssueType != "OBSERVABILITY_TUNING" {
+				t.Fatalf("expected observability recommendation, got %s", rec.IssueType)
+			}
+			if !strings.Contains(rec.SuggestedAction, "keep AI MEDIUM non-executable") {
+				t.Fatalf("expected conservative watch review guidance, got %s", rec.SuggestedAction)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected AI_WATCH_DECISION_COUNT observability recommendation")
 	}
 }
 
@@ -921,6 +1032,68 @@ func TestFeedback_LongDirectionalDiagnosticRecommendation(t *testing.T) {
 	}
 
 	t.Fatal("expected DIRECTIONAL_DIAGNOSTIC recommendation for weak LONG CHOP_RANGE TREND_PULLBACK slice")
+}
+
+func TestFeedback_GateBugDetectsBlockingM5ExecutionViolation(t *testing.T) {
+	audits := make([]usecase.DecisionAudit, 12)
+	for i := 0; i < 12; i++ {
+		audits[i] = usecase.DecisionAudit{
+			Symbol:               "ETHUSDT",
+			Playbook:             usecase.LIQUIDITY_SWEEP_REVERSAL,
+			MarketRegime:         string(usecase.ALT_SUPPORTIVE),
+			AIConfidence:         "HIGH",
+			FinalStatus:          usecase.FINAL_EXECUTE,
+			M5ConfirmationUsed:   true,
+			M5ConfirmationMode:   string(usecase.M5ConfirmationSoftConfirm),
+			M5ConfirmationStatus: string(usecase.M5ConfirmationFailed),
+		}
+	}
+
+	repo := &mockFeedbackStorageRepo{audits: audits}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	for _, rec := range repo.report.Recommendations {
+		if rec.IssueType == "GATE_BUG" && strings.Contains(rec.EvidenceSummary, "M5 mode SOFT_CONFIRM and status FAILED") {
+			return
+		}
+	}
+
+	t.Fatal("expected M5 blocking-mode gate bug recommendation")
+}
+
+func TestFeedback_WatchOnlyM5ExecutionDoesNotRaiseGateBug(t *testing.T) {
+	audits := make([]usecase.DecisionAudit, 12)
+	for i := 0; i < 12; i++ {
+		audits[i] = usecase.DecisionAudit{
+			Symbol:               "SOLUSDT",
+			Playbook:             usecase.TREND_PULLBACK,
+			MarketRegime:         string(usecase.ALT_SUPPORTIVE),
+			AIConfidence:         "HIGH",
+			FinalStatus:          usecase.FINAL_EXECUTE,
+			M5ConfirmationUsed:   true,
+			M5ConfirmationMode:   string(usecase.M5ConfirmationWatchOnlyHint),
+			M5ConfirmationStatus: string(usecase.M5ConfirmationFailed),
+		}
+	}
+
+	repo := &mockFeedbackStorageRepo{audits: audits}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	for _, rec := range repo.report.Recommendations {
+		if rec.IssueType == "GATE_BUG" && strings.Contains(rec.EvidenceSummary, "M5 mode WATCH_ONLY_HINT and status FAILED") {
+			t.Fatalf("did not expect watch-only M5 execution to be treated as gate bug: %+v", rec)
+		}
+	}
 }
 
 func TestFeedback_LongDiagnosticsCanonicalizeRegimeReasonPhrase(t *testing.T) {

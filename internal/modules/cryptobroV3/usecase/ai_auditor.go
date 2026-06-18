@@ -108,7 +108,7 @@ func BuildAIAuditCacheKey(candidate QuantResult, payload dto.GeminiAuditPayload)
 }
 
 // Audit queries cached audits or calls GeminiService API if no cache hit exists.
-func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy MarketPolicy, m15, h1, h4 []dto.Candle) (dto.AIAuditResponse, error) {
+func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy MarketPolicy, m15, h1, h4 []dto.Candle, m5Summary *M5ConfirmationSummary) (dto.AIAuditResponse, error) {
 	symbol := quant.Symbol
 
 	// Limit RawKlines to last 30 closed M15 candles
@@ -180,6 +180,23 @@ func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy
 		}
 	}
 
+	var m5Context *dto.GeminiM5ConfirmationContext
+	if m5Summary != nil {
+		m5Context = &dto.GeminiM5ConfirmationContext{
+			Used:              m5Summary.Used,
+			Mode:              string(m5Summary.Mode),
+			Status:            string(m5Summary.Status),
+			Reason:            m5Summary.Reason,
+			ConfirmationType:  m5Summary.ConfirmationType,
+			Confirmed:         m5Summary.Confirmed,
+			EarlyInvalidation: m5Summary.EarlyInvalidation,
+			LastClose:         m5Summary.LastClose,
+			EMA9:              m5Summary.EMA9,
+			WickRatio:         m5Summary.WickRatio,
+			Threshold:         m5Summary.Threshold,
+		}
+	}
+
 	// Build the canonical GeminiAuditPayload
 	payload := dto.GeminiAuditPayload{
 		Candidate: dto.GeminiCandidateContext{
@@ -248,6 +265,7 @@ func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy
 			RR:                 rr,
 			InvalidationReason: quant.TradePlan.Reason,
 		},
+		M5Confirmation: m5Context,
 		Klines: dto.GeminiKlineContext{
 			M15Candles: m15Closed,
 			H1Candles:  h1Closed,

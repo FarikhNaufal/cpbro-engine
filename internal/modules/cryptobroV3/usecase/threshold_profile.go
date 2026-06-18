@@ -6,30 +6,53 @@ import (
 )
 
 type PlaybookThresholdProfile struct {
-	Playbook                 Playbook `json:"playbook"`
-	MinScoreAI               float64  `json:"min_score_ai"`
-	MinScoreExecute          float64  `json:"min_score_execute"`
-	MinRR                    float64  `json:"min_rr"`
-	MinADX                   float64  `json:"min_adx"`
-	MaxADX                   float64  `json:"max_adx"`
-	RequireADX               bool     `json:"require_adx"`
-	RejectADXExpansion       bool     `json:"reject_adx_expansion"`
-	MinVolumeRatio           float64  `json:"min_volume_ratio"`
-	MinWickRatio             float64  `json:"min_wick_ratio"`
-	MinRetestQuality         float64  `json:"min_retest_quality"`
-	MinRangeClarity          float64  `json:"min_range_clarity"`
-	MinCrowdingScore         float64  `json:"min_crowding_score"`
-	StalenessATR             float64  `json:"staleness_atr"`
-	RequireVolumeConfirm     bool     `json:"require_volume_confirm"`
-	RequireRejection         bool     `json:"require_rejection"`
-	RequireConfirmation      bool     `json:"require_confirmation"`
-	RequireRetest            bool     `json:"require_retest"`
-	AllowBreakoutCandleEntry bool     `json:"allow_breakout_candle_entry"`
-	RequireCrowdingEvidence  bool     `json:"require_crowding_evidence"`
-	RequireAIHigh            bool     `json:"require_ai_high"`
-	RequireM5RejectionConfirm    bool     `json:"require_m5_rejection_confirm"`
-	RequireM5ContinuationConfirm bool     `json:"require_m5_continuation_confirm"`
-	Reason                   string   `json:"reason"`
+	Playbook                     Playbook           `json:"playbook"`
+	MinScoreAI                   float64            `json:"min_score_ai"`
+	MinScoreExecute              float64            `json:"min_score_execute"`
+	MinRR                        float64            `json:"min_rr"`
+	MinADX                       float64            `json:"min_adx"`
+	MaxADX                       float64            `json:"max_adx"`
+	RequireADX                   bool               `json:"require_adx"`
+	RejectADXExpansion           bool               `json:"reject_adx_expansion"`
+	MinVolumeRatio               float64            `json:"min_volume_ratio"`
+	MinWickRatio                 float64            `json:"min_wick_ratio"`
+	MinRetestQuality             float64            `json:"min_retest_quality"`
+	MinRangeClarity              float64            `json:"min_range_clarity"`
+	MinCrowdingScore             float64            `json:"min_crowding_score"`
+	StalenessATR                 float64            `json:"staleness_atr"`
+	RequireVolumeConfirm         bool               `json:"require_volume_confirm"`
+	RequireRejection             bool               `json:"require_rejection"`
+	RequireConfirmation          bool               `json:"require_confirmation"`
+	RequireRetest                bool               `json:"require_retest"`
+	AllowBreakoutCandleEntry     bool               `json:"allow_breakout_candle_entry"`
+	RequireCrowdingEvidence      bool               `json:"require_crowding_evidence"`
+	RequireAIHigh                bool               `json:"require_ai_high"`
+	RequireM5RejectionConfirm    bool               `json:"require_m5_rejection_confirm"`
+	RequireM5ContinuationConfirm bool               `json:"require_m5_continuation_confirm"`
+	M5ConfirmationMode           M5ConfirmationMode `json:"m5_confirmation_mode"`
+	Reason                       string             `json:"reason"`
+}
+
+func usesM5Confirmation(profile PlaybookThresholdProfile) bool {
+	return resolveM5ConfirmationMode(profile) != M5ConfirmationDisabled
+}
+
+func resolveM5ConfirmationMode(profile PlaybookThresholdProfile) M5ConfirmationMode {
+	if !profile.RequireM5RejectionConfirm && !profile.RequireM5ContinuationConfirm {
+		return M5ConfirmationDisabled
+	}
+
+	switch profile.M5ConfirmationMode {
+	case M5ConfirmationWatchOnlyHint, M5ConfirmationSoftConfirm, M5ConfirmationHardConfirm:
+		return profile.M5ConfirmationMode
+	default:
+		return M5ConfirmationWatchOnlyHint
+	}
+}
+
+func normalizePlaybookThresholdProfile(profile PlaybookThresholdProfile) PlaybookThresholdProfile {
+	profile.M5ConfirmationMode = resolveM5ConfirmationMode(profile)
+	return profile
 }
 
 func resolvePlaybookProfileBaseline(playbook Playbook) (PlaybookThresholdProfile, bool) {
@@ -105,5 +128,5 @@ func GetPlaybookThresholdProfile(playbook Playbook, policy MarketPolicy, tier Ti
 		profile.Reason = fmt.Sprintf("%s (Tier C tightened)", profile.Reason)
 	}
 
-	return profile
+	return normalizePlaybookThresholdProfile(profile)
 }
