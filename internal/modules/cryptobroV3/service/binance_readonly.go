@@ -80,6 +80,50 @@ func (s *BinanceReadonlyService) withRetry(ctx context.Context, op func(context.
 	return lastErr
 }
 
+func parseBinanceStatFloat(raw string) (float64, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 0, fmt.Errorf("empty numeric field")
+	}
+	return strconv.ParseFloat(trimmed, 64)
+}
+
+func buildTicker24h(item *futures.PriceChangeStats) (dto.Ticker24h, bool) {
+	if item == nil {
+		return dto.Ticker24h{}, false
+	}
+
+	pricePercent, err := parseBinanceStatFloat(item.PriceChangePercent)
+	if err != nil {
+		return dto.Ticker24h{}, false
+	}
+	lastPrice, err := parseBinanceStatFloat(item.LastPrice)
+	if err != nil {
+		return dto.Ticker24h{}, false
+	}
+	volume, err := parseBinanceStatFloat(item.Volume)
+	if err != nil {
+		return dto.Ticker24h{}, false
+	}
+
+	quoteVol, err := parseBinanceStatFloat(item.QuoteVolume)
+	if err != nil {
+		if strings.HasSuffix(strings.ToUpper(strings.TrimSpace(item.Symbol)), "USDT") && lastPrice > 0 && volume > 0 {
+			quoteVol = volume * lastPrice
+		} else {
+			return dto.Ticker24h{}, false
+		}
+	}
+
+	return dto.Ticker24h{
+		Symbol:             item.Symbol,
+		PriceChangePercent: pricePercent,
+		LastPrice:          lastPrice,
+		Volume:             volume,
+		QuoteVolume:        quoteVol,
+	}, true
+}
+
 func parseFuturesCandle(symbol, interval string, k *futures.Kline) (dto.Candle, error) {
 	open, err := strconv.ParseFloat(k.Open, 64)
 	if err != nil {
@@ -186,30 +230,15 @@ func (s *BinanceReadonlyService) FetchAllFuturesTickers24h(ctx context.Context) 
 
 	var tickers []dto.Ticker24h
 	for _, item := range stats {
-		pricePercent, err := strconv.ParseFloat(item.PriceChangePercent, 64)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse 24h price change for %s: %w", item.Symbol, err)
+		ticker, ok := buildTicker24h(item)
+		if !ok {
+			continue
 		}
-		lastPrice, err := strconv.ParseFloat(item.LastPrice, 64)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse last price for %s: %w", item.Symbol, err)
-		}
-		volume, err := strconv.ParseFloat(item.Volume, 64)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse volume for %s: %w", item.Symbol, err)
-		}
-		quoteVol, err := strconv.ParseFloat(item.QuoteVolume, 64)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse quote volume for %s: %w", item.Symbol, err)
-		}
+		tickers = append(tickers, ticker)
+	}
 
-		tickers = append(tickers, dto.Ticker24h{
-			Symbol:             item.Symbol,
-			PriceChangePercent: pricePercent,
-			LastPrice:          lastPrice,
-			Volume:             volume,
-			QuoteVolume:        quoteVol,
-		})
+	if len(tickers) == 0 {
+		return nil, fmt.Errorf("all futures ticker stats were malformed or unusable")
 	}
 	return tickers, nil
 }
