@@ -10,6 +10,8 @@ type RuntimeSettings struct {
 	RequireFreshEntryForExecute              bool
 	WatchCooldownMinutes                     int
 	WatchDedupPriceToleranceBps              int
+	WatchRecheckMaxAgeMinutes                int
+	WatchRecheckBatchLimit                   int
 	MaxMarketDataConcurrency                 int
 	MaxCandidatePipelineConcurrency          int
 	MaxAIConcurrency                         int
@@ -93,6 +95,8 @@ var (
 		RequireFreshEntryForExecute:              true,
 		WatchCooldownMinutes:                     30,
 		WatchDedupPriceToleranceBps:              50,
+		WatchRecheckMaxAgeMinutes:                12,
+		WatchRecheckBatchLimit:                   6,
 		MaxMarketDataConcurrency:                 5,
 		MaxCandidatePipelineConcurrency:          0,
 		MaxAIConcurrency:                         3,

@@ -798,16 +798,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 
 	// Build context and run Staleness Check and Final Execution Gates for all candidates
 	var decisions []FinalDecision
-	type candContext struct {
-		quantResult     QuantResult
-		auditResponse   dto.AIAuditResponse
-		stalenessRes    StalenessResult
-		localGateResult LocalGateResult
-		planReview      PlanReview
-		latestPrice     float64
-		aiSkipped       bool
-	}
-	ctxMap := make(map[string]candContext)
+	ctxMap := make(map[string]scanCandidateContext)
 	totalAISyntheticLocalGate := 0
 	totalAISkippedQuota := 0
 
@@ -817,97 +808,31 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		pair := qResult.Symbol
 		cache := candlesMap[pair]
 		lgRes := localGateMap[pair]
-
-		var auditResponse dto.AIAuditResponse
-		aiSkipped := false
-		if !lgRes.Passed {
-			decision := "REJECT"
-			reason := "LOCAL_GATE_FAILED"
-			if lgRes.Status == LOCAL_WATCH {
-				decision = "WAIT"
-				reason = "LOCAL_GATE_WATCH"
-			}
-			auditResponse = dto.AIAuditResponse{
-				Symbol:     pair,
-				IsApproved: false,
-				Decision:   decision,
-				Sentiment:  "NEUTRAL",
-				Reasoning:  "Local gate failed: " + lgRes.Reason,
-				Reason:     reason,
-				Source:     AIAuditSourceSyntheticLocalGate,
-			}
-			totalAISyntheticLocalGate++
-		} else {
-			resp, audited := aiAuditsMap[pair]
-			if audited {
-				auditResponse = resp
-				if strings.Contains(strings.ToUpper(auditResponse.Reason), "AI_ERROR") || strings.Contains(strings.ToUpper(auditResponse.Reasoning), "AI_ERROR") {
-					reason := firstNonEmpty(auditResponse.Reason, auditResponse.Decision, "AI_ERROR")
-					funnelSummary.Add(funnelStageAIError, reason)
-					playbookBlockers.Add(qResult.Playbook, funnelStageAIError, reason)
-				} else if auditResponse.Decision == "WAIT" {
-					reason := firstNonEmpty(auditResponse.Reason, auditResponse.Decision)
-					funnelSummary.Add(funnelStageAIWait, reason)
-					playbookBlockers.Add(qResult.Playbook, funnelStageAIWait, reason)
-				} else if auditResponse.Decision == "REJECT" {
-					reason := firstNonEmpty(auditResponse.Reason, auditResponse.Decision)
-					funnelSummary.Add(funnelStageAIReject, reason)
-					playbookBlockers.Add(qResult.Playbook, funnelStageAIReject, reason)
-				}
-			} else {
-				aiSkipped = true
-				auditResponse = dto.AIAuditResponse{
-					Symbol:     pair,
-					IsApproved: false,
-					Decision:   "WAIT",
-					Sentiment:  "NEUTRAL",
-					Reasoning:  "AI_SKIPPED: Exceeded policy MaxAICandidates quota limit",
-					Reason:     "AI_SKIPPED",
-					Source:     AIAuditSourceSyntheticQuota,
-				}
-				funnelSummary.Add(funnelStageAIWait, auditResponse.Reason)
-				playbookBlockers.Add(qResult.Playbook, funnelStageAIWait, auditResponse.Reason)
-				totalAISkippedQuota++
-			}
-		}
-
-		planReview := uc.planReconciliationUsecase.Reconcile(qResult, auditResponse)
-
-		latestPrice, latestPriceOK := uc.stalenessUsecase.ResolveLatestPrice(ctx, pair)
-		if !latestPriceOK {
-			latestPrice = 0
-		}
-
-		stalenessRes := uc.stalenessUsecase.Evaluate(qResult, planReview, policy, latestPrice)
-		GetGlobalMetrics().AddStalenessChecked(1)
-		if stalenessRes.IsStale {
-			GetGlobalMetrics().AddStalenessCount(1)
-		}
-
-		finalDecision := uc.finalGateUsecase.Evaluate(
+		auditResponse, audited := aiAuditsMap[pair]
+		evaluated := uc.evaluateSelectedCandidate(
+			ctx,
 			qResult,
-			lgRes,
-			auditResponse,
-			planReview,
-			stalenessRes,
 			policy,
-			latestPrice,
 			activeSignals,
 			historySignals,
-			cache.data.M15Candles,
+			cache.data,
+			lgRes,
+			auditResponse,
+			audited,
 		)
 
-		ctxMap[pair] = candContext{
-			quantResult:     qResult,
-			auditResponse:   auditResponse,
-			stalenessRes:    stalenessRes,
-			localGateResult: lgRes,
-			planReview:      planReview,
-			latestPrice:     latestPrice,
-			aiSkipped:       aiSkipped,
+		if evaluated.syntheticLocalGate {
+			totalAISyntheticLocalGate++
+		}
+		if evaluated.aiSkippedQuota {
+			totalAISkippedQuota++
+		}
+		if evaluated.recordAIFunnel {
+			recordAIAuditFunnelOutcome(qResult.Playbook, evaluated.context.auditResponse, funnelSummary, playbookBlockers)
 		}
 
-		decisions = append(decisions, finalDecision)
+		ctxMap[pair] = evaluated.context
+		decisions = append(decisions, evaluated.decision)
 	}
 	finalGateDuration := time.Since(finalGateStart)
 	metrics.SetLastFinalGateDuration(finalGateDuration)

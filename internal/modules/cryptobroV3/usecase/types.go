@@ -124,6 +124,7 @@ const (
 	VIRTUAL_TP2_HIT   Status = "VIRTUAL_TP2_HIT"
 	VIRTUAL_SL_HIT    Status = "VIRTUAL_SL_HIT"
 	VIRTUAL_EXPIRED   Status = "VIRTUAL_EXPIRED"
+	WATCH_PROMOTED    Status = "WATCH_PROMOTED"
 )
 
 type M5ConfirmationMode string

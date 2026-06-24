@@ -37,6 +37,7 @@ type ScannerConfig struct {
 // MonitoringConfig virtual position tracker rules
 type MonitoringConfig struct {
 	Enabled                     bool `json:"enabled"`
+	RecheckEnabled              bool `json:"recheck_enabled"`
 	IntervalSeconds             int  `json:"interval_seconds"`
 	MaxHoldMinutes              int  `json:"max_hold_minutes"`
 	MaxHoldM15Candles           int  `json:"max_hold_m15_candles"`
@@ -96,6 +97,8 @@ type StrategyRuntimeConfig struct {
 	RequireFreshEntryForExecute              bool    `json:"require_fresh_entry_for_execute"`
 	WatchCooldownMinutes                     int     `json:"watch_cooldown_minutes"`
 	WatchDedupPriceToleranceBps              int     `json:"watch_dedup_price_tolerance_bps"`
+	WatchRecheckMaxAgeMinutes                int     `json:"watch_recheck_max_age_minutes"`
+	WatchRecheckBatchLimit                   int     `json:"watch_recheck_batch_limit"`
 	EvaluationMinSampleWarning               int     `json:"min_sample_warning"`
 	EvaluationMinSampleMedium                int     `json:"min_sample_medium"`
 	EvaluationMinSampleHigh                  int     `json:"min_sample_high"`
@@ -336,6 +339,7 @@ func LoadConfigFromEnv() (*Config, error) {
 		},
 		Monitoring: MonitoringConfig{
 			Enabled:                     getEnvBool("MONITORING_ENABLED", true),
+			RecheckEnabled:              getEnvBool("MONITORING_RECHECK_ENABLED", true),
 			IntervalSeconds:             getEnvInt("MONITORING_INTERVAL_SECONDS", 60),
 			MaxHoldMinutes:              getEnvInt("MONITORING_MAX_HOLD_MINUTES", 120),
 			MaxHoldM15Candles:           getEnvInt("MONITORING_MAX_HOLD_M15_CANDLES", 8),
@@ -389,6 +393,8 @@ func LoadConfigFromEnv() (*Config, error) {
 			RequireFreshEntryForExecute:              getEnvBoolWithFallback("STRATEGY_REQUIRE_FRESH_ENTRY_FOR_EXECUTE", "REQUIRE_FRESH_ENTRY_FOR_EXECUTE", true),
 			WatchCooldownMinutes:                     getEnvIntWithFallback("STRATEGY_WATCH_COOLDOWN_MINUTES", "WATCH_COOLDOWN_MINUTES", 30),
 			WatchDedupPriceToleranceBps:              getEnvIntWithFallback("STRATEGY_WATCH_DEDUP_PRICE_TOLERANCE_BPS", "WATCH_DEDUP_PRICE_TOLERANCE_BPS", 50),
+			WatchRecheckMaxAgeMinutes:                getEnvInt("STRATEGY_WATCH_RECHECK_MAX_AGE_MINUTES", 12),
+			WatchRecheckBatchLimit:                   getEnvInt("STRATEGY_WATCH_RECHECK_BATCH_LIMIT", 6),
 			EvaluationMinSampleWarning:               getEnvIntWithFallback("STRATEGY_EVALUATION_MIN_SAMPLE_WARNING", "EVALUATION_MIN_SAMPLE_WARNING", 10),
 			EvaluationMinSampleMedium:                getEnvIntWithFallback("STRATEGY_EVALUATION_MIN_SAMPLE_MEDIUM", "EVALUATION_MIN_SAMPLE_MEDIUM", 20),
 			EvaluationMinSampleHigh:                  getEnvIntWithFallback("STRATEGY_EVALUATION_MIN_SAMPLE_HIGH", "EVALUATION_MIN_SAMPLE_HIGH", 50),
@@ -744,6 +750,12 @@ func ValidateConfig(cfg *Config) error {
 	if cfg.Strategy.WatchDedupPriceToleranceBps < 1 {
 		return fmt.Errorf("STRATEGY_WATCH_DEDUP_PRICE_TOLERANCE_BPS must be at least 1")
 	}
+	if cfg.Strategy.WatchRecheckMaxAgeMinutes < 1 {
+		return fmt.Errorf("STRATEGY_WATCH_RECHECK_MAX_AGE_MINUTES must be at least 1")
+	}
+	if cfg.Strategy.WatchRecheckBatchLimit < 1 {
+		return fmt.Errorf("STRATEGY_WATCH_RECHECK_BATCH_LIMIT must be at least 1")
+	}
 	if cfg.Strategy.EvaluationMinSampleWarning < 1 || cfg.Strategy.EvaluationMinSampleMedium < 1 || cfg.Strategy.EvaluationMinSampleHigh < 1 {
 		return fmt.Errorf("strategy evaluation sample thresholds must be at least 1")
 	}
@@ -947,6 +959,7 @@ func SafeConfigView(cfg *Config) map[string]any {
 		},
 		"monitoring": map[string]any{
 			"enabled":                cfg.Monitoring.Enabled,
+			"recheck_enabled":        cfg.Monitoring.RecheckEnabled,
 			"interval_seconds":       cfg.Monitoring.IntervalSeconds,
 			"max_hold_minutes":       cfg.Monitoring.MaxHoldMinutes,
 			"timeout_buffer_seconds": cfg.Monitoring.TimeoutBufferSeconds,
@@ -996,6 +1009,8 @@ func SafeConfigView(cfg *Config) map[string]any {
 			"require_fresh_entry_for_execute":              cfg.Strategy.RequireFreshEntryForExecute,
 			"watch_cooldown_minutes":                       cfg.Strategy.WatchCooldownMinutes,
 			"watch_dedup_price_tolerance_bps":              cfg.Strategy.WatchDedupPriceToleranceBps,
+			"watch_recheck_max_age_minutes":                cfg.Strategy.WatchRecheckMaxAgeMinutes,
+			"watch_recheck_batch_limit":                    cfg.Strategy.WatchRecheckBatchLimit,
 			"min_sample_warning":                           cfg.Strategy.EvaluationMinSampleWarning,
 			"min_sample_medium":                            cfg.Strategy.EvaluationMinSampleMedium,
 			"min_sample_high":                              cfg.Strategy.EvaluationMinSampleHigh,

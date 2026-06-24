@@ -233,7 +233,7 @@ func isActiveWatchStatus(journal WatchJournal, now time.Time) bool {
 
 func isClosedWatchStatus(status Status) bool {
 	switch status {
-	case VIRTUAL_TP2_HIT, VIRTUAL_SL_HIT, VIRTUAL_EXPIRED:
+	case VIRTUAL_TP2_HIT, VIRTUAL_SL_HIT, VIRTUAL_EXPIRED, WATCH_PROMOTED:
 		return true
 	default:
 		return false

@@ -289,6 +289,7 @@ func main() {
 	// Start Background Scan, Monitoring & Evaluation Workers
 	go startStartupScan(ctx, cfg, scannerUC, storageUC, opsNotificationUC)
 	go startBackgroundWorker(ctx, cfg, scannerUC, storageUC, feedbackUC, opsNotificationUC)
+	go startWatchRecheckWorker(ctx, cfg, scannerUC)
 	go startMonitoringWorker(ctx, cfg, monitoringUC)
 	go startEvaluationWorker(ctx, cfg, feedbackUC)
 
@@ -519,6 +520,68 @@ func startMonitoringWorker(ctx context.Context, cfg *config.Config, monitoringUC
 					slog.Error("Monitoring worker execution failed", "error", err)
 				}
 			}()
+		}
+	}
+}
+
+func startWatchRecheckWorker(ctx context.Context, cfg *config.Config, scannerUC *usecase.ScannerUsecase) {
+	if !cfg.Monitoring.Enabled || !cfg.Monitoring.RecheckEnabled {
+		slog.Info("Watch recheck worker disabled by config")
+		return
+	}
+
+	slog.Info("Starting watch recheck worker...")
+	usecase.RecheckWorkerRunning.Store(true)
+	defer usecase.RecheckWorkerRunning.Store(false)
+
+	ticker := time.NewTicker(time.Duration(cfg.Scanner.PollIntervalSeconds) * time.Second)
+	defer ticker.Stop()
+
+	recheckBoundaryDuration := 5 * time.Minute
+	primaryBoundaryDuration := time.Duration(cfg.Scanner.BoundaryMinutes) * time.Minute
+	lastRun := time.Now().Truncate(recheckBoundaryDuration)
+
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("Watch recheck worker stopped.")
+			return
+		case now := <-ticker.C:
+			boundary := now.Truncate(recheckBoundaryDuration)
+			bufferSec := cfg.Scanner.CloseCandleBufferSeconds
+			if bufferSec <= 0 {
+				bufferSec = 3
+			}
+			if primaryBoundaryDuration > 0 && boundary.Equal(boundary.Truncate(primaryBoundaryDuration)) {
+				continue
+			}
+			if !boundary.After(lastRun) || now.Sub(boundary) < time.Duration(bufferSec)*time.Second {
+				continue
+			}
+			lastRun = boundary
+
+			go func(boundary time.Time) {
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("PANIC RECOVERY in watch recheck worker", "panic", r)
+					}
+				}()
+
+				if !scannerRunning.CompareAndSwap(false, true) {
+					slog.Warn("Watch recheck skipped: primary scan pipeline already in progress")
+					return
+				}
+				defer scannerRunning.Store(false)
+
+				recheckCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Scanner.ContextTimeoutSeconds)*time.Second)
+				defer cancel()
+
+				if _, err := scannerUC.RunWatchRecheck(recheckCtx, dto.ScanRequest{TriggerTime: boundary}); err != nil {
+					slog.Error("Watch recheck worker execution failed", "boundary", boundary.Format("15:04:05"), "error", err)
+					usecase.GetGlobalMetrics().IncrementRecheckFail()
+					return
+				}
+			}(boundary)
 		}
 	}
 }

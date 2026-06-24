@@ -13,7 +13,11 @@ type MetricsRegistry struct {
 	// Counters and gauges
 	ScanSuccessCount              uint64
 	ScanFailCount                 uint64
+	RecheckSuccessCount           uint64
+	RecheckFailCount              uint64
+	RecheckPromotionCount         uint64
 	LastScanDurationMs            uint64
+	LastRecheckDurationMs         uint64
 	LastMarketDataMs              uint64
 	LastCandidateMs               uint64
 	LastAIBatchMs                 uint64
@@ -50,6 +54,7 @@ type MetricsRegistry struct {
 	// Timestamp trackers
 	LastScanTime       time.Time
 	LastSuccessScan    time.Time
+	LastRecheckTime    time.Time
 	LastEvaluationTime time.Time
 }
 
@@ -83,8 +88,24 @@ func (m *MetricsRegistry) IncrementScanFail() {
 	atomic.AddUint64(&m.ScanFailCount, 1)
 }
 
+func (m *MetricsRegistry) IncrementRecheckSuccess() {
+	atomic.AddUint64(&m.RecheckSuccessCount, 1)
+}
+
+func (m *MetricsRegistry) IncrementRecheckFail() {
+	atomic.AddUint64(&m.RecheckFailCount, 1)
+}
+
+func (m *MetricsRegistry) AddRecheckPromotionCount(val uint64) {
+	atomic.AddUint64(&m.RecheckPromotionCount, val)
+}
+
 func (m *MetricsRegistry) SetLastScanDuration(d time.Duration) {
 	atomic.StoreUint64(&m.LastScanDurationMs, uint64(d.Milliseconds()))
+}
+
+func (m *MetricsRegistry) SetLastRecheckDuration(d time.Duration) {
+	atomic.StoreUint64(&m.LastRecheckDurationMs, uint64(d.Milliseconds()))
 }
 
 func (m *MetricsRegistry) SetLastMarketDataDuration(d time.Duration) {
@@ -235,10 +256,16 @@ func (m *MetricsRegistry) SetLastEvaluationTime(t time.Time) {
 	m.LastEvaluationTime = t
 }
 
-func (m *MetricsRegistry) GetTimestamps() (lastScan, lastSuccess, lastEval time.Time) {
+func (m *MetricsRegistry) SetLastRecheckTime(t time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.LastRecheckTime = t
+}
+
+func (m *MetricsRegistry) GetTimestamps() (lastScan, lastSuccess, lastRecheck, lastEval time.Time) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.LastScanTime, m.LastSuccessScan, m.LastEvaluationTime
+	return m.LastScanTime, m.LastSuccessScan, m.LastRecheckTime, m.LastEvaluationTime
 }
 
 func (m *MetricsRegistry) GetAverageAILatencyMs() float64 {

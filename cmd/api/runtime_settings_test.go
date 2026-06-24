@@ -54,34 +54,38 @@ func TestBuildRuntimeSettingsMapsConfigSurfaces(t *testing.T) {
 	cfg.Strategy.RequireFreshEntryForExecute = false
 	cfg.Strategy.WatchCooldownMinutes = 401
 	cfg.Strategy.WatchDedupPriceToleranceBps = 402
-	cfg.Strategy.EvaluationMinSampleWarning = 403
-	cfg.Strategy.EvaluationMinSampleMedium = 404
-	cfg.Strategy.EvaluationMinSampleHigh = 405
+	cfg.Strategy.WatchRecheckMaxAgeMinutes = 403
+	cfg.Strategy.WatchRecheckBatchLimit = 404
+	cfg.Strategy.EvaluationMinSampleWarning = 405
+	cfg.Strategy.EvaluationMinSampleMedium = 406
+	cfg.Strategy.EvaluationMinSampleHigh = 407
 	cfg.Strategy.DebugSaveRawKlines = true
 	cfg.Strategy.RawKlinesDebugDir = "debug/custom"
-	cfg.Strategy.MaxMarketDataPrefetchSymbols = 406
-	cfg.Strategy.ScanRequestWeightBudget = 407
+	cfg.Strategy.MaxMarketDataPrefetchSymbols = 408
+	cfg.Strategy.ScanRequestWeightBudget = 409
 	cfg.Strategy.CompressionNeutralBreadthLower = 0.81
 	cfg.Strategy.CompressionNeutralBreadthUpper = 0.82
 	cfg.Strategy.CompressionMaxBBWidth = 0.83
+	cfg.Strategy.CompressionBBWidthPercentile = 0.84
+	cfg.Strategy.CompressionBBWidthLookback = 410
 	cfg.Strategy.CompressionZeroEligibleFallbackThreshold = 408
 	cfg.Strategy.BroaderVolatilitySampleFloor = 409
-	cfg.Strategy.FundingExtremeThreshold = 0.84
-	cfg.Strategy.ATRFallbackPercent = 0.85
-	cfg.Strategy.MinSLATRMultiplierBase = 0.86
-	cfg.Strategy.MinSLATRMultiplierReversal = 0.87
-	cfg.Strategy.MinSLATRMultiplierHighVol = 0.88
-	cfg.Strategy.RotationActivityThresholdDefault = 0.89
-	cfg.Strategy.RotationActivityThresholdAlt = 0.90
-	cfg.Strategy.RotationActivityThresholdDefensive = 0.91
-	cfg.Strategy.RotationActivityThresholdLowVol = 0.92
-	cfg.Strategy.RotationPrefetchRatioDefault = 0.93
-	cfg.Strategy.RotationPrefetchRatioAlt = 0.94
-	cfg.Strategy.RotationPrefetchRatioDefensive = 0.95
-	cfg.Strategy.StalenessPolicyScaleBase = 0.96
-	cfg.Strategy.StalenessPolicyScaleMin = 0.97
-	cfg.Strategy.StalenessPolicyScaleMax = 0.98
-	cfg.Strategy.StalenessLateThresholdMultiplier = 0.99
+	cfg.Strategy.FundingExtremeThreshold = 0.85
+	cfg.Strategy.ATRFallbackPercent = 0.86
+	cfg.Strategy.MinSLATRMultiplierBase = 0.87
+	cfg.Strategy.MinSLATRMultiplierReversal = 0.88
+	cfg.Strategy.MinSLATRMultiplierHighVol = 0.89
+	cfg.Strategy.RotationActivityThresholdDefault = 0.90
+	cfg.Strategy.RotationActivityThresholdAlt = 0.91
+	cfg.Strategy.RotationActivityThresholdDefensive = 0.92
+	cfg.Strategy.RotationActivityThresholdLowVol = 0.93
+	cfg.Strategy.RotationPrefetchRatioDefault = 0.94
+	cfg.Strategy.RotationPrefetchRatioAlt = 0.95
+	cfg.Strategy.RotationPrefetchRatioDefensive = 0.96
+	cfg.Strategy.StalenessPolicyScaleBase = 0.97
+	cfg.Strategy.StalenessPolicyScaleMin = 0.98
+	cfg.Strategy.StalenessPolicyScaleMax = 0.99
+	cfg.Strategy.StalenessLateThresholdMultiplier = 1.01
 	cfg.Strategy.StalenessBasePctChaos = 0.24
 	cfg.Strategy.StalenessBasePctHighVol = 0.25
 	cfg.Strategy.StalenessBasePctTierC = 0.26
@@ -98,17 +102,19 @@ func TestBuildRuntimeSettingsMapsConfigSurfaces(t *testing.T) {
 		RequireFreshEntryForExecute:              false,
 		WatchCooldownMinutes:                     401,
 		WatchDedupPriceToleranceBps:              402,
+		WatchRecheckMaxAgeMinutes:                403,
+		WatchRecheckBatchLimit:                   404,
 		MaxMarketDataConcurrency:                 11,
 		MaxCandidatePipelineConcurrency:          12,
 		MaxAIConcurrency:                         13,
 		AIAuditEnabled:                           false,
 		DecisionAuditEnabled:                     false,
-		MaxMarketDataPrefetchSymbols:             406,
-		ScanRequestWeightBudget:                  407,
+		MaxMarketDataPrefetchSymbols:             408,
+		ScanRequestWeightBudget:                  409,
 		MaxMonitoringCandleConcurrency:           14,
-		EvaluationMinSampleWarning:               403,
-		EvaluationMinSampleMedium:                404,
-		EvaluationMinSampleHigh:                  405,
+		EvaluationMinSampleWarning:               405,
+		EvaluationMinSampleMedium:                406,
+		EvaluationMinSampleHigh:                  407,
 		HealthStorageCheck:                       false,
 		HealthCheckTimeoutSeconds:                501,
 		DebugSaveRawKlines:                       true,
@@ -147,24 +153,26 @@ func TestBuildRuntimeSettingsMapsConfigSurfaces(t *testing.T) {
 		CompressionNeutralBreadthLower:           0.81,
 		CompressionNeutralBreadthUpper:           0.82,
 		CompressionMaxBBWidth:                    0.83,
+		CompressionBBWidthPercentile:             0.84,
+		CompressionBBWidthLookback:               410,
 		CompressionZeroEligibleFallbackThreshold: 408,
 		BroaderVolatilitySampleFloor:             409,
-		FundingExtremeThreshold:                  0.84,
-		ATRFallbackPercent:                       0.85,
-		MinSLATRMultiplierBase:                   0.86,
-		MinSLATRMultiplierReversal:               0.87,
-		MinSLATRMultiplierHighVol:                0.88,
-		RotationActivityThresholdDefault:         0.89,
-		RotationActivityThresholdAlt:             0.90,
-		RotationActivityThresholdDefensive:       0.91,
-		RotationActivityThresholdLowVol:          0.92,
-		RotationPrefetchRatioDefault:             0.93,
-		RotationPrefetchRatioAlt:                 0.94,
-		RotationPrefetchRatioDefensive:           0.95,
-		StalenessPolicyScaleBase:                 0.96,
-		StalenessPolicyScaleMin:                  0.97,
-		StalenessPolicyScaleMax:                  0.98,
-		StalenessLateThresholdMultiplier:         0.99,
+		FundingExtremeThreshold:                  0.85,
+		ATRFallbackPercent:                       0.86,
+		MinSLATRMultiplierBase:                   0.87,
+		MinSLATRMultiplierReversal:               0.88,
+		MinSLATRMultiplierHighVol:                0.89,
+		RotationActivityThresholdDefault:         0.90,
+		RotationActivityThresholdAlt:             0.91,
+		RotationActivityThresholdDefensive:       0.92,
+		RotationActivityThresholdLowVol:          0.93,
+		RotationPrefetchRatioDefault:             0.94,
+		RotationPrefetchRatioAlt:                 0.95,
+		RotationPrefetchRatioDefensive:           0.96,
+		StalenessPolicyScaleBase:                 0.97,
+		StalenessPolicyScaleMin:                  0.98,
+		StalenessPolicyScaleMax:                  0.99,
+		StalenessLateThresholdMultiplier:         1.01,
 		StalenessBasePctChaos:                    0.24,
 		StalenessBasePctHighVol:                  0.25,
 		StalenessBasePctTierC:                    0.26,

@@ -9,6 +9,8 @@ func BuildRuntimeSettings(cfg *config.Config) RuntimeSettings {
 		RequireFreshEntryForExecute:              cfg.Strategy.RequireFreshEntryForExecute,
 		WatchCooldownMinutes:                     cfg.Strategy.WatchCooldownMinutes,
 		WatchDedupPriceToleranceBps:              cfg.Strategy.WatchDedupPriceToleranceBps,
+		WatchRecheckMaxAgeMinutes:                cfg.Strategy.WatchRecheckMaxAgeMinutes,
+		WatchRecheckBatchLimit:                   cfg.Strategy.WatchRecheckBatchLimit,
 		MaxMarketDataConcurrency:                 cfg.Worker.MaxMarketDataConcurrency,
 		MaxCandidatePipelineConcurrency:          cfg.Worker.MaxCandidatePipelineConcurrency,
 		MaxAIConcurrency:                         cfg.Worker.MaxAIConcurrency,

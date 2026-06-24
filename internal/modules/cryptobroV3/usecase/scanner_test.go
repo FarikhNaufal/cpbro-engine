@@ -17,6 +17,7 @@ import (
 type mockMarketDataProvider struct {
 	tickers      []dto.Ticker24h
 	fundingRates map[string]float64
+	m5Candles    map[string][]dto.Candle
 	m15Candles   map[string][]dto.Candle
 	h1Candles    map[string][]dto.Candle
 	h4Candles    map[string][]dto.Candle
@@ -24,7 +25,11 @@ type mockMarketDataProvider struct {
 }
 
 func (m *mockMarketDataProvider) FetchClosedCandles(ctx context.Context, symbol string, interval string, limit int) ([]dto.Candle, error) {
-	if interval == "15m" {
+	if interval == "5m" {
+		if c, ok := m.m5Candles[symbol]; ok {
+			return c, nil
+		}
+	} else if interval == "15m" {
 		if c, ok := m.m15Candles[symbol]; ok {
 			return c, nil
 		}
@@ -63,7 +68,9 @@ func (m *mockMarketDataProvider) FetchOpenInterest(ctx context.Context, symbol s
 }
 
 func (m *mockMarketDataProvider) FetchHistoricalCandles(ctx context.Context, symbol string, interval string, startTime time.Time, endTime time.Time) ([]dto.Candle, error) {
-	if interval == "15m" {
+	if interval == "5m" {
+		return m.m5Candles[symbol], nil
+	} else if interval == "15m" {
 		return m.m15Candles[symbol], nil
 	} else if interval == "1h" {
 		return m.h1Candles[symbol], nil

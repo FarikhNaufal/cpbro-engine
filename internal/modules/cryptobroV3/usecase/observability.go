@@ -33,6 +33,7 @@ type RealtimeStatusProvider interface {
 // Global atomic variables for worker running statuses
 var (
 	ScanWorkerRunning       atomic.Bool
+	RecheckWorkerRunning    atomic.Bool
 	MonitoringWorkerRunning atomic.Bool
 	EvaluationWorkerRunning atomic.Bool
 )
@@ -48,9 +49,12 @@ type HealthStatus struct {
 	LastScanAgeSec           float64             `json:"last_scan_age_seconds"`
 	LastSuccessfulScan       time.Time           `json:"last_successful_scan"`
 	LastSuccessfulScanAgeSec float64             `json:"last_successful_scan_age_seconds"`
+	LastRecheckTime          time.Time           `json:"last_recheck_time"`
+	LastRecheckAgeSec        float64             `json:"last_recheck_age_seconds"`
 	LastEvaluationTime       time.Time           `json:"last_evaluation_time"`
 	LastEvaluationAgeSec     float64             `json:"last_evaluation_age_seconds"`
 	ScanWorkerRunning        bool                `json:"scan_worker_running"`
+	RecheckWorkerRunning     bool                `json:"recheck_worker_running"`
 	MonitoringWorkerRunning  bool                `json:"monitoring_worker_running"`
 	EvaluationWorkerRunning  bool                `json:"evaluation_worker_running"`
 	Metrics                  *SREMetrics         `json:"metrics"`
@@ -59,6 +63,7 @@ type HealthStatus struct {
 
 type SREMetrics struct {
 	ScanDurationMs                     uint64  `json:"scan_duration_ms"`
+	RecheckDurationMs                  uint64  `json:"recheck_duration_ms"`
 	MarketDataDurationMs               uint64  `json:"market_data_duration_ms"`
 	CandidatePipelineMs                uint64  `json:"candidate_pipeline_duration_ms"`
 	AIBatchDurationMs                  uint64  `json:"ai_batch_duration_ms"`
@@ -69,6 +74,9 @@ type SREMetrics struct {
 	EnrichedCandidateCount             uint64  `json:"enriched_candidate_count"`
 	ScanSuccessCount                   uint64  `json:"scan_success_count"`
 	ScanFailCount                      uint64  `json:"scan_fail_count"`
+	RecheckSuccessCount                uint64  `json:"recheck_success_count"`
+	RecheckFailCount                   uint64  `json:"recheck_fail_count"`
+	RecheckPromotionCount              uint64  `json:"recheck_promotion_count"`
 	TotalTickers                       uint64  `json:"total_tickers"`
 	UniversePassCount                  uint64  `json:"universe_pass_count"`
 	UniverseRejectCount                uint64  `json:"universe_reject_count"`
@@ -190,7 +198,7 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 
 	// 6. Calculate ages and metrics
 	reg := GetGlobalMetrics()
-	lastScan, lastSuccess, lastEval := reg.GetTimestamps()
+	lastScan, lastSuccess, lastRecheck, lastEval := reg.GetTimestamps()
 	now := time.Now()
 
 	lastScanAge := -1.0
@@ -208,8 +216,14 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 		lastEvalAge = now.Sub(lastEval).Seconds()
 	}
 
+	lastRecheckAge := -1.0
+	if !lastRecheck.IsZero() {
+		lastRecheckAge = now.Sub(lastRecheck).Seconds()
+	}
+
 	metrics := &SREMetrics{
 		ScanDurationMs:                     atomic.LoadUint64(&reg.LastScanDurationMs),
+		RecheckDurationMs:                  atomic.LoadUint64(&reg.LastRecheckDurationMs),
 		MarketDataDurationMs:               atomic.LoadUint64(&reg.LastMarketDataMs),
 		CandidatePipelineMs:                atomic.LoadUint64(&reg.LastCandidateMs),
 		AIBatchDurationMs:                  atomic.LoadUint64(&reg.LastAIBatchMs),
@@ -220,6 +234,9 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 		EnrichedCandidateCount:             atomic.LoadUint64(&reg.LastEnrichedCount),
 		ScanSuccessCount:                   atomic.LoadUint64(&reg.ScanSuccessCount),
 		ScanFailCount:                      atomic.LoadUint64(&reg.ScanFailCount),
+		RecheckSuccessCount:                atomic.LoadUint64(&reg.RecheckSuccessCount),
+		RecheckFailCount:                   atomic.LoadUint64(&reg.RecheckFailCount),
+		RecheckPromotionCount:              atomic.LoadUint64(&reg.RecheckPromotionCount),
 		TotalTickers:                       atomic.LoadUint64(&reg.TotalTickers),
 		UniversePassCount:                  atomic.LoadUint64(&reg.UniversePass),
 		UniverseRejectCount:                atomic.LoadUint64(&reg.UniverseReject),
@@ -256,9 +273,12 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 		LastScanAgeSec:           lastScanAge,
 		LastSuccessfulScan:       lastSuccess,
 		LastSuccessfulScanAgeSec: lastSuccessAge,
+		LastRecheckTime:          lastRecheck,
+		LastRecheckAgeSec:        lastRecheckAge,
 		LastEvaluationTime:       lastEval,
 		LastEvaluationAgeSec:     lastEvalAge,
 		ScanWorkerRunning:        ScanWorkerRunning.Load(),
+		RecheckWorkerRunning:     RecheckWorkerRunning.Load(),
 		MonitoringWorkerRunning:  MonitoringWorkerRunning.Load(),
 		EvaluationWorkerRunning:  EvaluationWorkerRunning.Load(),
 		Metrics:                  metrics,

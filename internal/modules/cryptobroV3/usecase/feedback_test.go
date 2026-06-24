@@ -567,6 +567,51 @@ func TestFeedback_WatchMetrics_ExcludeActiveVirtualTP1AndUseRealizedPnL(t *testi
 	}
 }
 
+func TestFeedback_WatchPromotedExcludedFromVirtualWatchMetrics(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &mockFeedbackStorageRepo{
+		watch: []usecase.WatchJournal{
+			{
+				ID:            "watch_promoted",
+				Playbook:      usecase.LIQUIDITY_SWEEP_REVERSAL,
+				Direction:     usecase.LONG,
+				Status:        usecase.WATCH_PROMOTED,
+				EntryPrice:    100,
+				TP1:           105,
+				TP2:           110,
+				StopLoss:      95,
+				CreatedAt:     now.Add(-20 * time.Minute),
+				ClosedAt:      now.Add(-10 * time.Minute),
+				PnlPercentage: 9.0,
+			},
+			{
+				ID:            "watch_virtual_tp2",
+				Playbook:      usecase.LIQUIDITY_SWEEP_REVERSAL,
+				Direction:     usecase.LONG,
+				Status:        usecase.VIRTUAL_TP2_HIT,
+				EntryPrice:    100,
+				TP1:           105,
+				TP2:           110,
+				StopLoss:      95,
+				CreatedAt:     now.Add(-40 * time.Minute),
+				ClosedAt:      now.Add(-5 * time.Minute),
+				PnlPercentage: 7.5,
+			},
+		},
+	}
+
+	fb := usecase.NewFeedbackUsecase(usecase.NewStorageUsecase(repo))
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if repo.report == nil {
+		t.Fatal("expected report to be saved")
+	}
+	if repo.report.Metrics["watch_finalized"] != 1 {
+		t.Fatalf("expected only finalized virtual watch outcomes to be counted, got %v", repo.report.Metrics["watch_finalized"])
+	}
+}
+
 // 5. Test Trend Pullback many SL with low ADX
 func TestFeedback_TrendPullbackLowADX(t *testing.T) {
 	// 15 signals
