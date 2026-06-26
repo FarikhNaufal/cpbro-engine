@@ -87,22 +87,22 @@ func resolveRotationActivityThreshold(policy MarketPolicy) float64 {
 		if settings.RotationActivityThresholdAlt > 0 {
 			return settings.RotationActivityThresholdAlt
 		}
-		return 0.45
+		return defaultRotationActivityThresholdAlt
 	case RISK_OFF, BTC_CHAOS, HIGH_VOL:
 		if settings.RotationActivityThresholdDefensive > 0 {
 			return settings.RotationActivityThresholdDefensive
 		}
-		return 0.65
+		return defaultRotationActivityThresholdDefensive
 	case CHOP_RANGE, LOW_VOL:
 		if settings.RotationActivityThresholdLowVol > 0 {
 			return settings.RotationActivityThresholdLowVol
 		}
-		return 0.50
+		return defaultRotationActivityThresholdLowVol
 	default:
 		if settings.RotationActivityThresholdDefault > 0 {
 			return settings.RotationActivityThresholdDefault
 		}
-		return 0.55
+		return defaultRotationActivityThresholdDefault
 	}
 }
 
@@ -114,20 +114,20 @@ func resolveRotationPrefetchSlots(policy MarketPolicy, prefetchLimit int, rotati
 	settings := getRuntimeSettings()
 	ratio := settings.RotationPrefetchRatioDefault
 	if ratio <= 0 {
-		ratio = 0.15
+		ratio = defaultRotationPrefetchRatio
 	}
 	switch policy.EffectiveRegime() {
 	case ALT_SUPPORTIVE, COMPRESSION:
 		if settings.RotationPrefetchRatioAlt > 0 {
 			ratio = settings.RotationPrefetchRatioAlt
 		} else {
-			ratio = 0.20
+			ratio = defaultRotationPrefetchRatioAlt
 		}
 	case RISK_OFF, BTC_CHAOS, HIGH_VOL:
 		if settings.RotationPrefetchRatioDefensive > 0 {
 			ratio = settings.RotationPrefetchRatioDefensive
 		} else {
-			ratio = 0.10
+			ratio = defaultRotationPrefetchRatioDefensive
 		}
 	}
 

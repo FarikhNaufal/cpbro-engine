@@ -6,7 +6,15 @@ import (
 	"time"
 )
 
-const defaultMonitoringMaxHoldMinutes = 120
+const (
+	defaultMonitoringMaxHoldMinutes = 120
+	safetyADXExpansionCeiling       = 30.0
+	defaultScanBoundaryMinutes      = 15
+	defaultClosedCandleTimeframe    = 15 * time.Minute
+	defaultClosedCandleCacheTTL     = 15 * time.Second
+	defaultOpenInterestCacheTTL     = 30 * time.Second
+	closedCandleAvailabilityFactor  = 2
+)
 
 func getMonitoringMaxHoldMinutes() int {
 	minutes := getRuntimeSettings().MonitoringMaxHoldMinutes
@@ -18,6 +26,18 @@ func getMonitoringMaxHoldMinutes() int {
 
 func getMonitoringMaxHoldDuration() time.Duration {
 	return time.Duration(getMonitoringMaxHoldMinutes()) * time.Minute
+}
+
+func getClosedCandleFreshnessDuration() time.Duration {
+	boundaryMinutes := getRuntimeSettings().ScanBoundaryMinutes
+	if boundaryMinutes <= 0 {
+		boundaryMinutes = defaultScanBoundaryMinutes
+	}
+	return time.Duration(boundaryMinutes*closedCandleAvailabilityFactor) * time.Minute
+}
+
+func GetClosedCandleFreshnessDurationForExternal() time.Duration {
+	return getClosedCandleFreshnessDuration()
 }
 
 func getMonitoringMaxHoldLabel() string {

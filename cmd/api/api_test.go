@@ -136,6 +136,59 @@ func TestTryStartBackgroundRunPreventsOverlap(t *testing.T) {
 	}
 }
 
+func TestEvaluateWatchRecheckTick(t *testing.T) {
+	recheckBoundary := 5 * time.Minute
+	primaryBoundary := 15 * time.Minute
+	closeBuffer := 3 * time.Second
+	base := time.Date(2026, 6, 26, 10, 0, 0, 0, time.UTC)
+
+	t.Run("skip at primary boundary", func(t *testing.T) {
+		now := base.Add(15 * time.Minute).Add(4 * time.Second)
+		decision := evaluateWatchRecheckTick(now, base, recheckBoundary, primaryBoundary, closeBuffer)
+		if decision.ShouldRun {
+			t.Fatal("expected primary boundary to be skipped")
+		}
+		if decision.SkipReason != "primary_boundary" {
+			t.Fatalf("expected primary_boundary skip, got %s", decision.SkipReason)
+		}
+	})
+
+	t.Run("skip before buffer elapsed", func(t *testing.T) {
+		now := base.Add(5 * time.Minute).Add(2 * time.Second)
+		decision := evaluateWatchRecheckTick(now, base, recheckBoundary, primaryBoundary, closeBuffer)
+		if decision.ShouldRun {
+			t.Fatal("expected close buffer to block recheck")
+		}
+		if decision.SkipReason != "close_buffer_not_elapsed" {
+			t.Fatalf("expected close_buffer_not_elapsed, got %s", decision.SkipReason)
+		}
+	})
+
+	t.Run("run after buffer elapsed on non primary boundary", func(t *testing.T) {
+		now := base.Add(5 * time.Minute).Add(4 * time.Second)
+		decision := evaluateWatchRecheckTick(now, base, recheckBoundary, primaryBoundary, closeBuffer)
+		if !decision.ShouldRun {
+			t.Fatalf("expected recheck to run, got skip=%s", decision.SkipReason)
+		}
+		expectedBoundary := base.Add(5 * time.Minute)
+		if !decision.Boundary.Equal(expectedBoundary) {
+			t.Fatalf("expected boundary %v, got %v", expectedBoundary, decision.Boundary)
+		}
+	})
+
+	t.Run("skip duplicate boundary", func(t *testing.T) {
+		lastRun := base.Add(10 * time.Minute)
+		now := base.Add(10 * time.Minute).Add(7 * time.Second)
+		decision := evaluateWatchRecheckTick(now, lastRun, recheckBoundary, primaryBoundary, closeBuffer)
+		if decision.ShouldRun {
+			t.Fatal("expected duplicate boundary to be skipped")
+		}
+		if decision.SkipReason != "already_processed_boundary" {
+			t.Fatalf("expected already_processed_boundary, got %s", decision.SkipReason)
+		}
+	})
+}
+
 type mockAPITestAIAuditor struct{}
 
 func (m *mockAPITestAIAuditor) AuditCandidate(ctx context.Context, req dto.AIAuditRequest) (*dto.AIAuditResponse, error) {
@@ -183,7 +236,7 @@ func TestAPIRoutes(t *testing.T) {
 	scoringUC := usecase.NewScoringUsecase()
 	candidateArbiterUC := usecase.NewCandidateArbiterUsecase()
 	localGateUC := usecase.NewLocalGateUsecase()
-	aiCandidateSelectorUC := usecase.NewAICandidateSelectorUsecase(60.0)
+	aiCandidateSelectorUC := usecase.NewAICandidateSelectorUsecase(7.5)
 	aiAuditorUC := usecase.NewAIAuditorUsecase(&mockAPITestAIAuditor{}, storageUC)
 	planReconciliationUC := usecase.NewPlanReconciliationUsecase()
 	stalenessUC := usecase.NewStalenessUsecase(30 * time.Minute)
@@ -377,7 +430,7 @@ func TestSwaggerRouteEnabled(t *testing.T) {
 		usecase.NewScoringUsecase(),
 		usecase.NewCandidateArbiterUsecase(),
 		usecase.NewLocalGateUsecase(),
-		usecase.NewAICandidateSelectorUsecase(60.0),
+		usecase.NewAICandidateSelectorUsecase(7.5),
 		usecase.NewAIAuditorUsecase(&mockAPITestAIAuditor{}, storageUC),
 		usecase.NewPlanReconciliationUsecase(),
 		usecase.NewStalenessUsecase(30*time.Minute),
@@ -397,7 +450,7 @@ func TestSwaggerRouteEnabled(t *testing.T) {
 		usecase.NewScoringUsecase(),
 		usecase.NewCandidateArbiterUsecase(),
 		usecase.NewLocalGateUsecase(),
-		usecase.NewAICandidateSelectorUsecase(60.0),
+		usecase.NewAICandidateSelectorUsecase(7.5),
 		usecase.NewAIAuditorUsecase(&mockAPITestAIAuditor{}, storageUC),
 		usecase.NewPlanReconciliationUsecase(),
 		usecase.NewStalenessUsecase(30*time.Minute),
@@ -448,7 +501,7 @@ func TestSwaggerRouteDisabled(t *testing.T) {
 		usecase.NewScoringUsecase(),
 		usecase.NewCandidateArbiterUsecase(),
 		usecase.NewLocalGateUsecase(),
-		usecase.NewAICandidateSelectorUsecase(60.0),
+		usecase.NewAICandidateSelectorUsecase(7.5),
 		usecase.NewAIAuditorUsecase(&mockAPITestAIAuditor{}, storageUC),
 		usecase.NewPlanReconciliationUsecase(),
 		usecase.NewStalenessUsecase(30*time.Minute),
@@ -468,7 +521,7 @@ func TestSwaggerRouteDisabled(t *testing.T) {
 		usecase.NewScoringUsecase(),
 		usecase.NewCandidateArbiterUsecase(),
 		usecase.NewLocalGateUsecase(),
-		usecase.NewAICandidateSelectorUsecase(60.0),
+		usecase.NewAICandidateSelectorUsecase(7.5),
 		usecase.NewAIAuditorUsecase(&mockAPITestAIAuditor{}, storageUC),
 		usecase.NewPlanReconciliationUsecase(),
 		usecase.NewStalenessUsecase(30*time.Minute),

@@ -108,7 +108,7 @@ func TestBacktestEngine_Run(t *testing.T) {
 	scoringUC := usecase.NewScoringUsecase()
 	candidateArbiterUC := usecase.NewCandidateArbiterUsecase()
 	localGateUC := usecase.NewLocalGateUsecase()
-	aiCandidateSelectorUC := usecase.NewAICandidateSelectorUsecase(60.0)
+	aiCandidateSelectorUC := usecase.NewAICandidateSelectorUsecase(7.5)
 	aiAuditorUC := usecase.NewAIAuditorUsecase(&mockAPITestAIAuditor{}, storageUC)
 	planReconciliationUC := usecase.NewPlanReconciliationUsecase()
 	stalenessUC := usecase.NewStalenessUsecase(30 * time.Minute)

@@ -15,6 +15,7 @@ type ArbiterSelectedDetail struct {
 	StalenessStatus string `json:"staleness_status"`
 	FinalStatus     string `json:"final_status"`
 	FinalReason     string `json:"final_reason"`
+	DecisionBrief   string `json:"decision_brief,omitempty"`
 }
 
 type FunnelReasonCount struct {

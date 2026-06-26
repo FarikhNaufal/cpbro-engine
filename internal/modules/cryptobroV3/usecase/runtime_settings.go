@@ -1,20 +1,29 @@
 package usecase
 
 import (
+	"cpbro-engine/internal/modules/cryptobroV3/config"
 	"sync"
 )
 
 type RuntimeSettings struct {
+	ScanBoundaryMinutes                      int
+	ScanCloseCandleBufferSeconds             int
+	ScanPreventOverlap                       bool
 	MonitoringMaxHoldMinutes                 int
 	RequireAIHighForExecute                  bool
 	RequireFreshEntryForExecute              bool
 	WatchCooldownMinutes                     int
 	WatchDedupPriceToleranceBps              int
+	WatchRecheckBoundaryMinutes              int
 	WatchRecheckMaxAgeMinutes                int
 	WatchRecheckBatchLimit                   int
+	WatchRecheckAllowedPlaybooks             []string
+	WatchRecheckAllowedReasonTokens          []string
+	WatchRecheckBlockedReasonTokens          []string
 	MaxMarketDataConcurrency                 int
 	MaxCandidatePipelineConcurrency          int
 	MaxAIConcurrency                         int
+	GeminiMaxCandidatesDefault               int
 	AIAuditEnabled                           bool
 	DecisionAuditEnabled                     bool
 	MaxMarketDataPrefetchSymbols             int
@@ -27,6 +36,11 @@ type RuntimeSettings struct {
 	HealthCheckTimeoutSeconds                int
 	DebugSaveRawKlines                       bool
 	RawKlinesDebugDir                        string
+	LatestResultFile                         string
+	SignalJournalFile                        string
+	WatchJournalFile                         string
+	DecisionAuditFile                        string
+	HealthSnapshotFile                       string
 	UniverseTierAMinQuoteVolume              float64
 	UniverseTierBMinQuoteVolume              float64
 	UniverseTierCMinVolume                   float64
@@ -90,16 +104,24 @@ type RuntimeSettings struct {
 var (
 	runtimeSettingsMu sync.RWMutex
 	runtimeSettings   = RuntimeSettings{
+		ScanBoundaryMinutes:                      15,
+		ScanCloseCandleBufferSeconds:             3,
+		ScanPreventOverlap:                       true,
 		MonitoringMaxHoldMinutes:                 120,
 		RequireAIHighForExecute:                  true,
 		RequireFreshEntryForExecute:              true,
 		WatchCooldownMinutes:                     30,
 		WatchDedupPriceToleranceBps:              50,
+		WatchRecheckBoundaryMinutes:              5,
 		WatchRecheckMaxAgeMinutes:                12,
 		WatchRecheckBatchLimit:                   6,
+		WatchRecheckAllowedPlaybooks:             []string{"TREND_PULLBACK", "LIQUIDITY_SWEEP_REVERSAL", "COMPRESSION_BREAKOUT_RETEST"},
+		WatchRecheckAllowedReasonTokens:          []string{"AI DECISION IS WAIT", "AI_SKIPPED", "WATCH_ONLY", "WAIT_RETEST", "AI CONFIDENCE", "LOCAL_GATE_WATCH", "M5"},
+		WatchRecheckBlockedReasonTokens:          []string{"ACTIVE_MONITORING_EXISTS", "OPPOSITE_SIGNAL_CONFLICT", "LOWER_PRIORITY_CONFLICT", "DUPLICATE_SIGNAL_BUCKET", "SYMBOL_COOLDOWN_ACTIVE", "MAX_FINAL_EXECUTE_LIMIT"},
 		MaxMarketDataConcurrency:                 5,
 		MaxCandidatePipelineConcurrency:          0,
 		MaxAIConcurrency:                         3,
+		GeminiMaxCandidatesDefault:               3,
 		AIAuditEnabled:                           true,
 		DecisionAuditEnabled:                     true,
 		MaxMarketDataPrefetchSymbols:             0,
@@ -111,7 +133,12 @@ var (
 		HealthStorageCheck:                       true,
 		HealthCheckTimeoutSeconds:                2,
 		DebugSaveRawKlines:                       false,
-		RawKlinesDebugDir:                        "debug/klines",
+		RawKlinesDebugDir:                        config.DefaultRawKlinesDebugDir,
+		LatestResultFile:                         config.DefaultLatestResultFile,
+		SignalJournalFile:                        config.DefaultSignalJournalFile,
+		WatchJournalFile:                         config.DefaultWatchJournalFile,
+		DecisionAuditFile:                        config.DefaultDecisionAuditFile,
+		HealthSnapshotFile:                       config.DefaultHealthSnapshotFile,
 		UniverseTierAMinQuoteVolume:              150000000.0,
 		UniverseTierBMinQuoteVolume:              50000000.0,
 		UniverseTierCMinVolume:                   15000000.0,
@@ -177,6 +204,9 @@ func SetRuntimeSettings(settings RuntimeSettings) {
 	runtimeSettingsMu.Lock()
 	defer runtimeSettingsMu.Unlock()
 	settings.UniverseDefaultSymbols = append([]string(nil), settings.UniverseDefaultSymbols...)
+	settings.WatchRecheckAllowedPlaybooks = append([]string(nil), settings.WatchRecheckAllowedPlaybooks...)
+	settings.WatchRecheckAllowedReasonTokens = append([]string(nil), settings.WatchRecheckAllowedReasonTokens...)
+	settings.WatchRecheckBlockedReasonTokens = append([]string(nil), settings.WatchRecheckBlockedReasonTokens...)
 	runtimeSettings = settings
 }
 
@@ -185,6 +215,9 @@ func getRuntimeSettings() RuntimeSettings {
 	settings := runtimeSettings
 	runtimeSettingsMu.RUnlock()
 	settings.UniverseDefaultSymbols = append([]string(nil), settings.UniverseDefaultSymbols...)
+	settings.WatchRecheckAllowedPlaybooks = append([]string(nil), settings.WatchRecheckAllowedPlaybooks...)
+	settings.WatchRecheckAllowedReasonTokens = append([]string(nil), settings.WatchRecheckAllowedReasonTokens...)
+	settings.WatchRecheckBlockedReasonTokens = append([]string(nil), settings.WatchRecheckBlockedReasonTokens...)
 
 	return settings
 }

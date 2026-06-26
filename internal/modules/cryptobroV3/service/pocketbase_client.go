@@ -23,6 +23,8 @@ const (
 	PocketBaseAuthModeAdmin     PocketBaseAuthMode = "admin"
 )
 
+const defaultPocketBaseClientTimeout = 10 * time.Second
+
 type PocketBaseClient struct {
 	baseURL    string
 	httpClient *http.Client
@@ -60,7 +62,7 @@ func NewPocketBaseClientWithHTTPClient(baseURL string, httpClient *http.Client, 
 		return nil, fmt.Errorf("invalid pocketbase baseURL: %w", err)
 	}
 	if timeout <= 0 {
-		timeout = 10 * time.Second
+		timeout = defaultPocketBaseClientTimeout
 	}
 	if strings.TrimSpace(token) == "" && (authMode == PocketBaseAuthModeToken) {
 		return nil, errors.New("pocketbase auth mode token requires token")

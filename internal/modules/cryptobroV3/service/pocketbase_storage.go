@@ -18,6 +18,12 @@ import (
 	"cpbro-engine/internal/modules/cryptobroV3/usecase"
 )
 
+const (
+	defaultPocketBaseReadTimeout  = 10 * time.Second
+	defaultPocketBaseWriteTimeout = 15 * time.Second
+	defaultPocketBaseSaveTimeout  = 20 * time.Second
+)
+
 // PocketBaseStorageService stores SignalJournal/WatchJournal + EvaluationReport into PocketBase collections:
 // - signal_journals
 // - watch_journals
@@ -116,7 +122,7 @@ func (s *PocketBaseStorageService) LoadSignalJournal() ([]usecase.SignalJournal,
 		return localJournal, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultPocketBaseReadTimeout)
 	defer cancel()
 
 	items, err := s.listAll(ctx, "signal_journals", url.Values{
@@ -165,7 +171,7 @@ func (s *PocketBaseStorageService) SaveSignalJournal(journal []usecase.SignalJou
 }
 
 func (s *PocketBaseStorageService) saveSignalJournalUnlocked(journal []usecase.SignalJournal) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultPocketBaseSaveTimeout)
 	defer cancel()
 
 	existing, err := s.mapSignalIDToRecords(ctx)
@@ -256,7 +262,7 @@ func (s *PocketBaseStorageService) AppendSignalJournal(entry usecase.SignalJourn
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultPocketBaseWriteTimeout)
 	defer cancel()
 
 	if strings.TrimSpace(entry.ID) == "" {
@@ -343,7 +349,7 @@ func (s *PocketBaseStorageService) LoadWatchJournal() ([]usecase.WatchJournal, e
 		return localJournal, nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultPocketBaseReadTimeout)
 	defer cancel()
 
 	items, err := s.listAll(ctx, "watch_journals", url.Values{
@@ -384,7 +390,7 @@ func (s *PocketBaseStorageService) FindWatchJournalCandidates(probe usecase.Watc
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultPocketBaseReadTimeout)
 	defer cancel()
 
 	q := url.Values{}
@@ -444,7 +450,7 @@ func (s *PocketBaseStorageService) AppendWatchJournal(entry usecase.WatchJournal
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultPocketBaseWriteTimeout)
 	defer cancel()
 
 	if strings.TrimSpace(entry.ID) == "" {
@@ -528,7 +534,7 @@ func (s *PocketBaseStorageService) UpsertWatchJournalEntries(entries []usecase.W
 // --- Evaluation ---
 
 func (s *PocketBaseStorageService) LoadEvaluationReport() (*usecase.EvaluationReport, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultPocketBaseReadTimeout)
 	defer cancel()
 
 	var list pbListResponse
@@ -556,7 +562,7 @@ func (s *PocketBaseStorageService) SaveEvaluationReport(report *usecase.Evaluati
 		return errors.New("evaluation report is nil")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultPocketBaseSaveTimeout)
 	defer cancel()
 
 	evalID := makeEvaluationID(report.GeneratedAt)
@@ -730,7 +736,7 @@ func cloneValues(v url.Values) url.Values {
 }
 
 func (s *PocketBaseStorageService) saveJournalUnlocked(collection string, journal []usecase.SignalJournal) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultPocketBaseSaveTimeout)
 	defer cancel()
 
 	existing, err := s.mapSignalIDToRecordsForCollection(ctx, collection)
@@ -816,7 +822,7 @@ func (s *PocketBaseStorageService) saveJournalUnlocked(collection string, journa
 }
 
 func (s *PocketBaseStorageService) upsertJournalEntriesUnlocked(collection string, entries []usecase.SignalJournal) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultPocketBaseSaveTimeout)
 	defer cancel()
 
 	for _, entry := range entries {

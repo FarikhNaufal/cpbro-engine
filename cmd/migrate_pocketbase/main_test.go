@@ -49,11 +49,13 @@ func TestMigrateSignalJournal_UpsertsToPocketBase(t *testing.T) {
 	}
 
 	tmp := t.TempDir()
-	jsonSt, err := service.NewJSONStorageService(tmp)
+	jsonSt, err := service.NewJSONStorageServiceWithFiles(tmp, service.JSONStorageFiles{
+		SignalJournalFile: "custom_signal_journal.json",
+	})
 	if err != nil {
 		t.Fatalf("NewJSONStorageService: %v", err)
 	}
-	cfg := &config.Config{Storage: config.StorageConfig{StoragePath: tmp, SignalJournalFile: "signal_journal.json"}}
+	cfg := &config.Config{Storage: config.StorageConfig{StoragePath: tmp, SignalJournalFile: "custom_signal_journal.json"}}
 
 	entry := []usecase.SignalJournal{
 		{
@@ -134,11 +136,13 @@ func TestMigrateEvaluationReport_CreatesOrPatches(t *testing.T) {
 	}
 
 	tmp := t.TempDir()
-	jsonSt, err := service.NewJSONStorageService(tmp)
+	jsonSt, err := service.NewJSONStorageServiceWithFiles(tmp, service.JSONStorageFiles{
+		EvaluationReportFile: "custom_evaluation_report.json",
+	})
 	if err != nil {
 		t.Fatalf("NewJSONStorageService: %v", err)
 	}
-	cfg := &config.Config{Storage: config.StorageConfig{StoragePath: tmp, EvaluationReportFile: "evaluation_report.json"}}
+	cfg := &config.Config{Storage: config.StorageConfig{StoragePath: tmp, EvaluationReportFile: "custom_evaluation_report.json"}}
 
 	report := &usecase.EvaluationReport{
 		GeneratedAt:     time.Now().UTC(),
@@ -183,7 +187,7 @@ func TestMigrateEvaluationReport_CreatesOrPatches(t *testing.T) {
 	}
 
 	// ensure file exists as baseline
-	if _, err := os.Stat(filepath.Join(tmp, "evaluation_report.json")); err != nil {
-		t.Fatalf("expected evaluation_report.json exists: %v", err)
+	if _, err := os.Stat(filepath.Join(tmp, "custom_evaluation_report.json")); err != nil {
+		t.Fatalf("expected custom evaluation report exists: %v", err)
 	}
 }

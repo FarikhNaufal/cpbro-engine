@@ -45,6 +45,8 @@ type MetricsRegistry struct {
 	FinalRejectCount              uint64
 	ConflictDowngrade             uint64
 	CooldownReject                uint64
+	ScanOverlapSkipCount          uint64
+	RecheckOverlapSkipCount       uint64
 	TelegramSuccess               uint64
 	TelegramFail                  uint64
 	StorageWriteFail              uint64
@@ -52,10 +54,12 @@ type MetricsRegistry struct {
 	GateBugCount                  uint64
 
 	// Timestamp trackers
-	LastScanTime       time.Time
-	LastSuccessScan    time.Time
-	LastRecheckTime    time.Time
-	LastEvaluationTime time.Time
+	LastScanTime               time.Time
+	LastSuccessScan            time.Time
+	LastRecheckTime            time.Time
+	LastEvaluationTime         time.Time
+	LastBootstrapTickerSource  string
+	LastBootstrapFundingSource string
 }
 
 var (
@@ -162,6 +166,7 @@ func (m *MetricsRegistry) RecordBootstrapTickerCacheFallback(age time.Duration) 
 		age = 0
 	}
 	atomic.StoreUint64(&m.LastBootstrapTickerAgeSec, uint64(age.Seconds()))
+	m.SetBootstrapTickerSource("cache")
 }
 
 func (m *MetricsRegistry) RecordBootstrapFundingCacheFallback(age time.Duration) {
@@ -170,6 +175,7 @@ func (m *MetricsRegistry) RecordBootstrapFundingCacheFallback(age time.Duration)
 		age = 0
 	}
 	atomic.StoreUint64(&m.LastBootstrapFundingAgeSec, uint64(age.Seconds()))
+	m.SetBootstrapFundingSource("cache")
 }
 
 func (m *MetricsRegistry) ClearBootstrapTickerCacheAge() {
@@ -178,6 +184,18 @@ func (m *MetricsRegistry) ClearBootstrapTickerCacheAge() {
 
 func (m *MetricsRegistry) ClearBootstrapFundingCacheAge() {
 	atomic.StoreUint64(&m.LastBootstrapFundingAgeSec, 0)
+}
+
+func (m *MetricsRegistry) SetBootstrapTickerSource(source string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.LastBootstrapTickerSource = source
+}
+
+func (m *MetricsRegistry) SetBootstrapFundingSource(source string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.LastBootstrapFundingSource = source
 }
 
 func (m *MetricsRegistry) AddAICandidateCount(val uint64) {
@@ -219,6 +237,14 @@ func (m *MetricsRegistry) AddConflictDowngrade(val uint64) {
 
 func (m *MetricsRegistry) AddCooldownReject(val uint64) {
 	atomic.AddUint64(&m.CooldownReject, val)
+}
+
+func (m *MetricsRegistry) IncrementScanOverlapSkip() {
+	atomic.AddUint64(&m.ScanOverlapSkipCount, 1)
+}
+
+func (m *MetricsRegistry) IncrementRecheckOverlapSkip() {
+	atomic.AddUint64(&m.RecheckOverlapSkipCount, 1)
 }
 
 func (m *MetricsRegistry) IncrementTelegramSuccess() {
@@ -266,6 +292,12 @@ func (m *MetricsRegistry) GetTimestamps() (lastScan, lastSuccess, lastRecheck, l
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.LastScanTime, m.LastSuccessScan, m.LastRecheckTime, m.LastEvaluationTime
+}
+
+func (m *MetricsRegistry) GetBootstrapSources() (tickerSource, fundingSource string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.LastBootstrapTickerSource, m.LastBootstrapFundingSource
 }
 
 func (m *MetricsRegistry) GetAverageAILatencyMs() float64 {

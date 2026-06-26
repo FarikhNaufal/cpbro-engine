@@ -87,3 +87,33 @@ func TestHealthResponse_IncludesWebsocketStatus(t *testing.T) {
 		t.Fatalf("expected websocket last message time to be populated")
 	}
 }
+
+func TestHealthResponse_IncludesRolloutReadiness(t *testing.T) {
+	h := &Handler{
+		startTime: time.Now().Add(-5 * time.Second),
+	}
+
+	resp := h.mapHealthResponse(usecase.HealthStatus{
+		Status:              "UP",
+		Mode:                "alert-only",
+		BinanceConnectivity: "OK",
+		GeminiAvailability:  "OK",
+		StorageWritable:     "OK",
+		RolloutReadiness: usecase.RolloutReadinessStatus{
+			Ready:            true,
+			RecommendedPhase: "PHASE_1_EXPAND",
+			Blockers:         nil,
+			RollbackCriteria: []string{"rollback if health degrades"},
+		},
+	})
+
+	if !resp.RolloutReadiness.Ready {
+		t.Fatal("expected rollout readiness ready=true")
+	}
+	if resp.RolloutReadiness.RecommendedPhase != "PHASE_1_EXPAND" {
+		t.Fatalf("unexpected rollout phase %s", resp.RolloutReadiness.RecommendedPhase)
+	}
+	if len(resp.RolloutReadiness.RollbackCriteria) != 1 {
+		t.Fatalf("expected rollback criteria to be mapped, got %+v", resp.RolloutReadiness)
+	}
+}

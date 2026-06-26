@@ -52,7 +52,7 @@ func (uc *StalenessUsecase) ResolveLatestPrice(ctx context.Context, symbol strin
 
 // IsFresh checks if the latest closed candle timestamp is within maxStaleness.
 func (uc *StalenessUsecase) IsFresh(m15Candles []dto.Candle) bool {
-	return uc.IsFreshAt(m15Candles, time.Now(), 15*time.Minute)
+	return uc.IsFreshAt(m15Candles, time.Now(), defaultClosedCandleTimeframe)
 }
 
 // IsFreshAt checks closed-candle freshness against a supplied clock.
@@ -66,7 +66,7 @@ func (uc *StalenessUsecase) IsFreshAt(m15Candles []dto.Candle, now time.Time, ti
 		now = time.Now()
 	}
 	if timeframe <= 0 {
-		timeframe = 15 * time.Minute
+		timeframe = defaultClosedCandleTimeframe
 	}
 
 	lastCandle := m15Candles[len(m15Candles)-1]

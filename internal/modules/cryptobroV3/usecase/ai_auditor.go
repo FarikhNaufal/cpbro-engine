@@ -21,7 +21,7 @@ type AIAuditorUsecase struct {
 }
 
 const (
-	aiAuditCacheTTL     = 15 * time.Minute
+	aiAuditCacheTTL     = defaultClosedCandleTimeframe
 	aiAuditCacheMaxSize = 2000
 )
 
@@ -85,7 +85,7 @@ func pruneAIAuditCacheEntries(cacheMap map[string]entity.CachedAudit, now time.T
 
 func BuildAIAuditCacheKey(candidate QuantResult, payload dto.GeminiAuditPayload) string {
 	lastClosedTime := "N/A"
-	m15Closed := GetClosedCandlesOnly(candidate.RawKlines, 15*time.Minute)
+	m15Closed := GetClosedCandlesOnly(candidate.RawKlines, defaultClosedCandleTimeframe)
 	if len(m15Closed) > 0 {
 		lastClosedTime = m15Closed[len(m15Closed)-1].Time.Format(time.RFC3339)
 	}
@@ -112,7 +112,7 @@ func (uc *AIAuditorUsecase) Audit(ctx context.Context, quant QuantResult, policy
 	symbol := quant.Symbol
 
 	// Limit RawKlines to last 30 closed M15 candles
-	m15Closed := GetClosedCandlesOnly(m15, 15*time.Minute)
+	m15Closed := GetClosedCandlesOnly(m15, defaultClosedCandleTimeframe)
 	if len(m15Closed) > 30 {
 		m15Closed = m15Closed[len(m15Closed)-30:]
 	}

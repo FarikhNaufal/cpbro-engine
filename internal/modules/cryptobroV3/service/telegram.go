@@ -39,8 +39,10 @@ type TelegramConfig struct {
 	RequestTimeoutSeconds         int
 }
 
+const defaultTelegramRequestTimeout = 10 * time.Second
+
 func NewTelegramService(cfg TelegramConfig) *TelegramService {
-	timeout := 10 * time.Second
+	timeout := defaultTelegramRequestTimeout
 	if cfg.RequestTimeoutSeconds > 0 {
 		timeout = time.Duration(cfg.RequestTimeoutSeconds) * time.Second
 	}

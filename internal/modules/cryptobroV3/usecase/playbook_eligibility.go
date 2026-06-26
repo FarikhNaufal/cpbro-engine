@@ -177,7 +177,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 		}
 
 		// 1.5. Pullback to value area
-		m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
+		m15Closed := GetClosedCandlesOnly(data.M15Candles, defaultClosedCandleTimeframe)
 		if ok, reason := validateTrendPullbackValueArea(m15Closed, sel.Direction); !ok {
 			return PlaybookEligibilityResult{
 				Playbook: playbook,
@@ -303,7 +303,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 					Reason:   "No lower liquidity sweep detected for LONG setup",
 				}
 			}
-			m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
+			m15Closed := GetClosedCandlesOnly(data.M15Candles, defaultClosedCandleTimeframe)
 			if len(m15Closed) >= 21 {
 				lowest20 := LowestLow(m15Closed[:len(m15Closed)-1], 20)
 				lastClose := m15Closed[len(m15Closed)-1].Close
@@ -327,7 +327,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 				}
 			}
 
-			m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
+			m15Closed := GetClosedCandlesOnly(data.M15Candles, defaultClosedCandleTimeframe)
 			if len(m15Closed) >= 21 {
 				highest20 := HighestHigh(m15Closed[:len(m15Closed)-1], 20)
 				lastClose := m15Closed[len(m15Closed)-1].Close
@@ -355,7 +355,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 		}
 
 		// 3. Volume spike confirmation
-		m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
+		m15Closed := GetClosedCandlesOnly(data.M15Candles, defaultClosedCandleTimeframe)
 		minVolRatio := resolveConfiguredMinVolumeRatio(playbook, policy, sel.Tier)
 		if !hasVolumeConfirmation(tech, m15Closed, minVolRatio) {
 			return PlaybookEligibilityResult{
@@ -457,7 +457,7 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 		}
 
 		// 2. Breakout close valid & Retest check
-		m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
+		m15Closed := GetClosedCandlesOnly(data.M15Candles, defaultClosedCandleTimeframe)
 		if len(m15Closed) >= 20 {
 			_, upperBands, lowerBands := CalculateBollingerBands(m15Closed, 20, 2.0)
 			if len(upperBands) > 0 && len(lowerBands) > 0 {
@@ -606,12 +606,12 @@ func (uc *PlaybookEligibilityUsecase) CheckEligibility(
 
 		// 1.5. ADX not expanding strongly check
 		adx := tech.IndicatorValues[IndicatorADX]
-		if adx > 30.0 {
+		if adx > safetyADXExpansionCeiling {
 			return PlaybookEligibilityResult{
 				Playbook: playbook,
 				Eligible: false,
 				Status:   PLAYBOOK_REJECTED,
-				Reason:   fmt.Sprintf("Range edge reversal invalid: strong trending expansion (ADX = %f > 30.0)", adx),
+				Reason:   fmt.Sprintf("Range edge reversal invalid: strong trending expansion (ADX = %f > %0.1f)", adx, safetyADXExpansionCeiling),
 			}
 		}
 

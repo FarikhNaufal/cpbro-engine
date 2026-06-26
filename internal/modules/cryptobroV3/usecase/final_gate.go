@@ -306,7 +306,7 @@ func (uc *FinalGateUsecase) Evaluate(
 	if profile.RejectADXExpansion {
 		maxADX := profile.MaxADX
 		if maxADX <= 0 {
-			maxADX = 30.0
+			maxADX = safetyADXExpansionCeiling
 		}
 		if adxVal > maxADX {
 			addWatch("ADX", fmt.Sprintf("High trend expansion detected (ADX = %0.1f > %0.1f)", adxVal, maxADX))

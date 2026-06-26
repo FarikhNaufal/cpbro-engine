@@ -18,8 +18,10 @@ type GeminiService struct {
 	requestTimeout time.Duration
 }
 
+const defaultGeminiRequestTimeout = 25 * time.Second
+
 func NewGeminiService(modelName string) (*GeminiService, error) {
-	return NewGeminiServiceWithTimeout(modelName, 25*time.Second)
+	return NewGeminiServiceWithTimeout(modelName, defaultGeminiRequestTimeout)
 }
 
 func NewGeminiServiceWithTimeout(modelName string, requestTimeout time.Duration) (*GeminiService, error) {
@@ -31,7 +33,7 @@ func NewGeminiServiceWithAPIKey(apiKey, modelName string, requestTimeout time.Du
 		return nil, fmt.Errorf("GEMINI_API_KEY environment variable is not set")
 	}
 	if requestTimeout <= 0 {
-		requestTimeout = 25 * time.Second
+		requestTimeout = defaultGeminiRequestTimeout
 	}
 
 	ctx := context.Background()

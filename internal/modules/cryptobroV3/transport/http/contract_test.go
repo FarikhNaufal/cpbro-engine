@@ -180,6 +180,28 @@ func TestAPIResponse_Contract_Constraints(t *testing.T) {
 		}
 	})
 
+	t.Run("arbiter_selected_details preserves decision brief", func(t *testing.T) {
+		raw := &entity.LatestResult{
+			ArbiterSelectedDetails: []entity.ArbiterSelectedDetail{
+				{
+					Symbol:        "SOLUSDT",
+					Playbook:      "TREND_PULLBACK",
+					Direction:     "LONG",
+					FinalStatus:   "FINAL_WATCH",
+					FinalReason:   "Need retest",
+					DecisionBrief: "FINAL_WATCH | TREND_PULLBACK | ai=WAIT/HIGH | reason=Need retest",
+				},
+			},
+		}
+		res := usecase.NormalizeLatestResultForFrontend(raw)
+		if len(res.ArbiterSelectedDetails) != 1 {
+			t.Fatalf("expected 1 arbiter detail, got %d", len(res.ArbiterSelectedDetails))
+		}
+		if res.ArbiterSelectedDetails[0].DecisionBrief == "" {
+			t.Fatal("expected decision brief to be preserved")
+		}
+	})
+
 	// Test 5: APIResponse error punya errors [] bukan null
 	t.Run("APIResponse error has errors array and is not null", func(t *testing.T) {
 		resp := fail("some error message", "error detail 1")

@@ -103,9 +103,10 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	if scanBoundary.IsZero() {
 		scanBoundary = scanStart
 	}
-	scanID := scanBoundary.Format("20060102150405")
+	triggerSource := normalizeScanTriggerSource(req.TriggerSource)
+	scanID := buildScanID(triggerSource, scanBoundary)
 
-	slog.Info("Starting AnalyzeMarketV3 Scan", "scan_id", scanID)
+	slog.Info("Starting AnalyzeMarketV3 Scan", "scan_id", scanID, "scan_trigger", triggerSource, "scan_boundary", scanBoundary.Format(time.RFC3339))
 	maxHoldDuration := getMonitoringMaxHoldDuration()
 
 	finalSignals := []dto.SignalResponse{}
@@ -181,14 +182,14 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	}
 
 	if tickersErr == nil {
-		attrs := []any{"scan_id", scanID, "source", string(tickersMeta.Source), "count", len(tickers)}
+		attrs := []any{"scan_id", scanID, "source", string(tickersMeta.Source), "provenance", bootstrapProvenanceLabel(tickersMeta.Source), "count", len(tickers)}
 		if tickersMeta.Source == bootstrapSourceCache {
 			attrs = append(attrs, "cache_age_seconds", roundDurationSeconds(tickersMeta.CacheAge))
 		}
 		slog.Info("Futures ticker bootstrap ready", attrs...)
 	}
 	if fundingErr == nil {
-		attrs := []any{"scan_id", scanID, "source", string(fundingMeta.Source), "count", len(fundingRates)}
+		attrs := []any{"scan_id", scanID, "source", string(fundingMeta.Source), "provenance", bootstrapProvenanceLabel(fundingMeta.Source), "count", len(fundingRates)}
 		if fundingMeta.Source == bootstrapSourceCache {
 			attrs = append(attrs, "cache_age_seconds", roundDurationSeconds(fundingMeta.CacheAge))
 		}
@@ -970,6 +971,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			audit.M5Confirmed = candCtx.localGateResult.M5Summary.Confirmed
 			audit.M5EarlyInvalidation = candCtx.localGateResult.M5Summary.EarlyInvalidation
 		}
+		audit.DecisionBrief = buildDecisionBrief(audit)
 
 		if getRuntimeSettings().DecisionAuditEnabled {
 			decisionAudits = append(decisionAudits, audit)
@@ -1231,6 +1233,21 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			localGateStatus = "LOCAL_WATCH"
 		}
 
+		arbiterAudit := DecisionAudit{
+			Symbol:                  pair,
+			Playbook:                dec.Playbook,
+			FinalStatus:             dec.Status,
+			FinalReason:             dec.Reason,
+			FinalPrimaryReasonLayer: dec.PrimaryReasonLayer,
+			AIDecision:              candCtx.auditResponse.Decision,
+			AIConfidence:            candCtx.auditResponse.Confidence,
+			StalenessStatus:         string(candCtx.stalenessRes.Status),
+		}
+		if candCtx.localGateResult.M5Summary != nil {
+			arbiterAudit.M5ConfirmationUsed = candCtx.localGateResult.M5Summary.Used
+			arbiterAudit.M5ConfirmationStatus = string(candCtx.localGateResult.M5Summary.Status)
+		}
+
 		arbiterDetails = append(arbiterDetails, entity.ArbiterSelectedDetail{
 			Symbol:          pair,
 			Playbook:        string(dec.Playbook),
@@ -1241,6 +1258,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			StalenessStatus: string(candCtx.stalenessRes.Status),
 			FinalStatus:     string(dec.Status),
 			FinalReason:     dec.Reason,
+			DecisionBrief:   buildDecisionBrief(arbiterAudit),
 		})
 	}
 

@@ -204,3 +204,62 @@ func TestAICandidateSelector_ChopRangePrefersRangeEdgeOverSweepOnNearTie(t *test
 		t.Fatalf("expected RANGE_EDGE_REVERSAL to win CHOP_RANGE near tie, got %s", selected[0].Playbook)
 	}
 }
+
+func TestAICandidateSelector_UsesRuntimeDefaultLimit(t *testing.T) {
+	original := SnapshotRuntimeSettings()
+	defer SetRuntimeSettings(original)
+	settings := original
+	settings.GeminiMaxCandidatesDefault = 2
+	SetRuntimeSettings(settings)
+
+	selector := NewAICandidateSelectorUsecase(7.5)
+	policy := MarketPolicy{
+		Regime:          DEFAULT,
+		MaxAICandidates: 0,
+	}
+
+	candidates := []QuantResult{
+		{
+			Symbol:    "BTCUSDT",
+			Direction: LONG,
+			Playbook:  TREND_PULLBACK,
+			Score:     9.0,
+			Tier:      TierA,
+			TradePlan: TradePlan{EntryPrice: 10.0, TakeProfit: 12.0, StopLoss: 9.0},
+		},
+		{
+			Symbol:    "ETHUSDT",
+			Direction: LONG,
+			Playbook:  TREND_PULLBACK,
+			Score:     8.5,
+			Tier:      TierA,
+			TradePlan: TradePlan{EntryPrice: 10.0, TakeProfit: 12.0, StopLoss: 9.0},
+		},
+		{
+			Symbol:    "SOLUSDT",
+			Direction: LONG,
+			Playbook:  TREND_PULLBACK,
+			Score:     8.0,
+			Tier:      TierA,
+			TradePlan: TradePlan{EntryPrice: 10.0, TakeProfit: 12.0, StopLoss: 9.0},
+		},
+	}
+
+	selected, skipped := selector.SelectCandidates(candidates, policy)
+	if len(selected) != 2 {
+		t.Fatalf("expected runtime default limit to select 2 candidates, got %d", len(selected))
+	}
+	if len(skipped) != 1 {
+		t.Fatalf("expected runtime default limit to skip 1 candidate, got %d", len(skipped))
+	}
+}
+
+func TestAICandidateSelector_NormalizesInvalidLegacyThreshold(t *testing.T) {
+	selector := NewAICandidateSelectorUsecase(60.0)
+	if !selector.IsEligible(8.0) {
+		t.Fatalf("expected legacy invalid threshold to normalize to default AI eligibility score")
+	}
+	if selector.IsEligible(7.0) {
+		t.Fatalf("expected normalized default AI eligibility score to remain above 7.0")
+	}
+}

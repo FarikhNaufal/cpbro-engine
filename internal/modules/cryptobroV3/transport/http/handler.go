@@ -43,6 +43,8 @@ type HandlerRuntimeConfig struct {
 	SafeConfig      map[string]any
 }
 
+const logStreamPingInterval = 15 * time.Second
+
 type scannerRunner interface {
 	Run(ctx context.Context, req dto.ScanRequest) (dto.ScanResult, error)
 }
@@ -161,7 +163,13 @@ func (h *Handler) mapHealthResponse(status usecase.HealthStatus) dto.HealthRespo
 		WebsocketConnected:       status.RealtimePrice.Connected,
 		WebsocketActiveSymbols:   status.RealtimePrice.ActiveSymbols,
 		WebsocketLastMessageTime: websocketLastMessageStr,
-		SafeConfig:               h.runtime.SafeConfig,
+		RolloutReadiness: dto.RolloutReadiness{
+			Ready:            status.RolloutReadiness.Ready,
+			RecommendedPhase: status.RolloutReadiness.RecommendedPhase,
+			Blockers:         append([]string(nil), status.RolloutReadiness.Blockers...),
+			RollbackCriteria: append([]string(nil), status.RolloutReadiness.RollbackCriteria...),
+		},
+		SafeConfig: h.runtime.SafeConfig,
 	}
 }
 
@@ -304,7 +312,7 @@ func (h *Handler) PostRun(c *gin.Context) {
 
 // GetJournal godoc
 // @Summary      Get virtual signal journal
-// @Description  Reads signal_journal.json. Contains virtual monitoring outcomes only.
+// @Description  Reads the configured signal journal storage file. Contains virtual monitoring outcomes only.
 // @Tags         journal
 // @Produce      json
 // @Param        symbol query string false "Filter by symbol"
@@ -408,7 +416,7 @@ func (h *Handler) GetJournal(c *gin.Context) {
 
 // GetWatchJournal godoc
 // @Summary      Get virtual watch signal journal
-// @Description  Reads watch_journal.json. Contains virtual watchlist monitoring outcomes only.
+// @Description  Reads the configured watch journal storage file. Contains virtual watchlist monitoring outcomes only.
 // @Tags         journal
 // @Produce      json
 // @Param        symbol query string false "Filter by symbol"
@@ -512,7 +520,7 @@ func (h *Handler) GetWatchJournal(c *gin.Context) {
 
 // GetEvaluation godoc
 // @Summary      Get feedback evaluation report
-// @Description  Reads evaluation_report.json. Does not auto-apply recommendations.
+// @Description  Reads the configured evaluation report storage file. Does not auto-apply recommendations.
 // @Tags         evaluation
 // @Produce      json
 // @Success      200 {object} dto.EvaluationAPIResponse
@@ -568,7 +576,7 @@ func (h *Handler) GetEvaluation(c *gin.Context) {
 
 // PostEvaluationRun godoc
 // @Summary      Run feedback evaluation
-// @Description  Runs Feedback Evaluation and writes evaluation_report.json. Does not auto-apply threshold or policy changes.
+// @Description  Runs Feedback Evaluation and writes the configured evaluation report storage file. Does not auto-apply threshold or policy changes.
 // @Tags         evaluation
 // @Produce      json
 // @Success      200 {object} dto.EvaluationAPIResponse
@@ -592,7 +600,7 @@ func (h *Handler) PostEvaluationRun(c *gin.Context) {
 
 // GetDecisionAudit godoc
 // @Summary      Get decision audit trail
-// @Description  Reads decision_audit.json for audit/evaluation only. Not used for trade decisions.
+// @Description  Reads the configured decision audit storage file for audit/evaluation only. Not used for trade decisions.
 // @Tags         audit
 // @Produce      json
 // @Param        scan_id query string false "Filter by scan id"
@@ -966,7 +974,7 @@ func (h *Handler) GetLogs(c *gin.Context) {
 		defer service.GlobalLogBroadcaster.Unsubscribe(logChan)
 
 		// 3. Loop and push
-		ticker := time.NewTicker(15 * time.Second)
+		ticker := time.NewTicker(logStreamPingInterval)
 		defer ticker.Stop()
 
 		for {

@@ -290,7 +290,7 @@ func clampUniverseHotBoost(boost float64) float64 {
 	if boost <= 0 {
 		boost = settings.UniverseDefaultHotBoost
 		if boost <= 0 {
-			boost = 1.25
+			boost = defaultUniverseHotBoost
 		}
 	}
 	if boost < 1.0 {
@@ -298,7 +298,7 @@ func clampUniverseHotBoost(boost float64) float64 {
 	}
 	maxBoost := settings.UniverseMaxHotBoost
 	if maxBoost < 1.0 {
-		maxBoost = 1.5
+		maxBoost = defaultUniverseMaxHotBoost
 	}
 	if boost > maxBoost {
 		boost = maxBoost

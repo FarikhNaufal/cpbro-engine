@@ -70,3 +70,23 @@ func TestNormalizeSignalForFrontend_PreservesHotInfo(t *testing.T) {
 		t.Fatalf("expected hot metadata to be preserved, got %+v", out)
 	}
 }
+
+func TestBuildDecisionBrief(t *testing.T) {
+	audit := DecisionAudit{
+		Playbook:                LIQUIDITY_SWEEP_REVERSAL,
+		FinalStatus:             FINAL_EXECUTE,
+		FinalPrimaryReasonLayer: "AI_CONFIRM",
+		AIDecision:              "CONFIRM",
+		AIConfidence:            "HIGH",
+		StalenessStatus:         "FRESH",
+		M5ConfirmationUsed:      true,
+		M5ConfirmationStatus:    "CONFIRMED",
+		FinalReason:             "AI and local gates aligned",
+	}
+
+	brief := buildDecisionBrief(audit)
+	expected := "FINAL_EXECUTE | LIQUIDITY_SWEEP_REVERSAL | layer=AI_CONFIRM | ai=CONFIRM/HIGH | stale=FRESH | m5=CONFIRMED | reason=AI and local gates aligned"
+	if brief != expected {
+		t.Fatalf("unexpected brief\nwant: %s\ngot:  %s", expected, brief)
+	}
+}

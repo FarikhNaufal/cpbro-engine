@@ -15,9 +15,13 @@ func TestBuildRuntimeSettingsMapsConfigSurfaces(t *testing.T) {
 	}
 
 	cfg.Monitoring.MaxHoldMinutes = 321
+	cfg.Scanner.BoundaryMinutes = 17
+	cfg.Scanner.CloseCandleBufferSeconds = 19
+	cfg.Scanner.PreventOverlap = false
 	cfg.Worker.MaxMarketDataConcurrency = 11
 	cfg.Worker.MaxCandidatePipelineConcurrency = 12
 	cfg.Worker.MaxAIConcurrency = 13
+	cfg.Gemini.MaxCandidatesDefault = 14
 	cfg.Worker.MaxMonitoringCandleConcurrency = 14
 	cfg.Universe.TierAMinQuoteVolume = 101
 	cfg.Universe.TierBMinQuoteVolume = 102
@@ -54,13 +58,22 @@ func TestBuildRuntimeSettingsMapsConfigSurfaces(t *testing.T) {
 	cfg.Strategy.RequireFreshEntryForExecute = false
 	cfg.Strategy.WatchCooldownMinutes = 401
 	cfg.Strategy.WatchDedupPriceToleranceBps = 402
+	cfg.Strategy.WatchRecheckBoundaryMinutes = 4021
 	cfg.Strategy.WatchRecheckMaxAgeMinutes = 403
 	cfg.Strategy.WatchRecheckBatchLimit = 404
+	cfg.Strategy.WatchRecheckAllowedPlaybooks = []string{"TREND_PULLBACK", "COMPRESSION_BREAKOUT_RETEST"}
+	cfg.Strategy.WatchRecheckAllowedReasonTokens = []string{"AI DECISION IS WAIT", "WAIT_RETEST"}
+	cfg.Strategy.WatchRecheckBlockedReasonTokens = []string{"ACTIVE_MONITORING_EXISTS"}
 	cfg.Strategy.EvaluationMinSampleWarning = 405
 	cfg.Strategy.EvaluationMinSampleMedium = 406
 	cfg.Strategy.EvaluationMinSampleHigh = 407
 	cfg.Strategy.DebugSaveRawKlines = true
 	cfg.Strategy.RawKlinesDebugDir = "debug/custom"
+	cfg.Storage.LatestResultFile = "custom_latest.json"
+	cfg.Storage.SignalJournalFile = "custom_signal_journal.json"
+	cfg.Storage.WatchJournalFile = "custom_watch_journal.json"
+	cfg.Storage.DecisionAuditFile = "custom_decision_audit.json"
+	cfg.Storage.HealthSnapshotFile = "custom_health_snapshot.json"
 	cfg.Strategy.MaxMarketDataPrefetchSymbols = 408
 	cfg.Strategy.ScanRequestWeightBudget = 409
 	cfg.Strategy.CompressionNeutralBreadthLower = 0.81
@@ -97,16 +110,24 @@ func TestBuildRuntimeSettingsMapsConfigSurfaces(t *testing.T) {
 
 	got := usecase.BuildRuntimeSettings(cfg)
 	want := usecase.RuntimeSettings{
+		ScanBoundaryMinutes:                      17,
+		ScanCloseCandleBufferSeconds:             19,
+		ScanPreventOverlap:                       false,
 		MonitoringMaxHoldMinutes:                 321,
 		RequireAIHighForExecute:                  false,
 		RequireFreshEntryForExecute:              false,
 		WatchCooldownMinutes:                     401,
 		WatchDedupPriceToleranceBps:              402,
+		WatchRecheckBoundaryMinutes:              4021,
 		WatchRecheckMaxAgeMinutes:                403,
 		WatchRecheckBatchLimit:                   404,
+		WatchRecheckAllowedPlaybooks:             []string{"TREND_PULLBACK", "COMPRESSION_BREAKOUT_RETEST"},
+		WatchRecheckAllowedReasonTokens:          []string{"AI DECISION IS WAIT", "WAIT_RETEST"},
+		WatchRecheckBlockedReasonTokens:          []string{"ACTIVE_MONITORING_EXISTS"},
 		MaxMarketDataConcurrency:                 11,
 		MaxCandidatePipelineConcurrency:          12,
 		MaxAIConcurrency:                         13,
+		GeminiMaxCandidatesDefault:               14,
 		AIAuditEnabled:                           false,
 		DecisionAuditEnabled:                     false,
 		MaxMarketDataPrefetchSymbols:             408,
@@ -119,6 +140,11 @@ func TestBuildRuntimeSettingsMapsConfigSurfaces(t *testing.T) {
 		HealthCheckTimeoutSeconds:                501,
 		DebugSaveRawKlines:                       true,
 		RawKlinesDebugDir:                        "debug/custom",
+		LatestResultFile:                         "custom_latest.json",
+		SignalJournalFile:                        "custom_signal_journal.json",
+		WatchJournalFile:                         "custom_watch_journal.json",
+		DecisionAuditFile:                        "custom_decision_audit.json",
+		HealthSnapshotFile:                       "custom_health_snapshot.json",
 		UniverseTierAMinQuoteVolume:              101,
 		UniverseTierBMinQuoteVolume:              102,
 		UniverseTierCMinVolume:                   103,

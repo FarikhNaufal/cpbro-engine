@@ -3,7 +3,8 @@ package dto
 import "time"
 
 type ScanRequest struct {
-	TriggerTime time.Time `json:"trigger_time"`
+	TriggerTime   time.Time `json:"trigger_time"`
+	TriggerSource string    `json:"trigger_source,omitempty"`
 }
 
 type ScanResult struct {

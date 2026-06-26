@@ -2,9 +2,11 @@ package usecase
 
 import (
 	"context"
+	"cpbro-engine/internal/modules/cryptobroV3/config"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -26,6 +28,52 @@ type RealtimePriceStatus struct {
 	LastMessageTime time.Time `json:"last_message_time"`
 }
 
+type RecheckCadenceStatus struct {
+	Enabled                 bool     `json:"enabled"`
+	PreventOverlap          bool     `json:"prevent_overlap"`
+	SharedPipelineGuard     bool     `json:"shared_pipeline_guard"`
+	SkipPrimaryBoundary     bool     `json:"skip_primary_boundary"`
+	PrimaryBoundaryMinutes  int      `json:"primary_boundary_minutes"`
+	BoundaryMinutes         int      `json:"boundary_minutes"`
+	CloseBufferSeconds      int      `json:"close_buffer_seconds"`
+	MaxAgeMinutes           int      `json:"max_age_minutes"`
+	EffectiveHorizonMinutes int      `json:"effective_horizon_minutes"`
+	BatchLimit              int      `json:"batch_limit"`
+	AllowedPlaybooks        []string `json:"allowed_playbooks,omitempty"`
+}
+
+type BootstrapProvenanceStatus struct {
+	TickerSource       string `json:"ticker_source"`
+	TickerFresh        bool   `json:"ticker_fresh"`
+	TickerCacheAgeSec  uint64 `json:"ticker_cache_age_seconds"`
+	FundingSource      string `json:"funding_source"`
+	FundingFresh       bool   `json:"funding_fresh"`
+	FundingCacheAgeSec uint64 `json:"funding_cache_age_seconds"`
+}
+
+func normalizeBootstrapSourceForHealth(source string) string {
+	trimmed := strings.TrimSpace(source)
+	if trimmed == "" {
+		return "unknown"
+	}
+	return trimmed
+}
+
+type WatchJournalStatusCounts struct {
+	Monitoring         int `json:"monitoring"`
+	VirtualTP1         int `json:"virtual_tp1"`
+	Promoted           int `json:"promoted"`
+	RecheckExpired     int `json:"recheck_expired"`
+	RecheckInvalidated int `json:"recheck_invalidated"`
+}
+
+type RolloutReadinessStatus struct {
+	Ready            bool     `json:"ready"`
+	RecommendedPhase string   `json:"recommended_phase"`
+	Blockers         []string `json:"blockers,omitempty"`
+	RollbackCriteria []string `json:"rollback_criteria,omitempty"`
+}
+
 type RealtimeStatusProvider interface {
 	RealtimeStatus() RealtimePriceStatus
 }
@@ -39,26 +87,87 @@ var (
 )
 
 type HealthStatus struct {
-	Status                   string              `json:"status"`
-	Mode                     string              `json:"mode"`
-	BinanceConnectivity      string              `json:"binance_connectivity"`
-	GeminiAvailability       string              `json:"gemini_availability"`
-	TelegramAvailability     string              `json:"telegram_availability,omitempty"`
-	StorageWritable          string              `json:"storage_writable"`
-	LastScanTime             time.Time           `json:"last_scan_time"`
-	LastScanAgeSec           float64             `json:"last_scan_age_seconds"`
-	LastSuccessfulScan       time.Time           `json:"last_successful_scan"`
-	LastSuccessfulScanAgeSec float64             `json:"last_successful_scan_age_seconds"`
-	LastRecheckTime          time.Time           `json:"last_recheck_time"`
-	LastRecheckAgeSec        float64             `json:"last_recheck_age_seconds"`
-	LastEvaluationTime       time.Time           `json:"last_evaluation_time"`
-	LastEvaluationAgeSec     float64             `json:"last_evaluation_age_seconds"`
-	ScanWorkerRunning        bool                `json:"scan_worker_running"`
-	RecheckWorkerRunning     bool                `json:"recheck_worker_running"`
-	MonitoringWorkerRunning  bool                `json:"monitoring_worker_running"`
-	EvaluationWorkerRunning  bool                `json:"evaluation_worker_running"`
-	Metrics                  *SREMetrics         `json:"metrics"`
-	RealtimePrice            RealtimePriceStatus `json:"realtime_price"`
+	Status                   string                    `json:"status"`
+	Mode                     string                    `json:"mode"`
+	BinanceConnectivity      string                    `json:"binance_connectivity"`
+	GeminiAvailability       string                    `json:"gemini_availability"`
+	TelegramAvailability     string                    `json:"telegram_availability,omitempty"`
+	StorageWritable          string                    `json:"storage_writable"`
+	LastScanTime             time.Time                 `json:"last_scan_time"`
+	LastScanAgeSec           float64                   `json:"last_scan_age_seconds"`
+	LastSuccessfulScan       time.Time                 `json:"last_successful_scan"`
+	LastSuccessfulScanAgeSec float64                   `json:"last_successful_scan_age_seconds"`
+	LastRecheckTime          time.Time                 `json:"last_recheck_time"`
+	LastRecheckAgeSec        float64                   `json:"last_recheck_age_seconds"`
+	LastEvaluationTime       time.Time                 `json:"last_evaluation_time"`
+	LastEvaluationAgeSec     float64                   `json:"last_evaluation_age_seconds"`
+	ScanWorkerRunning        bool                      `json:"scan_worker_running"`
+	RecheckWorkerRunning     bool                      `json:"recheck_worker_running"`
+	MonitoringWorkerRunning  bool                      `json:"monitoring_worker_running"`
+	EvaluationWorkerRunning  bool                      `json:"evaluation_worker_running"`
+	Metrics                  *SREMetrics               `json:"metrics"`
+	RealtimePrice            RealtimePriceStatus       `json:"realtime_price"`
+	RecheckCadence           RecheckCadenceStatus      `json:"recheck_cadence"`
+	BootstrapProvenance      BootstrapProvenanceStatus `json:"bootstrap_provenance"`
+	WatchJournal             WatchJournalStatusCounts  `json:"watch_journal"`
+	RolloutReadiness         RolloutReadinessStatus    `json:"rollout_readiness"`
+}
+
+func evaluateRolloutReadiness(status HealthStatus) RolloutReadinessStatus {
+	blockers := make([]string, 0)
+	if status.BinanceConnectivity != "" && !strings.HasPrefix(status.BinanceConnectivity, "OK") {
+		blockers = append(blockers, "binance_connectivity_unhealthy")
+	}
+	if status.GeminiAvailability != "" && !strings.HasPrefix(status.GeminiAvailability, "OK") {
+		blockers = append(blockers, "gemini_unhealthy")
+	}
+	if status.StorageWritable != "" && !strings.HasPrefix(status.StorageWritable, "OK") {
+		blockers = append(blockers, "storage_unwritable")
+	}
+	if status.RealtimePrice.Enabled && status.RealtimePrice.ActiveSymbols > 0 && !status.RealtimePrice.Connected {
+		blockers = append(blockers, "realtime_price_disconnected")
+	}
+	if status.BootstrapProvenance.TickerSource == "unavailable" {
+		blockers = append(blockers, "ticker_bootstrap_unavailable")
+	}
+	if status.BootstrapProvenance.FundingSource == "unavailable" {
+		blockers = append(blockers, "funding_bootstrap_unavailable")
+	}
+	if status.Metrics != nil {
+		if status.Metrics.ScanSuccessCount == 0 {
+			blockers = append(blockers, "no_successful_scans_yet")
+		}
+		if status.RecheckCadence.Enabled && status.Metrics.RecheckSuccessCount == 0 {
+			blockers = append(blockers, "no_successful_rechecks_yet")
+		}
+	}
+	if status.LastSuccessfulScanAgeSec >= 0 {
+		maxScanAgeSec := float64(maxEvalInt(status.RecheckCadence.PrimaryBoundaryMinutes, 1) * 2 * 60)
+		if status.LastSuccessfulScanAgeSec > maxScanAgeSec {
+			blockers = append(blockers, "last_successful_scan_stale")
+		}
+	}
+
+	recommendedPhase := "HOLD"
+	if len(blockers) == 0 {
+		recommendedPhase = "PHASE_0_OBSERVE"
+		if status.Metrics != nil && status.Metrics.FinalExecuteCount > 0 {
+			recommendedPhase = "PHASE_1_EXPAND"
+		}
+	}
+
+	rollbackCriteria := []string{
+		"rollback if health status degrades or rollout blockers appear",
+		"rollback if bootstrap provenance turns unavailable or websocket disconnect persists during active feed usage",
+		"rollback if scan or recheck overlap skips start suppressing intended boundaries",
+	}
+
+	return RolloutReadinessStatus{
+		Ready:            len(blockers) == 0,
+		RecommendedPhase: recommendedPhase,
+		Blockers:         blockers,
+		RollbackCriteria: rollbackCriteria,
+	}
 }
 
 type SREMetrics struct {
@@ -94,6 +203,8 @@ type SREMetrics struct {
 	FinalRejectCount                   uint64  `json:"final_reject_count"`
 	ConflictDowngradeCount             uint64  `json:"conflict_downgrade_count"`
 	CooldownRejectCount                uint64  `json:"cooldown_reject_count"`
+	ScanOverlapSkipCount               uint64  `json:"scan_overlap_skip_count"`
+	RecheckOverlapSkipCount            uint64  `json:"recheck_overlap_skip_count"`
 	TelegramSuccessCount               uint64  `json:"telegram_success_count"`
 	TelegramFailCount                  uint64  `json:"telegram_fail_count"`
 	MonitoringActiveCount              uint64  `json:"monitoring_active_count"`
@@ -103,11 +214,31 @@ type SREMetrics struct {
 }
 
 type ObservabilityUsecase struct {
-	provider          MarketDataProvider
-	aiService         AIAuditorService
-	notifier          any
-	storageDir        string
-	realtimeStatusSrc RealtimeStatusProvider
+	provider           MarketDataProvider
+	aiService          AIAuditorService
+	notifier           any
+	storageDir         string
+	signalJournalFile  string
+	watchJournalFile   string
+	healthSnapshotFile string
+	realtimeStatusSrc  RealtimeStatusProvider
+}
+
+func resolveObservabilityStorageFiles() (string, string, string) {
+	settings := getRuntimeSettings()
+	signalJournalFile := strings.TrimSpace(settings.SignalJournalFile)
+	if signalJournalFile == "" {
+		signalJournalFile = config.DefaultSignalJournalFile
+	}
+	watchJournalFile := strings.TrimSpace(settings.WatchJournalFile)
+	if watchJournalFile == "" {
+		watchJournalFile = config.DefaultWatchJournalFile
+	}
+	healthSnapshotFile := strings.TrimSpace(settings.HealthSnapshotFile)
+	if healthSnapshotFile == "" {
+		healthSnapshotFile = config.DefaultHealthSnapshotFile
+	}
+	return signalJournalFile, watchJournalFile, healthSnapshotFile
 }
 
 func NewObservabilityUsecase(
@@ -116,11 +247,15 @@ func NewObservabilityUsecase(
 	notifier any,
 	storageDir string,
 ) *ObservabilityUsecase {
+	signalJournalFile, watchJournalFile, healthSnapshotFile := resolveObservabilityStorageFiles()
 	return &ObservabilityUsecase{
-		provider:   provider,
-		aiService:  aiService,
-		notifier:   notifier,
-		storageDir: storageDir,
+		provider:           provider,
+		aiService:          aiService,
+		notifier:           notifier,
+		storageDir:         storageDir,
+		signalJournalFile:  signalJournalFile,
+		watchJournalFile:   watchJournalFile,
+		healthSnapshotFile: healthSnapshotFile,
 	}
 }
 
@@ -129,6 +264,21 @@ func (uc *ObservabilityUsecase) SetRealtimeStatusProvider(provider RealtimeStatu
 		return
 	}
 	uc.realtimeStatusSrc = provider
+}
+
+func (uc *ObservabilityUsecase) SetStorageFiles(signalJournalFile, watchJournalFile, healthSnapshotFile string) {
+	if uc == nil {
+		return
+	}
+	if trimmed := strings.TrimSpace(signalJournalFile); trimmed != "" {
+		uc.signalJournalFile = trimmed
+	}
+	if trimmed := strings.TrimSpace(watchJournalFile); trimmed != "" {
+		uc.watchJournalFile = trimmed
+	}
+	if trimmed := strings.TrimSpace(healthSnapshotFile); trimmed != "" {
+		uc.healthSnapshotFile = trimmed
+	}
 }
 
 // PerformHealthAudit executes end-to-end connectivity and SRE checks, returns health snapshot and saves it atomically.
@@ -181,10 +331,9 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 		}
 	}
 
-	// Wait, instead of fetching candles, we can just load the Signal Journal dynamically from storage repo!
-	// Let's use os.ReadFile or load it directly to count monitoring active status
+	var watchCounts WatchJournalStatusCounts
 	var activeCount uint64
-	journalPath := filepath.Join(uc.storageDir, "signal_journal.json")
+	journalPath := filepath.Join(uc.storageDir, uc.signalJournalFile)
 	if data, err := os.ReadFile(journalPath); err == nil && len(data) > 0 {
 		var list []SignalJournal
 		if err := json.Unmarshal(data, &list); err == nil {
@@ -194,6 +343,41 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 				}
 			}
 		}
+	}
+	watchPath := filepath.Join(uc.storageDir, uc.watchJournalFile)
+	if data, err := os.ReadFile(watchPath); err == nil && len(data) > 0 {
+		var list []WatchJournal
+		if err := json.Unmarshal(data, &list); err == nil {
+			for _, item := range list {
+				switch item.Status {
+				case WATCH_MONITORING:
+					watchCounts.Monitoring++
+				case VIRTUAL_TP1_HIT:
+					watchCounts.VirtualTP1++
+				case WATCH_PROMOTED:
+					watchCounts.Promoted++
+				case WATCH_RECHECK_EXPIRED:
+					watchCounts.RecheckExpired++
+				case WATCH_RECHECK_INVALIDATED:
+					watchCounts.RecheckInvalidated++
+				}
+			}
+		}
+	}
+	recheckPolicy := resolveWatchRecheckPolicy()
+	settings := getRuntimeSettings()
+	recheckCadence := RecheckCadenceStatus{
+		Enabled:                 RecheckWorkerRunning.Load(),
+		PreventOverlap:          settings.ScanPreventOverlap,
+		SharedPipelineGuard:     settings.ScanPreventOverlap,
+		SkipPrimaryBoundary:     true,
+		PrimaryBoundaryMinutes:  settings.ScanBoundaryMinutes,
+		BoundaryMinutes:         recheckPolicy.BoundaryMinutes,
+		CloseBufferSeconds:      settings.ScanCloseCandleBufferSeconds,
+		MaxAgeMinutes:           recheckPolicy.MaxAgeMinutes,
+		EffectiveHorizonMinutes: int(recheckPolicy.EffectiveHorizon / time.Minute),
+		BatchLimit:              recheckPolicy.BatchLimit,
+		AllowedPlaybooks:        append([]string(nil), settings.WatchRecheckAllowedPlaybooks...),
 	}
 
 	// 6. Calculate ages and metrics
@@ -254,12 +438,25 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 		FinalRejectCount:                   atomic.LoadUint64(&reg.FinalRejectCount),
 		ConflictDowngradeCount:             atomic.LoadUint64(&reg.ConflictDowngrade),
 		CooldownRejectCount:                atomic.LoadUint64(&reg.CooldownReject),
+		ScanOverlapSkipCount:               atomic.LoadUint64(&reg.ScanOverlapSkipCount),
+		RecheckOverlapSkipCount:            atomic.LoadUint64(&reg.RecheckOverlapSkipCount),
 		TelegramSuccessCount:               atomic.LoadUint64(&reg.TelegramSuccess),
 		TelegramFailCount:                  atomic.LoadUint64(&reg.TelegramFail),
 		MonitoringActiveCount:              activeCount,
 		StorageWriteFailCount:              atomic.LoadUint64(&reg.StorageWriteFail),
 		EvaluationRecCount:                 atomic.LoadUint64(&reg.EvalRecCount),
 		GateBugCount:                       atomic.LoadUint64(&reg.GateBugCount),
+	}
+	tickerSource, fundingSource := reg.GetBootstrapSources()
+	tickerSource = normalizeBootstrapSourceForHealth(tickerSource)
+	fundingSource = normalizeBootstrapSourceForHealth(fundingSource)
+	bootstrapProvenance := BootstrapProvenanceStatus{
+		TickerSource:       tickerSource,
+		TickerFresh:        tickerSource == "live",
+		TickerCacheAgeSec:  metrics.BootstrapTickerCacheAgeSeconds,
+		FundingSource:      fundingSource,
+		FundingFresh:       fundingSource == "live",
+		FundingCacheAgeSec: metrics.BootstrapFundingCacheAgeSeconds,
 	}
 
 	status := HealthStatus{
@@ -282,13 +479,17 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 		MonitoringWorkerRunning:  MonitoringWorkerRunning.Load(),
 		EvaluationWorkerRunning:  EvaluationWorkerRunning.Load(),
 		Metrics:                  metrics,
+		RecheckCadence:           recheckCadence,
+		BootstrapProvenance:      bootstrapProvenance,
+		WatchJournal:             watchCounts,
 	}
 	if uc.realtimeStatusSrc != nil {
 		status.RealtimePrice = uc.realtimeStatusSrc.RealtimeStatus()
 	}
+	status.RolloutReadiness = evaluateRolloutReadiness(status)
 
 	// 7. Save Snapshot to File Atomically
-	healthPath := filepath.Join(uc.storageDir, "health_snapshot.json")
+	healthPath := filepath.Join(uc.storageDir, uc.healthSnapshotFile)
 	tmpPath := healthPath + ".tmp"
 	if bytes, err := json.MarshalIndent(status, "", "  "); err == nil {
 		if err := os.WriteFile(tmpPath, bytes, 0644); err == nil {

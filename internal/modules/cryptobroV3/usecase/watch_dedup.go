@@ -24,7 +24,7 @@ func resolveWatchJournalPersistence(current []WatchJournal, incoming WatchJourna
 		now = time.Now()
 	}
 
-	cooldownWindow := resolveWatchDurationEnv("WATCH_COOLDOWN_MINUTES", defaultWatchCooldownMinutes)
+	cooldownWindow := resolveWatchCooldownDuration()
 
 	for i := range current {
 		existing := current[i]
@@ -233,19 +233,19 @@ func isActiveWatchStatus(journal WatchJournal, now time.Time) bool {
 
 func isClosedWatchStatus(status Status) bool {
 	switch status {
-	case VIRTUAL_TP2_HIT, VIRTUAL_SL_HIT, VIRTUAL_EXPIRED, WATCH_PROMOTED:
+	case VIRTUAL_TP2_HIT, VIRTUAL_SL_HIT, VIRTUAL_EXPIRED, WATCH_PROMOTED, WATCH_RECHECK_INVALIDATED, WATCH_RECHECK_EXPIRED:
 		return true
 	default:
 		return false
 	}
 }
 
-func resolveWatchDurationEnv(key string, defaultMinutes int) time.Duration {
+func resolveWatchCooldownDuration() time.Duration {
 	minutes := getRuntimeSettings().WatchCooldownMinutes
-	if strings.EqualFold(key, "WATCH_COOLDOWN_MINUTES") && minutes > 0 {
+	if minutes > 0 {
 		return time.Duration(minutes) * time.Minute
 	}
-	return time.Duration(defaultMinutes) * time.Minute
+	return time.Duration(defaultWatchCooldownMinutes) * time.Minute
 }
 
 func resolveWatchPriceTolerance() float64 {

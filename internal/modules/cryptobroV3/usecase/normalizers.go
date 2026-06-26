@@ -210,6 +210,7 @@ func NormalizeLatestResultForFrontend(res *entity.LatestResult) dto.LatestResult
 			StalenessStatus: detail.StalenessStatus,
 			FinalStatus:     detail.FinalStatus,
 			FinalReason:     detail.FinalReason,
+			DecisionBrief:   detail.DecisionBrief,
 		})
 	}
 
@@ -374,6 +375,41 @@ func NormalizeEvaluationForFrontend(report *EvaluationReport) dto.EvaluationResp
 			TotalPnlPercentage: s.TotalPnlPercentage,
 		}
 	}
+	toDTOSetupMemorySlice := func(s SetupMemorySlice) dto.SetupMemorySlice {
+		return dto.SetupMemorySlice{
+			Symbol:             s.Symbol,
+			Direction:          s.Direction,
+			MarketRegime:       s.MarketRegime,
+			Playbook:           s.Playbook,
+			TotalSignals:       s.TotalSignals,
+			WinRate:            s.WinRate,
+			TP2Rate:            s.TP2Rate,
+			SLRate:             s.SLRate,
+			ExpiredRate:        s.ExpiredRate,
+			AverageRR:          s.AverageRR,
+			TotalPnlPercentage: s.TotalPnlPercentage,
+			LastStatus:         s.LastStatus,
+			LastOutcomeReason:  s.LastOutcomeReason,
+			LastDecisionBrief:  s.LastDecisionBrief,
+		}
+	}
+	toDTOLearningReview := func(s LearningReview) dto.LearningReview {
+		return dto.LearningReview{
+			IssueType:        s.IssueType,
+			Playbook:         s.Playbook,
+			MarketRegime:     s.MarketRegime,
+			Direction:        s.Direction,
+			PolicyMode:       s.PolicyMode,
+			Summary:          s.Summary,
+			SuggestedAction:  s.SuggestedAction,
+			ConfidenceLevel:  s.ConfidenceLevel,
+			Severity:         s.Severity,
+			SampleSize:       s.SampleSize,
+			ReviewOnly:       s.ReviewOnly,
+			DoNotAutoApply:   s.DoNotAutoApply,
+			RequiresMoreData: s.RequiresMoreData,
+		}
+	}
 
 	toDTORecommendation := func(r ThresholdRecommendation) dto.ThresholdRecommendation {
 		return dto.ThresholdRecommendation{
@@ -411,6 +447,8 @@ func NormalizeEvaluationForFrontend(report *EvaluationReport) dto.EvaluationResp
 		StalenessStats:          []dto.NamedStalenessStats{},
 		LongRegimePlaybookStats: []dto.SetupDiagnosticStats{},
 		WeakLongSetups:          []dto.SetupDiagnosticStats{},
+		SetupMemorySlices:       []dto.SetupMemorySlice{},
+		LearningReviews:         []dto.LearningReview{},
 		ConflictStats:           []dto.NamedIntStat{},
 		CooldownStats:           []dto.NamedIntStat{},
 		GateBugFindings:         []dto.GateBugFinding{},
@@ -486,6 +524,12 @@ func NormalizeEvaluationForFrontend(report *EvaluationReport) dto.EvaluationResp
 	}
 	for _, stat := range report.WeakLongSetups {
 		out.WeakLongSetups = append(out.WeakLongSetups, toDTOSetupDiagnosticStats(stat))
+	}
+	for _, stat := range report.SetupMemorySlices {
+		out.SetupMemorySlices = append(out.SetupMemorySlices, toDTOSetupMemorySlice(stat))
+	}
+	for _, item := range report.LearningReviews {
+		out.LearningReviews = append(out.LearningReviews, toDTOLearningReview(item))
 	}
 
 	confKeys := make([]string, 0, len(report.ConflictStats))
@@ -583,6 +627,7 @@ func NormalizeDecisionAuditForFrontend(audits []DecisionAudit, limit, offset int
 			FinalReasonAfterConflict:  item.FinalReasonAfterConflict,
 			FinalStatus:               string(item.FinalStatus),
 			FinalReason:               item.FinalReason,
+			DecisionBrief:             item.DecisionBrief,
 			FinalPrimaryReasonLayer:   item.FinalPrimaryReasonLayer,
 			FinalReasonBreakdown:      reasonBreakdown,
 			ConflictReason:            item.ConflictReason,

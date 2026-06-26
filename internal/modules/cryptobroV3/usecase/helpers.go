@@ -648,7 +648,7 @@ func DescribeCandleStructure(candles []dto.Candle, timeframe string, dominantTre
 
 // PopulateSnapshots builds high-fidelity TechnicalSnapshot and StructureSnapshot for use in selectors & gates.
 func PopulateSnapshots(m15 []dto.Candle, h1 []dto.Candle, h4 []dto.Candle, fundingRate float64, latestPrice float64, priceChange24h float64, openInterest float64, oiChangePct float64) (*TechnicalSnapshot, *StructureSnapshot) {
-	m15Closed := GetClosedCandlesOnly(m15, 15*time.Minute)
+	m15Closed := GetClosedCandlesOnly(m15, defaultClosedCandleTimeframe)
 	h1Closed := GetClosedCandlesOnly(h1, time.Hour)
 	h4Closed := GetClosedCandlesOnly(h4, 4*time.Hour)
 
@@ -777,7 +777,7 @@ func populateSnapshotsFromClosedCandles(m15Closed []dto.Candle, h1Closed []dto.C
 			if lastIdx >= 0 && lastIdx < len(basis) && basis[lastIdx] > 0 {
 				bbWidth := (upper[lastIdx] - lower[lastIdx]) / basis[lastIdx]
 				tech.IndicatorValues[IndicatorBBWidth] = bbWidth
-				
+
 				// Adaptive: use rolling percentile if configured, fallback to absolute threshold
 				contractionDetected := false
 				pctThreshold := 0.0

@@ -262,21 +262,21 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 	maxHoldDuration := getMonitoringMaxHoldDuration()
 
 	// Time progression: step by step 15m intervals
-	currentTick := req.StartTime.Truncate(15 * time.Minute)
-	endTick := req.EndTime.Truncate(15 * time.Minute)
+	currentTick := req.StartTime.Truncate(defaultClosedCandleTimeframe)
+	endTick := req.EndTime.Truncate(defaultClosedCandleTimeframe)
 	var latestPrice float64
 
 	for currentTick.Before(endTick) || currentTick.Equal(endTick) {
 		// 1. Filter closed candles up to currentTick
-		closedM15 := FilterClosedCandles(allSymbolM15, currentTick, 15*time.Minute)
+		closedM15 := FilterClosedCandles(allSymbolM15, currentTick, defaultClosedCandleTimeframe)
 		closedH1 := FilterClosedCandles(allSymbolH1, currentTick, time.Hour)
 		closedH4 := FilterClosedCandles(allSymbolH4, currentTick, 4*time.Hour)
 
-		closedBtcM15 := FilterClosedCandles(allBtcM15, currentTick, 15*time.Minute)
+		closedBtcM15 := FilterClosedCandles(allBtcM15, currentTick, defaultClosedCandleTimeframe)
 
 		// Ensure we have enough klines for indicators (warmup limit)
 		if len(closedM15) < 30 || len(closedBtcM15) < 30 {
-			currentTick = currentTick.Add(15 * time.Minute)
+			currentTick = currentTick.Add(defaultClosedCandleTimeframe)
 			continue
 		}
 
@@ -543,20 +543,20 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 		// Perform Universe filter
 		candidates, _ := uc.universeUsecase.FilterUniverse(tickers, fundingRates, policy, nil)
 		if len(candidates) == 0 {
-			currentTick = currentTick.Add(15 * time.Minute)
+			currentTick = currentTick.Add(defaultClosedCandleTimeframe)
 			continue
 		}
 
 		cand := candidates[0] // since tickers list contains only target symbol
 		if cand.Symbol != req.Symbol {
-			currentTick = currentTick.Add(15 * time.Minute)
+			currentTick = currentTick.Add(defaultClosedCandleTimeframe)
 			continue
 		}
 
 		// Staleness check on closed candles (prevents executing stale ticks)
-		if !uc.stalenessUsecase.IsFreshAt(closedM15, currentTick, 15*time.Minute) {
+		if !uc.stalenessUsecase.IsFreshAt(closedM15, currentTick, defaultClosedCandleTimeframe) {
 			staleDetections++
-			currentTick = currentTick.Add(15 * time.Minute)
+			currentTick = currentTick.Add(defaultClosedCandleTimeframe)
 			continue
 		}
 
@@ -573,7 +573,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 		}
 		prepared, ok := uc.playbookQuantEngineUsecase.prepareContext(prelimData)
 		if !ok {
-			currentTick = currentTick.Add(15 * time.Minute)
+			currentTick = currentTick.Add(defaultClosedCandleTimeframe)
 			continue
 		}
 		tech := &prepared.technicalSnapshot
@@ -616,14 +616,14 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 		}
 
 		if len(listCandidates) == 0 {
-			currentTick = currentTick.Add(15 * time.Minute)
+			currentTick = currentTick.Add(defaultClosedCandleTimeframe)
 			continue
 		}
 
 		// Arbitrate
 		selectedCandidates, _ := uc.candidateArbiterUsecase.Arbitrate(listCandidates, policy)
 		if len(selectedCandidates) == 0 {
-			currentTick = currentTick.Add(15 * time.Minute)
+			currentTick = currentTick.Add(defaultClosedCandleTimeframe)
 			continue
 		}
 
@@ -639,7 +639,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 		}
 
 		if len(localCandidates) == 0 {
-			currentTick = currentTick.Add(15 * time.Minute)
+			currentTick = currentTick.Add(defaultClosedCandleTimeframe)
 			continue
 		}
 
@@ -807,7 +807,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 			}
 		}
 
-		currentTick = currentTick.Add(15 * time.Minute)
+		currentTick = currentTick.Add(defaultClosedCandleTimeframe)
 	}
 
 	// 7. Process remaining active positions that are still in MONITORING/TP1_HIT status at EndTime.

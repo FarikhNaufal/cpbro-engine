@@ -40,7 +40,15 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	jsonStorage, err := service.NewJSONStorageService(cfg.Storage.StoragePath)
+	jsonStorage, err := service.NewJSONStorageServiceWithFiles(cfg.Storage.StoragePath, service.JSONStorageFiles{
+		LatestResultFile:     cfg.Storage.LatestResultFile,
+		SignalHistoryFile:    cfg.Storage.SignalHistoryFile,
+		SignalJournalFile:    cfg.Storage.SignalJournalFile,
+		WatchJournalFile:     cfg.Storage.WatchJournalFile,
+		AIAuditCacheFile:     cfg.Storage.AIAuditCacheFile,
+		EvaluationReportFile: cfg.Storage.EvaluationReportFile,
+		DecisionAuditFile:    cfg.Storage.DecisionAuditFile,
+	})
 	if err != nil {
 		log.Fatalf("failed to init JSON storage: %v", err)
 	}
@@ -87,7 +95,7 @@ func migrateSignalJournal(ctx context.Context, cfg *config.Config, jsonStorage *
 	_, statErr := os.Stat(journalPath)
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
-			slog.Info("signal_journal.json not found; skipping", "path", journalPath)
+			slog.Info("signal journal file not found; skipping", "file", cfg.Storage.SignalJournalFile, "path", journalPath)
 			return nil
 		}
 		return statErr
@@ -98,7 +106,7 @@ func migrateSignalJournal(ctx context.Context, cfg *config.Config, jsonStorage *
 		return err
 	}
 	if len(journal) == 0 {
-		slog.Info("signal_journal is empty; nothing to migrate")
+		slog.Info("signal journal is empty; nothing to migrate", "file", cfg.Storage.SignalJournalFile)
 		return nil
 	}
 
@@ -128,7 +136,7 @@ func migrateEvaluationReport(ctx context.Context, cfg *config.Config, jsonStorag
 	_, statErr := os.Stat(reportPath)
 	if statErr != nil {
 		if os.IsNotExist(statErr) {
-			slog.Info("evaluation_report.json not found; skipping", "path", reportPath)
+			slog.Info("evaluation report file not found; skipping", "file", cfg.Storage.EvaluationReportFile, "path", reportPath)
 			return nil
 		}
 		return statErr
@@ -139,7 +147,7 @@ func migrateEvaluationReport(ctx context.Context, cfg *config.Config, jsonStorag
 		return err
 	}
 	if report == nil || report.GeneratedAt.IsZero() {
-		slog.Info("evaluation_report empty or missing generated_at; skipping")
+		slog.Info("evaluation report empty or missing generated_at; skipping", "file", cfg.Storage.EvaluationReportFile)
 		return nil
 	}
 

@@ -1,6 +1,8 @@
 package service
 
 import (
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -162,5 +164,42 @@ func TestJSONStorageService_AppendDecisionAudits_BatchesAtomically(t *testing.T)
 	}
 	if audits[0].Symbol != "BTCUSDT" || audits[1].Symbol != "ETHUSDT" {
 		t.Fatalf("unexpected decision audits after batch append: %+v", audits)
+	}
+}
+
+func TestJSONStorageService_UsesConfiguredWatchJournalFile(t *testing.T) {
+	dir := t.TempDir()
+	st, err := NewJSONStorageServiceWithFiles(dir, JSONStorageFiles{
+		WatchJournalFile: "custom_watch_journal.json",
+	})
+	if err != nil {
+		t.Fatalf("NewJSONStorageServiceWithFiles failed: %v", err)
+	}
+
+	input := []usecase.WatchJournal{{
+		ID:        "watch_1",
+		Symbol:    "SOLUSDT",
+		Playbook:  usecase.LIQUIDITY_SWEEP_REVERSAL,
+		Direction: usecase.LONG,
+		Status:    usecase.WATCH_MONITORING,
+		CreatedAt: time.Now().UTC(),
+	}}
+	if err := st.SaveWatchJournal(input); err != nil {
+		t.Fatalf("SaveWatchJournal failed: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "custom_watch_journal.json")); err != nil {
+		t.Fatalf("expected custom watch journal file to exist: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "watch_journal.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected default watch journal file to stay unused, err=%v", err)
+	}
+
+	output, err := st.LoadWatchJournal()
+	if err != nil {
+		t.Fatalf("LoadWatchJournal failed: %v", err)
+	}
+	if len(output) != 1 || output[0].ID != "watch_1" {
+		t.Fatalf("unexpected watch journal contents: %+v", output)
 	}
 }

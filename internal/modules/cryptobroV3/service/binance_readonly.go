@@ -18,19 +18,25 @@ type BinanceReadonlyService struct {
 	retryBackoff   time.Duration
 }
 
+const (
+	defaultBinanceReadonlyRequestTimeout = 15 * time.Second
+	defaultBinanceReadonlyMaxRetry       = 2
+	defaultBinanceReadonlyRetryBackoff   = 300 * time.Millisecond
+)
+
 func NewBinanceReadonlyService(apiKey, apiSecret string) *BinanceReadonlyService {
-	return NewBinanceReadonlyServiceWithOptions(apiKey, apiSecret, "", 15*time.Second, 2, 300*time.Millisecond)
+	return NewBinanceReadonlyServiceWithOptions(apiKey, apiSecret, "", defaultBinanceReadonlyRequestTimeout, defaultBinanceReadonlyMaxRetry, defaultBinanceReadonlyRetryBackoff)
 }
 
 func NewBinanceReadonlyServiceWithOptions(apiKey, apiSecret, baseURL string, requestTimeout time.Duration, maxRetry int, retryBackoff time.Duration) *BinanceReadonlyService {
 	if requestTimeout <= 0 {
-		requestTimeout = 15 * time.Second
+		requestTimeout = defaultBinanceReadonlyRequestTimeout
 	}
 	if maxRetry < 0 {
 		maxRetry = 0
 	}
 	if retryBackoff <= 0 {
-		retryBackoff = 300 * time.Millisecond
+		retryBackoff = defaultBinanceReadonlyRetryBackoff
 	}
 	client := futures.NewClient(apiKey, apiSecret)
 	if trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/"); trimmed != "" {

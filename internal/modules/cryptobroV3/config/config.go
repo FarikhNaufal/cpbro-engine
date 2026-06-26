@@ -8,6 +8,19 @@ import (
 	"strings"
 )
 
+const (
+	ScanIntervalModeM15Close    = "m15_close"
+	DefaultLatestResultFile     = "latest_result.json"
+	DefaultSignalHistoryFile    = "signal_history.json"
+	DefaultSignalJournalFile    = "signal_journal.json"
+	DefaultWatchJournalFile     = "watch_journal.json"
+	DefaultAIAuditCacheFile     = "ai_audit_cache.json"
+	DefaultEvaluationReportFile = "evaluation_report.json"
+	DefaultDecisionAuditFile    = "decision_audit.json"
+	DefaultHealthSnapshotFile   = "health_snapshot.json"
+	DefaultRawKlinesDebugDir    = "debug/klines"
+)
+
 // AppConfig environment settings
 type AppConfig struct {
 	Env                               string `json:"env"`
@@ -93,46 +106,50 @@ type UniverseConfig struct {
 
 // StrategyRuntimeConfig controls runtime gate and debug heuristics.
 type StrategyRuntimeConfig struct {
-	RequireAIHighForExecute                  bool    `json:"require_ai_high_for_execute"`
-	RequireFreshEntryForExecute              bool    `json:"require_fresh_entry_for_execute"`
-	WatchCooldownMinutes                     int     `json:"watch_cooldown_minutes"`
-	WatchDedupPriceToleranceBps              int     `json:"watch_dedup_price_tolerance_bps"`
-	WatchRecheckMaxAgeMinutes                int     `json:"watch_recheck_max_age_minutes"`
-	WatchRecheckBatchLimit                   int     `json:"watch_recheck_batch_limit"`
-	EvaluationMinSampleWarning               int     `json:"min_sample_warning"`
-	EvaluationMinSampleMedium                int     `json:"min_sample_medium"`
-	EvaluationMinSampleHigh                  int     `json:"min_sample_high"`
-	DebugSaveRawKlines                       bool    `json:"debug_save_raw_klines"`
-	RawKlinesDebugDir                        string  `json:"raw_klines_debug_dir"`
-	MaxMarketDataPrefetchSymbols             int     `json:"max_marketdata_prefetch_symbols"`
-	ScanRequestWeightBudget                  int     `json:"scan_request_weight_budget"`
-	CompressionNeutralBreadthLower           float64 `json:"compression_neutral_breadth_lower"`
-	CompressionNeutralBreadthUpper           float64 `json:"compression_neutral_breadth_upper"`
-	CompressionMaxBBWidth                    float64 `json:"compression_max_bb_width"`
-	CompressionBBWidthPercentile             float64 `json:"compression_bb_width_percentile"`
-	CompressionBBWidthLookback               int     `json:"compression_bb_width_lookback"`
-	CompressionZeroEligibleFallbackThreshold int     `json:"compression_zero_eligible_fallback_threshold"`
-	BroaderVolatilitySampleFloor             int     `json:"broader_volatility_sample_floor"`
-	FundingExtremeThreshold                  float64 `json:"funding_extreme_threshold"`
-	ATRFallbackPercent                       float64 `json:"atr_fallback_percent"`
-	MinSLATRMultiplierBase                   float64 `json:"min_sl_atr_multiplier_base"`
-	MinSLATRMultiplierReversal               float64 `json:"min_sl_atr_multiplier_reversal"`
-	MinSLATRMultiplierHighVol                float64 `json:"min_sl_atr_multiplier_high_vol"`
-	RotationActivityThresholdDefault         float64 `json:"rotation_activity_threshold_default"`
-	RotationActivityThresholdAlt             float64 `json:"rotation_activity_threshold_alt"`
-	RotationActivityThresholdDefensive       float64 `json:"rotation_activity_threshold_defensive"`
-	RotationActivityThresholdLowVol          float64 `json:"rotation_activity_threshold_low_vol"`
-	RotationPrefetchRatioDefault             float64 `json:"rotation_prefetch_ratio_default"`
-	RotationPrefetchRatioAlt                 float64 `json:"rotation_prefetch_ratio_alt"`
-	RotationPrefetchRatioDefensive           float64 `json:"rotation_prefetch_ratio_defensive"`
-	StalenessPolicyScaleBase                 float64 `json:"staleness_policy_scale_base"`
-	StalenessPolicyScaleMin                  float64 `json:"staleness_policy_scale_min"`
-	StalenessPolicyScaleMax                  float64 `json:"staleness_policy_scale_max"`
-	StalenessLateThresholdMultiplier         float64 `json:"staleness_late_threshold_multiplier"`
-	StalenessBasePctChaos                    float64 `json:"staleness_base_pct_chaos"`
-	StalenessBasePctHighVol                  float64 `json:"staleness_base_pct_high_vol"`
-	StalenessBasePctTierC                    float64 `json:"staleness_base_pct_tier_c"`
-	StalenessBasePctDefault                  float64 `json:"staleness_base_pct_default"`
+	RequireAIHighForExecute                  bool     `json:"require_ai_high_for_execute"`
+	RequireFreshEntryForExecute              bool     `json:"require_fresh_entry_for_execute"`
+	WatchCooldownMinutes                     int      `json:"watch_cooldown_minutes"`
+	WatchDedupPriceToleranceBps              int      `json:"watch_dedup_price_tolerance_bps"`
+	WatchRecheckBoundaryMinutes              int      `json:"watch_recheck_boundary_minutes"`
+	WatchRecheckMaxAgeMinutes                int      `json:"watch_recheck_max_age_minutes"`
+	WatchRecheckBatchLimit                   int      `json:"watch_recheck_batch_limit"`
+	WatchRecheckAllowedPlaybooks             []string `json:"watch_recheck_allowed_playbooks"`
+	WatchRecheckAllowedReasonTokens          []string `json:"watch_recheck_allowed_reason_tokens"`
+	WatchRecheckBlockedReasonTokens          []string `json:"watch_recheck_blocked_reason_tokens"`
+	EvaluationMinSampleWarning               int      `json:"min_sample_warning"`
+	EvaluationMinSampleMedium                int      `json:"min_sample_medium"`
+	EvaluationMinSampleHigh                  int      `json:"min_sample_high"`
+	DebugSaveRawKlines                       bool     `json:"debug_save_raw_klines"`
+	RawKlinesDebugDir                        string   `json:"raw_klines_debug_dir"`
+	MaxMarketDataPrefetchSymbols             int      `json:"max_marketdata_prefetch_symbols"`
+	ScanRequestWeightBudget                  int      `json:"scan_request_weight_budget"`
+	CompressionNeutralBreadthLower           float64  `json:"compression_neutral_breadth_lower"`
+	CompressionNeutralBreadthUpper           float64  `json:"compression_neutral_breadth_upper"`
+	CompressionMaxBBWidth                    float64  `json:"compression_max_bb_width"`
+	CompressionBBWidthPercentile             float64  `json:"compression_bb_width_percentile"`
+	CompressionBBWidthLookback               int      `json:"compression_bb_width_lookback"`
+	CompressionZeroEligibleFallbackThreshold int      `json:"compression_zero_eligible_fallback_threshold"`
+	BroaderVolatilitySampleFloor             int      `json:"broader_volatility_sample_floor"`
+	FundingExtremeThreshold                  float64  `json:"funding_extreme_threshold"`
+	ATRFallbackPercent                       float64  `json:"atr_fallback_percent"`
+	MinSLATRMultiplierBase                   float64  `json:"min_sl_atr_multiplier_base"`
+	MinSLATRMultiplierReversal               float64  `json:"min_sl_atr_multiplier_reversal"`
+	MinSLATRMultiplierHighVol                float64  `json:"min_sl_atr_multiplier_high_vol"`
+	RotationActivityThresholdDefault         float64  `json:"rotation_activity_threshold_default"`
+	RotationActivityThresholdAlt             float64  `json:"rotation_activity_threshold_alt"`
+	RotationActivityThresholdDefensive       float64  `json:"rotation_activity_threshold_defensive"`
+	RotationActivityThresholdLowVol          float64  `json:"rotation_activity_threshold_low_vol"`
+	RotationPrefetchRatioDefault             float64  `json:"rotation_prefetch_ratio_default"`
+	RotationPrefetchRatioAlt                 float64  `json:"rotation_prefetch_ratio_alt"`
+	RotationPrefetchRatioDefensive           float64  `json:"rotation_prefetch_ratio_defensive"`
+	StalenessPolicyScaleBase                 float64  `json:"staleness_policy_scale_base"`
+	StalenessPolicyScaleMin                  float64  `json:"staleness_policy_scale_min"`
+	StalenessPolicyScaleMax                  float64  `json:"staleness_policy_scale_max"`
+	StalenessLateThresholdMultiplier         float64  `json:"staleness_late_threshold_multiplier"`
+	StalenessBasePctChaos                    float64  `json:"staleness_base_pct_chaos"`
+	StalenessBasePctHighVol                  float64  `json:"staleness_base_pct_high_vol"`
+	StalenessBasePctTierC                    float64  `json:"staleness_base_pct_tier_c"`
+	StalenessBasePctDefault                  float64  `json:"staleness_base_pct_default"`
 }
 
 // HotSourceConfig controls external hot-symbol discovery settings.
@@ -217,6 +234,7 @@ type StorageConfig struct {
 	LatestResultFile     string `json:"latest_result_file"`
 	SignalHistoryFile    string `json:"signal_history_file"`
 	SignalJournalFile    string `json:"signal_journal_file"`
+	WatchJournalFile     string `json:"watch_journal_file"`
 	AIAuditCacheFile     string `json:"ai_audit_cache_file"`
 	EvaluationReportFile string `json:"evaluation_report_file"`
 	DecisionAuditFile    string `json:"decision_audit_file"`
@@ -329,7 +347,7 @@ func LoadConfigFromEnv() (*Config, error) {
 		},
 		Scanner: ScannerConfig{
 			Enabled:                  getEnvBool("SCAN_ENABLED", true),
-			IntervalMode:             getEnv("SCAN_INTERVAL_MODE", "m15_close"),
+			IntervalMode:             getEnv("SCAN_INTERVAL_MODE", ScanIntervalModeM15Close),
 			StartupDelaySeconds:      getEnvInt("SCAN_STARTUP_DELAY_SECONDS", 5),
 			ContextTimeoutSeconds:    getEnvInt("SCAN_CONTEXT_TIMEOUT_SECONDS", 120),
 			PreventOverlap:           getEnvBool("PREVENT_SCAN_OVERLAP", true),
@@ -393,13 +411,17 @@ func LoadConfigFromEnv() (*Config, error) {
 			RequireFreshEntryForExecute:              getEnvBoolWithFallback("STRATEGY_REQUIRE_FRESH_ENTRY_FOR_EXECUTE", "REQUIRE_FRESH_ENTRY_FOR_EXECUTE", true),
 			WatchCooldownMinutes:                     getEnvIntWithFallback("STRATEGY_WATCH_COOLDOWN_MINUTES", "WATCH_COOLDOWN_MINUTES", 30),
 			WatchDedupPriceToleranceBps:              getEnvIntWithFallback("STRATEGY_WATCH_DEDUP_PRICE_TOLERANCE_BPS", "WATCH_DEDUP_PRICE_TOLERANCE_BPS", 50),
+			WatchRecheckBoundaryMinutes:              getEnvInt("STRATEGY_WATCH_RECHECK_BOUNDARY_MINUTES", 5),
 			WatchRecheckMaxAgeMinutes:                getEnvInt("STRATEGY_WATCH_RECHECK_MAX_AGE_MINUTES", 12),
 			WatchRecheckBatchLimit:                   getEnvInt("STRATEGY_WATCH_RECHECK_BATCH_LIMIT", 6),
+			WatchRecheckAllowedPlaybooks:             getEnvCSV("STRATEGY_WATCH_RECHECK_ALLOWED_PLAYBOOKS", []string{"TREND_PULLBACK", "LIQUIDITY_SWEEP_REVERSAL", "COMPRESSION_BREAKOUT_RETEST"}),
+			WatchRecheckAllowedReasonTokens:          getEnvCSV("STRATEGY_WATCH_RECHECK_ALLOWED_REASON_TOKENS", []string{"AI DECISION IS WAIT", "AI_SKIPPED", "WATCH_ONLY", "WAIT_RETEST", "AI CONFIDENCE", "LOCAL_GATE_WATCH", "M5 "}),
+			WatchRecheckBlockedReasonTokens:          getEnvCSV("STRATEGY_WATCH_RECHECK_BLOCKED_REASON_TOKENS", []string{"ACTIVE_MONITORING_EXISTS", "OPPOSITE_SIGNAL_CONFLICT", "LOWER_PRIORITY_CONFLICT", "DUPLICATE_SIGNAL_BUCKET", "SYMBOL_COOLDOWN_ACTIVE", "MAX_FINAL_EXECUTE_LIMIT"}),
 			EvaluationMinSampleWarning:               getEnvIntWithFallback("STRATEGY_EVALUATION_MIN_SAMPLE_WARNING", "EVALUATION_MIN_SAMPLE_WARNING", 10),
 			EvaluationMinSampleMedium:                getEnvIntWithFallback("STRATEGY_EVALUATION_MIN_SAMPLE_MEDIUM", "EVALUATION_MIN_SAMPLE_MEDIUM", 20),
 			EvaluationMinSampleHigh:                  getEnvIntWithFallback("STRATEGY_EVALUATION_MIN_SAMPLE_HIGH", "EVALUATION_MIN_SAMPLE_HIGH", 50),
 			DebugSaveRawKlines:                       getEnvBool("DEBUG_SAVE_RAW_KLINES", false),
-			RawKlinesDebugDir:                        getEnv("RAW_KLINES_DEBUG_DIR", "debug/klines"),
+			RawKlinesDebugDir:                        getEnv("RAW_KLINES_DEBUG_DIR", DefaultRawKlinesDebugDir),
 			MaxMarketDataPrefetchSymbols:             getEnvIntWithFallback("STRATEGY_MAX_MARKETDATA_PREFETCH_SYMBOLS", "MAX_MARKETDATA_PREFETCH_SYMBOLS", 0),
 			ScanRequestWeightBudget:                  getEnvIntWithFallback("STRATEGY_SCAN_REQUEST_WEIGHT_BUDGET", "SCAN_REQUEST_WEIGHT_BUDGET", 0),
 			CompressionNeutralBreadthLower:           getEnvFloat("STRATEGY_COMPRESSION_NEUTRAL_BREADTH_LOWER", 0.35),
@@ -495,13 +517,14 @@ func LoadConfigFromEnv() (*Config, error) {
 		},
 		Storage: StorageConfig{
 			StoragePath:          getEnv("STORAGE_PATH", "storage"),
-			LatestResultFile:     getEnv("LATEST_RESULT_FILE", "latest_result.json"),
-			SignalHistoryFile:    getEnv("SIGNAL_HISTORY_FILE", "signal_history.json"),
-			SignalJournalFile:    getEnv("SIGNAL_JOURNAL_FILE", "signal_journal.json"),
-			AIAuditCacheFile:     getEnv("AI_AUDIT_CACHE_FILE", "ai_audit_cache.json"),
-			EvaluationReportFile: getEnv("EVALUATION_REPORT_FILE", "evaluation_report.json"),
-			DecisionAuditFile:    getEnv("DECISION_AUDIT_FILE", "decision_audit.json"),
-			HealthSnapshotFile:   getEnv("HEALTH_SNAPSHOT_FILE", "health_snapshot.json"),
+			LatestResultFile:     getEnv("LATEST_RESULT_FILE", DefaultLatestResultFile),
+			SignalHistoryFile:    getEnv("SIGNAL_HISTORY_FILE", DefaultSignalHistoryFile),
+			SignalJournalFile:    getEnv("SIGNAL_JOURNAL_FILE", DefaultSignalJournalFile),
+			WatchJournalFile:     getEnv("WATCH_JOURNAL_FILE", DefaultWatchJournalFile),
+			AIAuditCacheFile:     getEnv("AI_AUDIT_CACHE_FILE", DefaultAIAuditCacheFile),
+			EvaluationReportFile: getEnv("EVALUATION_REPORT_FILE", DefaultEvaluationReportFile),
+			DecisionAuditFile:    getEnv("DECISION_AUDIT_FILE", DefaultDecisionAuditFile),
+			HealthSnapshotFile:   getEnv("HEALTH_SNAPSHOT_FILE", DefaultHealthSnapshotFile),
 		},
 		PocketBase: PocketBaseConfig{
 			Enabled:               getEnvBool("POCKETBASE_ENABLED", false),
@@ -564,6 +587,25 @@ func normalizeCompatibilityConfig(cfg *Config) {
 		return
 	}
 
+	switch strings.ToLower(strings.TrimSpace(cfg.Scanner.IntervalMode)) {
+	case "", ScanIntervalModeM15Close, "candle_close", "close_only":
+		cfg.Scanner.IntervalMode = ScanIntervalModeM15Close
+	default:
+		cfg.Scanner.IntervalMode = strings.ToLower(strings.TrimSpace(cfg.Scanner.IntervalMode))
+	}
+
+	if cfg.Monitoring.MaxHoldMinutes > 0 {
+		cfg.Monitoring.MaxHoldM15Candles = (cfg.Monitoring.MaxHoldMinutes + 14) / 15
+		if cfg.Monitoring.MaxHoldM15Candles < 1 {
+			cfg.Monitoring.MaxHoldM15Candles = 1
+		}
+	} else if cfg.Monitoring.MaxHoldM15Candles > 0 {
+		cfg.Monitoring.MaxHoldMinutes = cfg.Monitoring.MaxHoldM15Candles * 15
+	} else {
+		cfg.Monitoring.MaxHoldMinutes = 120
+		cfg.Monitoring.MaxHoldM15Candles = 8
+	}
+
 	cfg.Monitoring.MaxCandleConcurrency = cfg.Worker.MaxMonitoringCandleConcurrency
 	cfg.Monitoring.WatchCooldownMinutes = cfg.Strategy.WatchCooldownMinutes
 	cfg.Monitoring.WatchDedupPriceToleranceBps = cfg.Strategy.WatchDedupPriceToleranceBps
@@ -575,6 +617,9 @@ func normalizeCompatibilityConfig(cfg *Config) {
 	cfg.Concurrency.MaxSymbolsDefault = cfg.Universe.MaxSymbolsDefault
 
 	cfg.Gemini.MaxConcurrency = cfg.Worker.MaxAIConcurrency
+	cfg.Evaluation.MinSampleWarning = cfg.Strategy.EvaluationMinSampleWarning
+	cfg.Evaluation.MinSampleMedium = cfg.Strategy.EvaluationMinSampleMedium
+	cfg.Evaluation.MinSampleHigh = cfg.Strategy.EvaluationMinSampleHigh
 
 	cfg.Strategy.RequireAIHighForExecute = cfg.Safety.RequireAIHighForExecute
 	cfg.Strategy.RequireFreshEntryForExecute = cfg.Safety.RequireFreshEntryForExecute
@@ -632,6 +677,11 @@ func ValidateConfig(cfg *Config) error {
 	if cfg.Scanner.ContextTimeoutSeconds <= 0 {
 		return fmt.Errorf("SCAN_CONTEXT_TIMEOUT_SECONDS must be greater than zero")
 	}
+	switch cfg.Scanner.IntervalMode {
+	case ScanIntervalModeM15Close:
+	default:
+		return fmt.Errorf("SCAN_INTERVAL_MODE must be %s", ScanIntervalModeM15Close)
+	}
 	if cfg.Scanner.PollIntervalSeconds <= 0 {
 		return fmt.Errorf("SCAN_POLL_INTERVAL_SECONDS must be greater than zero")
 	}
@@ -678,6 +728,9 @@ func ValidateConfig(cfg *Config) error {
 	}
 	if cfg.Gemini.RequestTimeoutSeconds <= 0 {
 		return fmt.Errorf("GEMINI_REQUEST_TIMEOUT_SECONDS must be greater than zero")
+	}
+	if cfg.Gemini.MaxCandidatesDefault < 1 {
+		return fmt.Errorf("MAX_AI_CANDIDATES_DEFAULT must be at least 1")
 	}
 	if cfg.Telegram.RequestTimeoutSeconds <= 0 {
 		return fmt.Errorf("TELEGRAM_REQUEST_TIMEOUT_SECONDS must be greater than zero")
@@ -750,11 +803,23 @@ func ValidateConfig(cfg *Config) error {
 	if cfg.Strategy.WatchDedupPriceToleranceBps < 1 {
 		return fmt.Errorf("STRATEGY_WATCH_DEDUP_PRICE_TOLERANCE_BPS must be at least 1")
 	}
+	if cfg.Strategy.WatchRecheckBoundaryMinutes < 1 {
+		return fmt.Errorf("STRATEGY_WATCH_RECHECK_BOUNDARY_MINUTES must be at least 1")
+	}
 	if cfg.Strategy.WatchRecheckMaxAgeMinutes < 1 {
 		return fmt.Errorf("STRATEGY_WATCH_RECHECK_MAX_AGE_MINUTES must be at least 1")
 	}
 	if cfg.Strategy.WatchRecheckBatchLimit < 1 {
 		return fmt.Errorf("STRATEGY_WATCH_RECHECK_BATCH_LIMIT must be at least 1")
+	}
+	if cfg.Monitoring.RecheckEnabled && cfg.Strategy.WatchRecheckBoundaryMinutes >= cfg.Scanner.BoundaryMinutes {
+		return fmt.Errorf("STRATEGY_WATCH_RECHECK_BOUNDARY_MINUTES must be lower than SCAN_BOUNDARY_MINUTES while recheck is enabled")
+	}
+	if len(cfg.Strategy.WatchRecheckAllowedPlaybooks) == 0 {
+		return fmt.Errorf("STRATEGY_WATCH_RECHECK_ALLOWED_PLAYBOOKS must contain at least one playbook")
+	}
+	if len(cfg.Strategy.WatchRecheckAllowedReasonTokens) == 0 {
+		return fmt.Errorf("STRATEGY_WATCH_RECHECK_ALLOWED_REASON_TOKENS must contain at least one token")
 	}
 	if cfg.Strategy.EvaluationMinSampleWarning < 1 || cfg.Strategy.EvaluationMinSampleMedium < 1 || cfg.Strategy.EvaluationMinSampleHigh < 1 {
 		return fmt.Errorf("strategy evaluation sample thresholds must be at least 1")
@@ -846,19 +911,19 @@ func ValidateConfig(cfg *Config) error {
 
 	// Concurrencies checks
 	if cfg.Gemini.MaxConcurrency < 1 {
-		return fmt.Errorf("MAX_AI_CONCURRENCY must be at least 1")
+		return fmt.Errorf("WORKER_MAX_AI_CONCURRENCY must be at least 1")
 	}
 	if cfg.Concurrency.MaxMarketDataConcurrency < 1 {
-		return fmt.Errorf("MAX_MARKETDATA_CONCURRENCY must be at least 1")
+		return fmt.Errorf("WORKER_MAX_MARKETDATA_CONCURRENCY must be at least 1")
 	}
 	if cfg.Concurrency.MaxCandidatePipelineConcurrency < 0 {
-		return fmt.Errorf("MAX_CANDIDATE_PIPELINE_CONCURRENCY must be >= 0")
+		return fmt.Errorf("WORKER_MAX_CANDIDATE_PIPELINE_CONCURRENCY must be >= 0")
 	}
 	if cfg.Concurrency.MaxMarketDataPrefetchSymbols < 0 {
-		return fmt.Errorf("MAX_MARKETDATA_PREFETCH_SYMBOLS must be >= 0")
+		return fmt.Errorf("STRATEGY_MAX_MARKETDATA_PREFETCH_SYMBOLS must be >= 0")
 	}
 	if cfg.Concurrency.ScanRequestWeightBudget < 0 {
-		return fmt.Errorf("SCAN_REQUEST_WEIGHT_BUDGET must be >= 0")
+		return fmt.Errorf("STRATEGY_SCAN_REQUEST_WEIGHT_BUDGET must be >= 0")
 	}
 	if cfg.Monitoring.IntervalSeconds <= 0 {
 		return fmt.Errorf("MONITORING_INTERVAL_SECONDS must be greater than zero")
@@ -867,13 +932,13 @@ func ValidateConfig(cfg *Config) error {
 		return fmt.Errorf("MONITORING_TIMEOUT_BUFFER_SECONDS must be >= 0")
 	}
 	if cfg.Monitoring.MaxCandleConcurrency < 1 {
-		return fmt.Errorf("MAX_MONITORING_CANDLE_CONCURRENCY must be at least 1")
+		return fmt.Errorf("WORKER_MAX_MONITORING_CANDLE_CONCURRENCY must be at least 1")
 	}
 	if cfg.Monitoring.WatchCooldownMinutes < 1 {
-		return fmt.Errorf("WATCH_COOLDOWN_MINUTES must be at least 1")
+		return fmt.Errorf("STRATEGY_WATCH_COOLDOWN_MINUTES must be at least 1")
 	}
 	if cfg.Monitoring.WatchDedupPriceToleranceBps < 1 {
-		return fmt.Errorf("WATCH_DEDUP_PRICE_TOLERANCE_BPS must be at least 1")
+		return fmt.Errorf("STRATEGY_WATCH_DEDUP_PRICE_TOLERANCE_BPS must be at least 1")
 	}
 	if cfg.Safety.HealthCheckTimeoutSeconds <= 0 {
 		return fmt.Errorf("HEALTH_CHECK_TIMEOUT_SECONDS must be greater than zero")
@@ -1053,13 +1118,10 @@ func SafeConfigView(cfg *Config) map[string]any {
 			"smart_money_chains":      cfg.HotSource.SmartMoneyChains,
 		},
 		"evaluation": map[string]any{
-			"enabled":            cfg.Evaluation.Enabled,
-			"auto_run":           cfg.Evaluation.AutoRun,
-			"auto_apply":         cfg.Evaluation.AutoApply,
-			"interval_minutes":   cfg.Evaluation.IntervalMinutes,
-			"min_sample_warning": cfg.Evaluation.MinSampleWarning,
-			"min_sample_medium":  cfg.Evaluation.MinSampleMedium,
-			"min_sample_high":    cfg.Evaluation.MinSampleHigh,
+			"enabled":          cfg.Evaluation.Enabled,
+			"auto_run":         cfg.Evaluation.AutoRun,
+			"auto_apply":       cfg.Evaluation.AutoApply,
+			"interval_minutes": cfg.Evaluation.IntervalMinutes,
 		},
 		"binance": map[string]any{
 			"base_url":                  cfg.Binance.BaseURL,
@@ -1101,6 +1163,7 @@ func SafeConfigView(cfg *Config) map[string]any {
 			"latest_result_file":     cfg.Storage.LatestResultFile,
 			"signal_history_file":    cfg.Storage.SignalHistoryFile,
 			"signal_journal_file":    cfg.Storage.SignalJournalFile,
+			"watch_journal_file":     cfg.Storage.WatchJournalFile,
 			"ai_audit_cache_file":    cfg.Storage.AIAuditCacheFile,
 			"evaluation_report_file": cfg.Storage.EvaluationReportFile,
 			"decision_audit_file":    cfg.Storage.DecisionAuditFile,

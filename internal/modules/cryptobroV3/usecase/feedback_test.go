@@ -2,6 +2,7 @@ package usecase_test
 
 import (
 	"math"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -97,6 +98,14 @@ func (m *mockFeedbackStorageRepo) AppendDecisionAudit(entry usecase.DecisionAudi
 
 // 1. Test empty signal journal
 func TestFeedback_EmptyJournalAndAudits(t *testing.T) {
+	original := usecase.SnapshotRuntimeSettings()
+	t.Cleanup(func() { usecase.SetRuntimeSettings(original) })
+	settings := original
+	settings.SignalJournalFile = "sig_custom.json"
+	settings.WatchJournalFile = "watch_custom.json"
+	settings.DecisionAuditFile = "audit_custom.json"
+	usecase.SetRuntimeSettings(settings)
+
 	repo := &mockFeedbackStorageRepo{journal: nil, audits: nil}
 	storage := usecase.NewStorageUsecase(repo)
 	fb := usecase.NewFeedbackUsecase(storage)
@@ -118,9 +127,59 @@ func TestFeedback_EmptyJournalAndAudits(t *testing.T) {
 	if len(report.Recommendations) != 1 || report.Recommendations[0].IssueType != "INSUFFICIENT_SAMPLE" {
 		t.Errorf("Expected 1 INSUFFICIENT_SAMPLE recommendation, got %v", report.Recommendations)
 	}
+	if !strings.Contains(report.Recommendations[0].Reason, "sig_custom.json") ||
+		!strings.Contains(report.Recommendations[0].Reason, "watch_custom.json") ||
+		!strings.Contains(report.Recommendations[0].Reason, "audit_custom.json") {
+		t.Fatalf("expected custom source file names in reason, got %q", report.Recommendations[0].Reason)
+	}
 
 	if report.DataCompleteness.HasSignalJournal || report.DataCompleteness.HasDecisionAudit {
 		t.Error("Expected completeness flags to be false")
+	}
+}
+
+func TestFeedback_UsesConfiguredSourceFileLabels(t *testing.T) {
+	original := usecase.SnapshotRuntimeSettings()
+	t.Cleanup(func() { usecase.SetRuntimeSettings(original) })
+	settings := original
+	settings.LatestResultFile = "latest_custom.json"
+	settings.SignalJournalFile = "signal_custom.json"
+	settings.WatchJournalFile = "watch_custom.json"
+	settings.DecisionAuditFile = "audit_custom.json"
+	usecase.SetRuntimeSettings(settings)
+
+	now := time.Now()
+	repo := &mockFeedbackStorageRepo{
+		journal: []usecase.SignalJournal{{
+			ID:        "sig1",
+			Symbol:    "BTCUSDT",
+			Playbook:  usecase.TREND_PULLBACK,
+			Status:    usecase.TP2_HIT,
+			CreatedAt: now.Add(-30 * time.Minute),
+			UpdatedAt: now.Add(-15 * time.Minute),
+			ClosedAt:  now.Add(-10 * time.Minute),
+		}},
+		watch: []usecase.WatchJournal{{
+			ID:        "w1",
+			Symbol:    "SOLUSDT",
+			Playbook:  usecase.LIQUIDITY_SWEEP_REVERSAL,
+			Status:    usecase.WATCH_PROMOTED,
+			CreatedAt: now.Add(-40 * time.Minute),
+			UpdatedAt: now.Add(-10 * time.Minute),
+		}},
+		latestRes: &entity.LatestResult{
+			Signals: []dto.SignalResponse{{Symbol: "BTCUSDT"}},
+		},
+		audits: []usecase.DecisionAudit{{GeneratedAt: now.Add(-5 * time.Minute)}},
+	}
+
+	fb := usecase.NewFeedbackUsecase(usecase.NewStorageUsecase(repo))
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	want := []string{"signal_custom.json", "watch_custom.json", "latest_custom.json", "audit_custom.json"}
+	if !reflect.DeepEqual(repo.report.SourceFilesUsed, want) {
+		t.Fatalf("expected source files %v, got %v", want, repo.report.SourceFilesUsed)
 	}
 }
 
@@ -609,6 +668,60 @@ func TestFeedback_WatchPromotedExcludedFromVirtualWatchMetrics(t *testing.T) {
 	}
 	if repo.report.Metrics["watch_finalized"] != 1 {
 		t.Fatalf("expected only finalized virtual watch outcomes to be counted, got %v", repo.report.Metrics["watch_finalized"])
+	}
+	if repo.report.Metrics["watch_promoted_count"] != 1 {
+		t.Fatalf("expected watch_promoted_count=1, got %v", repo.report.Metrics["watch_promoted_count"])
+	}
+}
+
+func TestFeedback_PromotedConversionAndFreshnessMetrics(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &mockFeedbackStorageRepo{
+		journal: []usecase.SignalJournal{
+			{
+				ID:            "sig_promoted_tp2",
+				Playbook:      usecase.LIQUIDITY_SWEEP_REVERSAL,
+				Direction:     usecase.LONG,
+				Status:        usecase.TP2_HIT,
+				CreatedAt:     now.Add(-30 * time.Minute),
+				UpdatedAt:     now.Add(-20 * time.Minute),
+				ClosedAt:      now.Add(-10 * time.Minute),
+				EntryPrice:    100,
+				TP1:           105,
+				TP2:           110,
+				StopLoss:      95,
+				PnlPercentage: 7.5,
+				Reason:        "WATCH_RECHECK_PROMOTION origin_watch_id=w1 | confirmed",
+			},
+		},
+		watch: []usecase.WatchJournal{
+			{ID: "w1", Status: usecase.WATCH_PROMOTED, CreatedAt: now.Add(-40 * time.Minute), UpdatedAt: now.Add(-10 * time.Minute)},
+			{ID: "w2", Status: usecase.WATCH_RECHECK_INVALIDATED, CreatedAt: now.Add(-50 * time.Minute), UpdatedAt: now.Add(-15 * time.Minute), ClosedAt: now.Add(-15 * time.Minute)},
+			{ID: "w3", Status: usecase.WATCH_RECHECK_EXPIRED, CreatedAt: now.Add(-60 * time.Minute), UpdatedAt: now.Add(-25 * time.Minute), ClosedAt: now.Add(-25 * time.Minute)},
+		},
+		audits: []usecase.DecisionAudit{
+			{GeneratedAt: now.Add(-5 * time.Minute)},
+		},
+	}
+
+	fb := usecase.NewFeedbackUsecase(usecase.NewStorageUsecase(repo))
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if repo.report == nil {
+		t.Fatal("expected report to be saved")
+	}
+	if math.Abs(repo.report.Metrics["watch_to_promote_conversion_rate"]-((1.0/3.0)*100.0)) > 1e-9 {
+		t.Fatalf("expected conversion rate 33.33..., got %v", repo.report.Metrics["watch_to_promote_conversion_rate"])
+	}
+	if repo.report.Metrics["promoted_win_rate"] != 100.0 {
+		t.Fatalf("expected promoted_win_rate 100, got %v", repo.report.Metrics["promoted_win_rate"])
+	}
+	if repo.report.FreshnessMarkers["signal_journal"].Status == "" {
+		t.Fatalf("expected signal_journal freshness marker, got %+v", repo.report.FreshnessMarkers)
+	}
+	if repo.report.FreshnessMarkers["decision_audit"].Status == "" {
+		t.Fatalf("expected decision_audit freshness marker, got %+v", repo.report.FreshnessMarkers)
 	}
 }
 
@@ -1530,5 +1643,84 @@ func TestFeedback_QuarantinesTP1HitClosedAfterExpiry(t *testing.T) {
 	}
 	if repo.report.Metrics["excluded_signal_anomaly_count"] != 1 {
 		t.Fatalf("expected 1 excluded anomaly, got %v", repo.report.Metrics["excluded_signal_anomaly_count"])
+	}
+}
+
+func TestFeedback_SetupMemorySlicesIncludeLatestDecisionBrief(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &mockFeedbackStorageRepo{
+		journal: []usecase.SignalJournal{
+			{
+				ID:            "slice_tp2",
+				Symbol:        "SOLUSDT",
+				Playbook:      usecase.TREND_PULLBACK,
+				Direction:     usecase.LONG,
+				MarketRegime:  string(usecase.ALT_SUPPORTIVE),
+				Tier:          usecase.TierA,
+				Status:        usecase.TP2_HIT,
+				EntryPrice:    100,
+				TP1:           103,
+				TP2:           106,
+				StopLoss:      97,
+				RR:            2.0,
+				PnlPercentage: 4.5,
+				CreatedAt:     now.Add(-2 * time.Hour),
+				UpdatedAt:     now.Add(-90 * time.Minute),
+				ClosedAt:      now.Add(-80 * time.Minute),
+				ExpiresAt:     now.Add(-70 * time.Minute),
+				TimeToTP1:     "15m0s",
+				TimeToTP2:     "40m0s",
+			},
+		},
+		audits: []usecase.DecisionAudit{
+			{
+				Symbol:        "SOLUSDT",
+				Direction:     usecase.LONG,
+				Playbook:      usecase.TREND_PULLBACK,
+				MarketRegime:  string(usecase.ALT_SUPPORTIVE),
+				GeneratedAt:   now.Add(-60 * time.Minute),
+				FinalStatus:   usecase.FINAL_WATCH,
+				FinalReason:   "Need retest",
+				DecisionBrief: "FINAL_WATCH | TREND_PULLBACK | ai=WAIT/HIGH | reason=Need retest",
+			},
+		},
+	}
+
+	fb := usecase.NewFeedbackUsecase(usecase.NewStorageUsecase(repo))
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("GenerateEvaluationReport: %v", err)
+	}
+	if repo.report == nil {
+		t.Fatal("expected report")
+	}
+	if len(repo.report.SetupMemorySlices) != 1 {
+		t.Fatalf("expected 1 setup memory slice, got %d", len(repo.report.SetupMemorySlices))
+	}
+	slice := repo.report.SetupMemorySlices[0]
+	if slice.Symbol != "SOLUSDT" || slice.Playbook != string(usecase.TREND_PULLBACK) || slice.Direction != string(usecase.LONG) {
+		t.Fatalf("unexpected slice identity: %+v", slice)
+	}
+	if slice.MarketRegime != string(usecase.ALT_SUPPORTIVE) {
+		t.Fatalf("expected canonical regime %q, got %q", usecase.ALT_SUPPORTIVE, slice.MarketRegime)
+	}
+	if slice.LastStatus != string(usecase.TP2_HIT) {
+		t.Fatalf("expected last status TP2_HIT from finalized signal, got %q", slice.LastStatus)
+	}
+	if slice.LastDecisionBrief == "" || !strings.Contains(slice.LastDecisionBrief, "Need retest") {
+		t.Fatalf("expected last decision brief, got %q", slice.LastDecisionBrief)
+	}
+
+	frontend := usecase.NormalizeEvaluationForFrontend(repo.report)
+	if len(frontend.SetupMemorySlices) != 1 {
+		t.Fatalf("expected frontend setup memory slices, got %d", len(frontend.SetupMemorySlices))
+	}
+	if frontend.SetupMemorySlices[0].LastDecisionBrief != slice.LastDecisionBrief {
+		t.Fatalf("expected frontend decision brief %q, got %q", slice.LastDecisionBrief, frontend.SetupMemorySlices[0].LastDecisionBrief)
+	}
+	if len(frontend.LearningReviews) == 0 {
+		t.Fatalf("expected review-only learning rows, got 0")
+	}
+	if !frontend.LearningReviews[0].ReviewOnly || !frontend.LearningReviews[0].DoNotAutoApply {
+		t.Fatalf("expected review-only learning semantics, got %+v", frontend.LearningReviews[0])
 	}
 }

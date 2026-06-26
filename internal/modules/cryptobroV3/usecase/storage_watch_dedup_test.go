@@ -70,6 +70,13 @@ func (r *watchDedupFinderRepo) FindWatchJournalCandidates(probe WatchJournal) ([
 }
 
 func TestSaveWatchToJournal_SkipsDuplicateActiveWatch(t *testing.T) {
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.WatchCooldownMinutes = 30
+	settings.WatchDedupPriceToleranceBps = 50
+	SetRuntimeSettings(settings)
+
 	now := time.Now().UTC()
 	repo := &watchDedupRepo{
 		watchJournal: []WatchJournal{{
@@ -118,6 +125,13 @@ func TestSaveWatchToJournal_SkipsDuplicateActiveWatch(t *testing.T) {
 }
 
 func TestSaveWatchToJournal_UpdatesExistingActiveWatchOnMaterialChange(t *testing.T) {
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.WatchCooldownMinutes = 30
+	settings.WatchDedupPriceToleranceBps = 50
+	SetRuntimeSettings(settings)
+
 	now := time.Now().UTC()
 	oldCreatedAt := now.Add(-10 * time.Minute)
 	oldExpiresAt := now.Add(110 * time.Minute)
@@ -185,6 +199,13 @@ func TestSaveWatchToJournal_UpdatesExistingActiveWatchOnMaterialChange(t *testin
 }
 
 func TestSaveWatchToJournal_SkipsRecentlyClosedMatchingWatch(t *testing.T) {
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.WatchCooldownMinutes = 30
+	settings.WatchDedupPriceToleranceBps = 50
+	SetRuntimeSettings(settings)
+
 	now := time.Now().UTC()
 	repo := &watchDedupRepo{
 		watchJournal: []WatchJournal{{
@@ -224,6 +245,110 @@ func TestSaveWatchToJournal_SkipsRecentlyClosedMatchingWatch(t *testing.T) {
 	}
 	if len(repo.watchJournal) != 1 {
 		t.Fatalf("expected no new watch row, got %d", len(repo.watchJournal))
+	}
+}
+
+func TestSaveWatchToJournal_RespectsRuntimeCooldownWindow(t *testing.T) {
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.WatchCooldownMinutes = 5
+	settings.WatchDedupPriceToleranceBps = 50
+	SetRuntimeSettings(settings)
+
+	now := time.Now().UTC()
+	repo := &watchDedupRepo{
+		watchJournal: []WatchJournal{{
+			ID:         "watch_1",
+			Symbol:     "SOLUSDT",
+			Direction:  LONG,
+			Playbook:   LIQUIDITY_SWEEP_REVERSAL,
+			EntryPrice: 100,
+			StopLoss:   98,
+			TP2:        105,
+			Status:     VIRTUAL_EXPIRED,
+			CreatedAt:  now.Add(-2 * time.Hour),
+			UpdatedAt:  now.Add(-10 * time.Minute),
+			ClosedAt:   now.Add(-10 * time.Minute),
+		}},
+	}
+
+	storage := NewStorageUsecase(repo)
+	err := storage.SaveWatchToJournal(WatchJournal{
+		ID:         "watch_new",
+		Symbol:     "SOLUSDT",
+		Direction:  LONG,
+		Playbook:   LIQUIDITY_SWEEP_REVERSAL,
+		EntryPrice: 100.05,
+		StopLoss:   98.02,
+		TP2:        105.02,
+		Status:     WATCH_MONITORING,
+		CreatedAt:  now,
+		ExpiresAt:  now.Add(2 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("SaveWatchToJournal: %v", err)
+	}
+
+	if repo.appendCount != 1 {
+		t.Fatalf("expected append after cooldown window elapsed, got %d", repo.appendCount)
+	}
+	if len(repo.watchJournal) != 2 {
+		t.Fatalf("expected second watch row after cooldown expiry, got %d", len(repo.watchJournal))
+	}
+}
+
+func TestSaveWatchToJournal_RespectsRuntimePriceTolerance(t *testing.T) {
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.WatchCooldownMinutes = 30
+	settings.WatchDedupPriceToleranceBps = 5
+	SetRuntimeSettings(settings)
+
+	now := time.Now().UTC()
+	repo := &watchDedupRepo{
+		watchJournal: []WatchJournal{{
+			ID:         "watch_1",
+			Symbol:     "SOLUSDT",
+			Direction:  LONG,
+			Playbook:   LIQUIDITY_SWEEP_REVERSAL,
+			EntryPrice: 100,
+			StopLoss:   98,
+			TP2:        105,
+			Status:     WATCH_MONITORING,
+			CreatedAt:  now.Add(-10 * time.Minute),
+			ExpiresAt:  now.Add(110 * time.Minute),
+			UpdatedAt:  now.Add(-5 * time.Minute),
+		}},
+	}
+
+	storage := NewStorageUsecase(repo)
+	err := storage.SaveWatchToJournal(WatchJournal{
+		ID:         "watch_new",
+		Symbol:     "SOLUSDT",
+		Direction:  LONG,
+		Playbook:   LIQUIDITY_SWEEP_REVERSAL,
+		EntryPrice: 100.20,
+		StopLoss:   97.80,
+		TP2:        105.30,
+		Status:     WATCH_MONITORING,
+		CreatedAt:  now,
+		ExpiresAt:  now.Add(2 * time.Hour),
+		Reason:     "materially changed setup",
+	})
+	if err != nil {
+		t.Fatalf("SaveWatchToJournal: %v", err)
+	}
+
+	if repo.appendCount != 1 {
+		t.Fatalf("expected append for setup outside runtime tolerance, got %d", repo.appendCount)
+	}
+	if repo.upsertCount != 0 {
+		t.Fatalf("expected no upsert for materially different watch, got %d", repo.upsertCount)
+	}
+	if len(repo.watchJournal) != 2 {
+		t.Fatalf("expected two watch rows for materially different setup, got %d", len(repo.watchJournal))
 	}
 }
 

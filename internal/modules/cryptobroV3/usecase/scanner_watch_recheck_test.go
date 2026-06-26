@@ -13,8 +13,10 @@ func TestSelectWatchRecheckCandidates(t *testing.T) {
 	original := getRuntimeSettings()
 	t.Cleanup(func() { SetRuntimeSettings(original) })
 	settings := original
+	settings.WatchRecheckBoundaryMinutes = 5
 	settings.WatchRecheckMaxAgeMinutes = 12
 	settings.WatchRecheckBatchLimit = 4
+	settings.WatchRecheckAllowedPlaybooks = []string{"TREND_PULLBACK", "LIQUIDITY_SWEEP_REVERSAL", "COMPRESSION_BREAKOUT_RETEST"}
 	SetRuntimeSettings(settings)
 
 	now := time.Now()
@@ -83,15 +85,21 @@ func TestSelectWatchRecheckCandidates(t *testing.T) {
 		},
 	}
 
-	shortlist := selectWatchRecheckCandidates(journal, now)
-	if len(shortlist) != 2 {
-		t.Fatalf("expected 2 recheck candidates, got %d", len(shortlist))
+	shortlist, terminal := selectWatchRecheckCandidates(journal, now)
+	if len(shortlist) != 3 {
+		t.Fatalf("expected 3 recheck candidates, got %d", len(shortlist))
 	}
 	if shortlist[0].entry.Symbol != "SOLUSDT" {
 		t.Fatalf("expected SOLUSDT to win duplicate symbol prioritization, got %s", shortlist[0].entry.Symbol)
 	}
 	if shortlist[1].entry.Symbol != "ADAUSDT" {
 		t.Fatalf("expected ADAUSDT second eligible candidate, got %s", shortlist[1].entry.Symbol)
+	}
+	if shortlist[2].entry.Symbol != "XRPUSDT" {
+		t.Fatalf("expected safe compression recheck candidate third, got %s", shortlist[2].entry.Symbol)
+	}
+	if len(terminal) != 1 || terminal[0].origin.Symbol != "BTCUSDT" || terminal[0].disposition.TerminalStatus != WATCH_RECHECK_EXPIRED {
+		t.Fatalf("expected BTCUSDT to be terminally expired, got %+v", terminal)
 	}
 }
 
@@ -184,7 +192,7 @@ func TestScannerUsecase_RunWatchRecheckPromotesEligibleWatch(t *testing.T) {
 	candidateArbiterUC := NewCandidateArbiterUsecase()
 	localGateUC := NewLocalGateUsecase()
 	localGateUC.SetMarketData(marketDataUC)
-	aiCandidateSelectorUC := NewAICandidateSelectorUsecase(60.0)
+	aiCandidateSelectorUC := NewAICandidateSelectorUsecase(7.5)
 	aiAuditorUC := NewAIAuditorUsecase(mockAI, storageUC)
 	planReconciliationUC := NewPlanReconciliationUsecase()
 	stalenessUC := NewStalenessUsecase(30 * time.Minute)
@@ -224,8 +232,10 @@ func TestScannerUsecase_RunWatchRecheckPromotesEligibleWatch(t *testing.T) {
 	settings := original
 	settings.RequireAIHighForExecute = true
 	settings.RequireFreshEntryForExecute = true
+	settings.WatchRecheckBoundaryMinutes = 5
 	settings.WatchRecheckMaxAgeMinutes = 12
 	settings.WatchRecheckBatchLimit = 4
+	settings.WatchRecheckAllowedPlaybooks = []string{"LIQUIDITY_SWEEP_REVERSAL"}
 	SetRuntimeSettings(settings)
 
 	summary, err := uc.RunWatchRecheck(context.Background(), dto.ScanRequest{TriggerTime: time.Now()})
@@ -263,6 +273,9 @@ func TestScannerUsecase_RunWatchRecheckPromotesEligibleWatch(t *testing.T) {
 	}
 	if watchJournal[0].ClosedAt.IsZero() {
 		t.Fatal("expected promoted watch to be closed")
+	}
+	if !strings.Contains(watchJournal[0].OutcomeReason, "executable signal") {
+		t.Fatalf("expected explicit promotion closeout outcome, got %q", watchJournal[0].OutcomeReason)
 	}
 
 	audits, err := storageUC.LoadDecisionAudits()

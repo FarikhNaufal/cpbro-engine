@@ -440,9 +440,9 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 		penalty += 15.0
 		notes = append(notes, "GLOBAL PENALTY: Trend pullback playbook requires ADX >= 20 (-15)")
 	}
-	if quant.Playbook == RANGE_EDGE_REVERSAL && adxVal > 30.0 {
+	if quant.Playbook == RANGE_EDGE_REVERSAL && adxVal > safetyADXExpansionCeiling {
 		penalty += 15.0
-		notes = append(notes, "GLOBAL PENALTY: Range edge reversal disallowed under ADX > 30 trend expansion (-15)")
+		notes = append(notes, "GLOBAL PENALTY: Range edge reversal disallowed under ADX > safety expansion ceiling (-15)")
 	}
 
 	// 7. MFI / RSI anomaly

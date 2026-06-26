@@ -406,10 +406,10 @@ func (uc *MonitoringUsecase) storeMonitoringCandles(symbol string, candles []dto
 	if uc == nil {
 		return
 	}
-	validUntil := now.Add(15 * time.Second)
+	validUntil := now.Add(defaultClosedCandleCacheTTL)
 	if len(candles) > 0 {
-		lastCloseTime := candles[len(candles)-1].Time.Add(15 * time.Minute)
-		validUntil = lastCloseTime.Add(15 * time.Minute)
+		lastCloseTime := candles[len(candles)-1].Time.Add(defaultClosedCandleTimeframe)
+		validUntil = lastCloseTime.Add(defaultClosedCandleTimeframe)
 	}
 	uc.candleCacheMu.Lock()
 	uc.candleCache[symbol] = monitoringCandleCacheEntry{

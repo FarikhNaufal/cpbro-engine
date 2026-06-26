@@ -23,6 +23,18 @@ var (
 	scannerRunning atomic.Bool
 )
 
+const (
+	defaultWorkerBoundaryBufferSeconds   = 3
+	defaultMonitoringTimeoutFloorSeconds = 25
+	defaultRecheckBoundaryMinutes        = 5
+)
+
+type watchRecheckTickDecision struct {
+	Boundary   time.Time
+	ShouldRun  bool
+	SkipReason string
+}
+
 func notificationTime(t time.Time) string {
 	loc, err := time.LoadLocation("Asia/Jakarta")
 	if err != nil {
@@ -66,7 +78,15 @@ func main() {
 	usecase.SetRuntimeSettings(usecase.BuildRuntimeSettings(cfg))
 
 	// 2. Initialize Storage from config
-	jsonStorage, err := service.NewJSONStorageService(cfg.Storage.StoragePath)
+	jsonStorage, err := service.NewJSONStorageServiceWithFiles(cfg.Storage.StoragePath, service.JSONStorageFiles{
+		LatestResultFile:     cfg.Storage.LatestResultFile,
+		SignalHistoryFile:    cfg.Storage.SignalHistoryFile,
+		SignalJournalFile:    cfg.Storage.SignalJournalFile,
+		WatchJournalFile:     cfg.Storage.WatchJournalFile,
+		AIAuditCacheFile:     cfg.Storage.AIAuditCacheFile,
+		EvaluationReportFile: cfg.Storage.EvaluationReportFile,
+		DecisionAuditFile:    cfg.Storage.DecisionAuditFile,
+	})
 	if err != nil {
 		slog.Error("failed to initialize json storage", "error", err)
 		os.Exit(1)
@@ -171,7 +191,7 @@ func main() {
 	candidateArbiterUC := usecase.NewCandidateArbiterUsecase()
 	localGateUC := usecase.NewLocalGateUsecase()
 	localGateUC.SetMarketData(marketDataUC)
-	aiCandidateSelectorUC := usecase.NewAICandidateSelectorUsecase(60.0)
+	aiCandidateSelectorUC := usecase.NewAICandidateSelectorUsecase(7.5)
 
 	var aiService usecase.AIAuditorService
 	if geminiService != nil {
@@ -182,7 +202,7 @@ func main() {
 
 	aiAuditorUC := usecase.NewAIAuditorUsecase(aiService, storageUC)
 	planReconciliationUC := usecase.NewPlanReconciliationUsecase()
-	stalenessUC := usecase.NewStalenessUsecase(30 * time.Minute)
+	stalenessUC := usecase.NewStalenessUsecase(usecase.GetClosedCandleFreshnessDurationForExternal())
 	stalenessUC.SetLatestPriceFeed(realtimePriceFeed)
 	stalenessUC.SetFallbackProvider(binanceService)
 	finalGateUC := usecase.NewFinalGateUsecase()
@@ -295,6 +315,7 @@ func main() {
 
 	// 7. Setup HTTP transport Handler and Router
 	observabilityUC := usecase.NewObservabilityUsecase(binanceService, aiService, telegramService, cfg.Storage.StoragePath)
+	observabilityUC.SetStorageFiles(cfg.Storage.SignalJournalFile, cfg.Storage.WatchJournalFile, cfg.Storage.HealthSnapshotFile)
 	observabilityUC.SetRealtimeStatusProvider(realtimePriceFeed)
 	handler := transhttp.NewHandler(scannerUC, feedbackUC, storageUC, backtestUC, observabilityUC, cfg.Storage.StoragePath, &scannerRunning, transhttp.HandlerRuntimeConfig{
 		AppName:         cfg.App.Name,
@@ -355,14 +376,15 @@ func startStartupScan(ctx context.Context, cfg *config.Config, scannerUC *usecas
 			}
 		}()
 
-		slog.Info("Startup scan trigger: executing initial scan")
+		slog.Info("Startup scan trigger: executing initial scan", "interval_mode", cfg.Scanner.IntervalMode)
 		boundaryDuration := time.Duration(cfg.Scanner.BoundaryMinutes) * time.Minute
 		boundary := time.Now().Truncate(boundaryDuration)
-		scanID := boundary.Format("20060102150405")
+		scanID := usecase.BuildScanIDForExternal("startup", boundary)
 
 		if cfg.Scanner.PreventOverlap {
 			if !scannerRunning.CompareAndSwap(false, true) {
 				slog.Warn("Startup scan skipped: scan already in progress")
+				usecase.GetGlobalMetrics().IncrementScanOverlapSkip()
 				return
 			}
 			defer scannerRunning.Store(false)
@@ -376,7 +398,8 @@ func startStartupScan(ctx context.Context, cfg *config.Config, scannerUC *usecas
 		defer cancel()
 
 		_, err := scannerUC.Run(scanCtx, dto.ScanRequest{
-			TriggerTime: boundary,
+			TriggerTime:   boundary,
+			TriggerSource: "startup",
 		})
 		if err != nil {
 			slog.Error("Startup scan failed", "error", err)
@@ -403,7 +426,7 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 		return
 	}
 
-	slog.Info("Starting background scan worker...")
+	slog.Info("Starting background scan worker...", "interval_mode", cfg.Scanner.IntervalMode)
 	usecase.ScanWorkerRunning.Store(true)
 	defer usecase.ScanWorkerRunning.Store(false)
 	ticker := time.NewTicker(time.Duration(cfg.Scanner.PollIntervalSeconds) * time.Second)
@@ -421,7 +444,7 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 			boundary := now.Truncate(boundaryDuration)
 			bufferSec := cfg.Scanner.CloseCandleBufferSeconds
 			if bufferSec <= 0 {
-				bufferSec = 3
+				bufferSec = defaultWorkerBoundaryBufferSeconds
 			}
 			if boundary.After(lastRun) && now.Sub(boundary) >= time.Duration(bufferSec)*time.Second {
 				lastRun = boundary
@@ -433,12 +456,13 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 						}
 					}()
 
-					slog.Info("Background worker trigger: executing M15 scan", "boundary", boundary.Format("15:04:05"))
-					scanID := boundary.Format("20060102150405")
+					slog.Info("Background worker trigger: executing M15 scan", "boundary", boundary.Format("15:04:05"), "interval_mode", cfg.Scanner.IntervalMode)
+					scanID := usecase.BuildScanIDForExternal("scheduled", boundary)
 
 					if cfg.Scanner.PreventOverlap {
 						if !scannerRunning.CompareAndSwap(false, true) {
 							slog.Warn("Scan worker skipped: scan already in progress")
+							usecase.GetGlobalMetrics().IncrementScanOverlapSkip()
 							return
 						}
 						defer scannerRunning.Store(false)
@@ -452,7 +476,8 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 					defer cancel()
 
 					_, err := scannerUC.Run(scanCtx, dto.ScanRequest{
-						TriggerTime: boundary,
+						TriggerTime:   boundary,
+						TriggerSource: "scheduled",
 					})
 					if err != nil {
 						slog.Error("Background scan failed", "error", err)
@@ -510,7 +535,7 @@ func startMonitoringWorker(ctx context.Context, cfg *config.Config, monitoringUC
 
 				timeoutSec := cfg.Monitoring.IntervalSeconds - cfg.Monitoring.TimeoutBufferSeconds
 				if timeoutSec <= 0 {
-					timeoutSec = 25
+					timeoutSec = defaultMonitoringTimeoutFloorSeconds
 				}
 
 				monitorCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
@@ -537,7 +562,11 @@ func startWatchRecheckWorker(ctx context.Context, cfg *config.Config, scannerUC 
 	ticker := time.NewTicker(time.Duration(cfg.Scanner.PollIntervalSeconds) * time.Second)
 	defer ticker.Stop()
 
-	recheckBoundaryDuration := 5 * time.Minute
+	recheckBoundaryMinutes := usecase.SnapshotRuntimeSettings().WatchRecheckBoundaryMinutes
+	if recheckBoundaryMinutes <= 0 {
+		recheckBoundaryMinutes = defaultRecheckBoundaryMinutes
+	}
+	recheckBoundaryDuration := time.Duration(recheckBoundaryMinutes) * time.Minute
 	primaryBoundaryDuration := time.Duration(cfg.Scanner.BoundaryMinutes) * time.Minute
 	lastRun := time.Now().Truncate(recheckBoundaryDuration)
 
@@ -547,18 +576,20 @@ func startWatchRecheckWorker(ctx context.Context, cfg *config.Config, scannerUC 
 			slog.Info("Watch recheck worker stopped.")
 			return
 		case now := <-ticker.C:
-			boundary := now.Truncate(recheckBoundaryDuration)
 			bufferSec := cfg.Scanner.CloseCandleBufferSeconds
 			if bufferSec <= 0 {
-				bufferSec = 3
+				bufferSec = defaultWorkerBoundaryBufferSeconds
 			}
-			if primaryBoundaryDuration > 0 && boundary.Equal(boundary.Truncate(primaryBoundaryDuration)) {
+			decision := evaluateWatchRecheckTick(now, lastRun, recheckBoundaryDuration, primaryBoundaryDuration, time.Duration(bufferSec)*time.Second)
+			if !decision.ShouldRun {
+				if decision.SkipReason == "primary_boundary" {
+					slog.Info("Watch recheck skipped at primary boundary", "worker", "watch_recheck", "boundary", decision.Boundary.Format("15:04:05"), "primary_boundary_minutes", cfg.Scanner.BoundaryMinutes, "recheck_boundary_minutes", recheckBoundaryMinutes)
+				}
 				continue
 			}
-			if !boundary.After(lastRun) || now.Sub(boundary) < time.Duration(bufferSec)*time.Second {
-				continue
-			}
+			boundary := decision.Boundary
 			lastRun = boundary
+			slog.Info("Watch recheck boundary reached", "worker", "watch_recheck", "boundary", boundary.Format("15:04:05"), "boundary_minutes", recheckBoundaryMinutes, "primary_boundary_minutes", cfg.Scanner.BoundaryMinutes)
 
 			go func(boundary time.Time) {
 				defer func() {
@@ -568,7 +599,8 @@ func startWatchRecheckWorker(ctx context.Context, cfg *config.Config, scannerUC 
 				}()
 
 				if !scannerRunning.CompareAndSwap(false, true) {
-					slog.Warn("Watch recheck skipped: primary scan pipeline already in progress")
+					slog.Warn("Watch recheck skipped: primary scan pipeline already in progress", "worker", "watch_recheck", "boundary", boundary.Format("15:04:05"), "primary_boundary_minutes", cfg.Scanner.BoundaryMinutes, "recheck_boundary_minutes", recheckBoundaryMinutes)
+					usecase.GetGlobalMetrics().IncrementRecheckOverlapSkip()
 					return
 				}
 				defer scannerRunning.Store(false)
@@ -576,7 +608,7 @@ func startWatchRecheckWorker(ctx context.Context, cfg *config.Config, scannerUC 
 				recheckCtx, cancel := context.WithTimeout(ctx, time.Duration(cfg.Scanner.ContextTimeoutSeconds)*time.Second)
 				defer cancel()
 
-				if _, err := scannerUC.RunWatchRecheck(recheckCtx, dto.ScanRequest{TriggerTime: boundary}); err != nil {
+				if _, err := scannerUC.RunWatchRecheck(recheckCtx, dto.ScanRequest{TriggerTime: boundary, TriggerSource: "recheck"}); err != nil {
 					slog.Error("Watch recheck worker execution failed", "boundary", boundary.Format("15:04:05"), "error", err)
 					usecase.GetGlobalMetrics().IncrementRecheckFail()
 					return
@@ -584,6 +616,23 @@ func startWatchRecheckWorker(ctx context.Context, cfg *config.Config, scannerUC 
 			}(boundary)
 		}
 	}
+}
+
+func evaluateWatchRecheckTick(now time.Time, lastRun time.Time, recheckBoundaryDuration time.Duration, primaryBoundaryDuration time.Duration, closeBuffer time.Duration) watchRecheckTickDecision {
+	if recheckBoundaryDuration <= 0 {
+		return watchRecheckTickDecision{ShouldRun: false, SkipReason: "invalid_recheck_boundary"}
+	}
+	boundary := now.Truncate(recheckBoundaryDuration)
+	if primaryBoundaryDuration > 0 && boundary.Equal(boundary.Truncate(primaryBoundaryDuration)) {
+		return watchRecheckTickDecision{Boundary: boundary, ShouldRun: false, SkipReason: "primary_boundary"}
+	}
+	if !boundary.After(lastRun) {
+		return watchRecheckTickDecision{Boundary: boundary, ShouldRun: false, SkipReason: "already_processed_boundary"}
+	}
+	if closeBuffer > 0 && now.Sub(boundary) < closeBuffer {
+		return watchRecheckTickDecision{Boundary: boundary, ShouldRun: false, SkipReason: "close_buffer_not_elapsed"}
+	}
+	return watchRecheckTickDecision{Boundary: boundary, ShouldRun: true}
 }
 
 func tryStartBackgroundRun(flag *atomic.Bool, workerName string) bool {

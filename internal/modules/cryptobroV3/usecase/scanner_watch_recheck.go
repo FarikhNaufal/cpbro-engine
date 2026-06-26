@@ -17,6 +17,8 @@ type watchRecheckSummary struct {
 	TriggerTime     time.Time
 	EligibleWatches int
 	Evaluated       int
+	Invalidated     int
+	Expired         int
 	Promoted        int
 	FinalExecute    int
 	FinalWatch      int
@@ -28,9 +30,18 @@ type watchRecheckCandidate struct {
 }
 
 type watchRecheckEvaluation struct {
-	origin   WatchJournal
-	decision FinalDecision
-	context  scanCandidateContext
+	origin      WatchJournal
+	decision    FinalDecision
+	context     scanCandidateContext
+	disposition watchRecheckDisposition
+}
+
+type watchRecheckDisposition struct {
+	Eligible       bool
+	Terminal       bool
+	TerminalStatus Status
+	Reason         string
+	OutcomeReason  string
 }
 
 func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanRequest) (watchRecheckSummary, error) {
@@ -39,7 +50,7 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 	if triggerTime.IsZero() {
 		triggerTime = start
 	}
-	scanID := "recheck_" + triggerTime.Format("20060102150405")
+	scanID := buildScanID(scanTriggerRecheck, triggerTime)
 	summary := watchRecheckSummary{
 		ScanID:      scanID,
 		TriggerTime: triggerTime,
@@ -57,10 +68,23 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 		return summary, fmt.Errorf("failed to load watch journal for recheck: %w", err)
 	}
 
-	shortlist := selectWatchRecheckCandidates(watchJournal, triggerTime)
+	shortlist, terminalUpdates := selectWatchRecheckCandidates(watchJournal, triggerTime)
 	summary.EligibleWatches = len(shortlist)
+	for _, update := range terminalUpdates {
+		switch update.disposition.TerminalStatus {
+		case WATCH_RECHECK_EXPIRED:
+			summary.Expired++
+		case WATCH_RECHECK_INVALIDATED:
+			summary.Invalidated++
+		}
+	}
+	if len(terminalUpdates) > 0 {
+		if err := uc.applyWatchRecheckTerminalUpdates(terminalUpdates, triggerTime); err != nil {
+			slog.Warn("Watch recheck failed to persist terminal state updates", "scan_id", scanID, "error", err)
+		}
+	}
 	if len(shortlist) == 0 {
-		slog.Info("Watch recheck skipped: no eligible watch candidates", "scan_id", scanID)
+		slog.Info("Watch recheck skipped: no eligible watch candidates", "scan_id", scanID, "scan_trigger", scanTriggerRecheck, "expired", summary.Expired, "invalidated", summary.Invalidated)
 		metrics.IncrementRecheckSuccess()
 		return summary, nil
 	}
@@ -109,8 +133,20 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 
 	evaluations := make([]watchRecheckEvaluation, 0, len(shortlist))
 	for _, candidate := range shortlist {
-		evaluated, ok := uc.evaluateWatchRecheckCandidate(ctx, candidate.entry, policy, fundingRates, tickerMap, activeSignals, historySignals)
-		if !ok {
+		evaluated := uc.evaluateWatchRecheckCandidate(ctx, candidate.entry, policy, fundingRates, tickerMap, activeSignals, historySignals)
+		if evaluated.disposition.Terminal {
+			if err := uc.applyWatchRecheckTerminalUpdates([]watchRecheckEvaluation{evaluated}, triggerTime); err != nil {
+				slog.Warn("Watch recheck failed to persist evaluated terminal state", "scan_id", scanID, "symbol", candidate.entry.Symbol, "error", err)
+			}
+			switch evaluated.disposition.TerminalStatus {
+			case WATCH_RECHECK_EXPIRED:
+				summary.Expired++
+			case WATCH_RECHECK_INVALIDATED:
+				summary.Invalidated++
+			}
+			continue
+		}
+		if !evaluated.disposition.Eligible {
 			continue
 		}
 		evaluations = append(evaluations, evaluated)
@@ -118,7 +154,7 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 
 	summary.Evaluated = len(evaluations)
 	if len(evaluations) == 0 {
-		slog.Info("Watch recheck completed with zero evaluable candidates", "scan_id", scanID, "eligible_watch_candidates", summary.EligibleWatches)
+		slog.Info("Watch recheck completed with zero evaluable candidates", "scan_id", scanID, "scan_trigger", scanTriggerRecheck, "eligible_watch_candidates", summary.EligibleWatches)
 		metrics.IncrementRecheckSuccess()
 		return summary, nil
 	}
@@ -246,7 +282,7 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 			RetestTouches:             candCtx.quantResult.TechnicalSnapshot.IndicatorValues[IndicatorRetestTouches],
 			RetestHold:                candCtx.quantResult.TechnicalSnapshot.IndicatorValues[IndicatorRetestHold] == 1.0,
 			HasDerivativesEvidence:    candCtx.quantResult.TechnicalSnapshot.IndicatorValues[IndicatorHasCrowdingEvidence] == 1.0,
-			RejectOrWatchReason:       fmt.Sprintf("watch_recheck origin=%s; %s", origin.ID, finalDecision.Reason),
+			RejectOrWatchReason:       buildWatchRecheckAuditContext(origin.ID, finalDecision.Reason),
 			CreatedAt:                 now,
 			HypotheticalEntry:         entryPrice,
 		}
@@ -268,14 +304,15 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 		}
 
 		summary.Promoted++
-		promotionReason := fmt.Sprintf("WATCH_RECHECK_PROMOTION origin_watch_id=%s | %s", origin.ID, finalDecision.Reason)
+		signalID := now.Format("20060102150405") + "_recheck_" + pair
+		promotionReason := buildWatchRecheckPromotionReason(origin.ID, signalID, finalDecision.Reason)
 		notificationReqs = append(notificationReqs, SignalNotificationRequest{
 			Decision:      finalDecision,
 			AuditResponse: candCtx.auditResponse,
 		})
 
 		_ = uc.storageUsecase.SaveSignalToJournal(SignalJournal{
-			ID:                      now.Format("20060102150405") + "_recheck_" + pair,
+			ID:                      signalID,
 			ConfigVersion:           GetGlobalConfigRegistry().GetVersion(),
 			Symbol:                  pair,
 			Direction:               finalDecision.Direction,
@@ -321,7 +358,7 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 			StructureSnapshot:       candCtx.quantResult.StructureSnapshot,
 		})
 
-		_ = uc.promoteWatchJournalEntry(origin, now, promotionReason)
+		_ = uc.promoteWatchJournalEntry(origin, now, signalID, promotionReason)
 	}
 
 	if getRuntimeSettings().DecisionAuditEnabled && len(decisionAudits) > 0 {
@@ -347,6 +384,8 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 		"scan_id", scanID,
 		"eligible_watch_candidates", summary.EligibleWatches,
 		"evaluated_candidates", summary.Evaluated,
+		"recheck_expired", summary.Expired,
+		"recheck_invalidated", summary.Invalidated,
 		"promoted_execute", summary.Promoted,
 		"final_execute", summary.FinalExecute,
 		"final_watch", summary.FinalWatch,
@@ -364,15 +403,30 @@ func (uc *ScannerUsecase) evaluateWatchRecheckCandidate(
 	tickerMap map[string]dto.Ticker24h,
 	activeSignals []SignalJournal,
 	historySignals []dto.SignalResponse,
-) (watchRecheckEvaluation, bool) {
+) watchRecheckEvaluation {
 	fullData, err := uc.marketDataUsecase.FetchMarketData(ctx, entry.Symbol, fundingRates)
 	if err != nil {
 		slog.Warn("Watch recheck market data fetch failed", "symbol", entry.Symbol, "error", err)
 		GetGlobalMetrics().IncrementMarketDataError()
-		return watchRecheckEvaluation{}, false
+		return watchRecheckEvaluation{
+			origin: entry,
+			disposition: watchRecheckDisposition{
+				Eligible: false,
+				Reason:   "Watch recheck skipped: transient market data fetch error",
+			},
+		}
 	}
 	if !uc.stalenessUsecase.IsFresh(fullData.M15Candles) {
-		return watchRecheckEvaluation{}, false
+		return watchRecheckEvaluation{
+			origin: entry,
+			disposition: watchRecheckDisposition{
+				Eligible:       false,
+				Terminal:       true,
+				TerminalStatus: WATCH_RECHECK_INVALIDATED,
+				Reason:         "Watch recheck invalidated: latest M15 context is stale",
+				OutcomeReason:  "Recheck invalidated because fresh M15 context was unavailable",
+			},
+		}
 	}
 
 	latestPrice := 0.0
@@ -387,7 +441,16 @@ func (uc *ScannerUsecase) evaluateWatchRecheckCandidate(
 
 	prepared, ok := uc.playbookQuantEngineUsecase.prepareContext(fullData)
 	if !ok {
-		return watchRecheckEvaluation{}, false
+		return watchRecheckEvaluation{
+			origin: entry,
+			disposition: watchRecheckDisposition{
+				Eligible:       false,
+				Terminal:       true,
+				TerminalStatus: WATCH_RECHECK_INVALIDATED,
+				Reason:         "Watch recheck invalidated: prepared context no longer valid",
+				OutcomeReason:  "Recheck invalidated because market context no longer supports the original setup",
+			},
+		}
 	}
 	tech := &prepared.technicalSnapshot
 	structure := &prepared.structureSnapshot
@@ -403,14 +466,32 @@ func (uc *ScannerUsecase) evaluateWatchRecheckCandidate(
 
 	eligibilityRes := uc.playbookEligibilityUsecase.CheckEligibility(sel, policy, fullData, tech, structure)
 	if !eligibilityRes.Eligible {
-		return watchRecheckEvaluation{}, false
+		return watchRecheckEvaluation{
+			origin: entry,
+			disposition: watchRecheckDisposition{
+				Eligible:       false,
+				Terminal:       true,
+				TerminalStatus: WATCH_RECHECK_INVALIDATED,
+				Reason:         "Watch recheck invalidated: playbook eligibility no longer holds",
+				OutcomeReason:  "Recheck invalidated because the original playbook setup no longer qualifies",
+			},
+		}
 	}
 
 	quantResult := uc.playbookQuantEngineUsecase.RunEngineWithPreparedContext(entry.Playbook, entry.Direction, fullData, policy, prepared)
 	quantResult.Tier = entry.Tier
 	quantResult.RawKlines = fullData.M15Candles
 	if !isArbiterReadyQuantResult(quantResult) {
-		return watchRecheckEvaluation{}, false
+		return watchRecheckEvaluation{
+			origin: entry,
+			disposition: watchRecheckDisposition{
+				Eligible:       false,
+				Terminal:       true,
+				TerminalStatus: WATCH_RECHECK_INVALIDATED,
+				Reason:         "Watch recheck invalidated: quant path no longer produces a tradable plan",
+				OutcomeReason:  "Recheck invalidated because the quant engine no longer supports the original setup",
+			},
+		}
 	}
 
 	reconciliationDir := uc.conflictResolverUsecase.Resolve(quantResult.Direction, "NEUTRAL")
@@ -472,27 +553,32 @@ func (uc *ScannerUsecase) evaluateWatchRecheckCandidate(
 		origin:   entry,
 		decision: evaluated.decision,
 		context:  evaluated.context,
-	}, true
+		disposition: watchRecheckDisposition{
+			Eligible: true,
+			Reason:   "Watch recheck candidate re-evaluated successfully",
+		},
+	}
 }
 
-func selectWatchRecheckCandidates(journal []WatchJournal, now time.Time) []watchRecheckCandidate {
+func selectWatchRecheckCandidates(journal []WatchJournal, now time.Time) ([]watchRecheckCandidate, []watchRecheckEvaluation) {
 	if len(journal) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	maxAgeMinutes := getRuntimeSettings().WatchRecheckMaxAgeMinutes
-	if maxAgeMinutes <= 0 {
-		maxAgeMinutes = 12
-	}
-	maxAge := time.Duration(maxAgeMinutes) * time.Minute
-	limit := getRuntimeSettings().WatchRecheckBatchLimit
-	if limit <= 0 {
-		limit = 6
-	}
+	recheckPolicy := resolveWatchRecheckPolicy()
 
 	bestBySymbol := make(map[string]WatchJournal)
+	terminalUpdates := make([]watchRecheckEvaluation, 0)
 	for _, entry := range journal {
-		if !isWatchRecheckEligible(entry, now, maxAge) {
+		disposition := classifyWatchRecheckDisposition(entry, now, recheckPolicy)
+		if disposition.Terminal {
+			terminalUpdates = append(terminalUpdates, watchRecheckEvaluation{
+				origin:      entry,
+				disposition: disposition,
+			})
+			continue
+		}
+		if !disposition.Eligible {
 			continue
 		}
 		current, exists := bestBySymbol[entry.Symbol]
@@ -512,59 +598,92 @@ func selectWatchRecheckCandidates(journal []WatchJournal, now time.Time) []watch
 		return compareWatchRecheckPriority(left, right) < 0
 	})
 
-	if len(shortlist) > limit {
-		shortlist = shortlist[:limit]
+	if len(shortlist) > recheckPolicy.BatchLimit {
+		shortlist = shortlist[:recheckPolicy.BatchLimit]
 	}
-	return shortlist
+	return shortlist, terminalUpdates
 }
 
-func isWatchRecheckEligible(entry WatchJournal, now time.Time, maxAge time.Duration) bool {
+func classifyWatchRecheckDisposition(entry WatchJournal, now time.Time, policy watchRecheckPolicy) watchRecheckDisposition {
 	if entry.Status != WATCH_MONITORING {
-		return false
+		return watchRecheckDisposition{Eligible: false, Reason: "Watch recheck skipped: watch is no longer in WATCH_MONITORING"}
 	}
 	if !entry.ClosedAt.IsZero() {
-		return false
+		return watchRecheckDisposition{Eligible: false, Reason: "Watch recheck skipped: watch is already closed"}
 	}
-	if entry.Playbook != TREND_PULLBACK && entry.Playbook != LIQUIDITY_SWEEP_REVERSAL {
-		return false
+	if !isWatchRecheckAllowedPlaybook(entry.Playbook, policy) {
+		return watchRecheckDisposition{
+			Eligible:       false,
+			Terminal:       true,
+			TerminalStatus: WATCH_RECHECK_INVALIDATED,
+			Reason:         fmt.Sprintf("Watch recheck invalidated: playbook %s is not allowlisted for recheck", entry.Playbook),
+			OutcomeReason:  "Recheck invalidated because the playbook is no longer eligible for secondary recheck",
+		}
 	}
-	if entry.CreatedAt.IsZero() || now.Sub(entry.CreatedAt) > maxAge {
-		return false
+	if entry.CreatedAt.IsZero() {
+		return watchRecheckDisposition{
+			Eligible:       false,
+			Terminal:       true,
+			TerminalStatus: WATCH_RECHECK_INVALIDATED,
+			Reason:         "Watch recheck invalidated: missing created_at timestamp",
+			OutcomeReason:  "Recheck invalidated because watch metadata is incomplete",
+		}
+	}
+	if !entry.ExpiresAt.IsZero() && now.After(entry.ExpiresAt) {
+		return watchRecheckDisposition{
+			Eligible:       false,
+			Terminal:       true,
+			TerminalStatus: WATCH_RECHECK_EXPIRED,
+			Reason:         "Watch recheck expired: watch horizon elapsed before promotion",
+			OutcomeReason:  "Recheck expired because watch horizon elapsed before a valid promotion",
+		}
+	}
+	if now.Sub(entry.CreatedAt) > policy.EffectiveHorizon {
+		return watchRecheckDisposition{
+			Eligible:       false,
+			Terminal:       true,
+			TerminalStatus: WATCH_RECHECK_EXPIRED,
+			Reason:         "Watch recheck expired: secondary recheck max-age elapsed",
+			OutcomeReason:  "Recheck expired because the secondary recheck window elapsed",
+		}
 	}
 
 	reasonBlob := strings.ToUpper(strings.TrimSpace(entry.Reason + " " + entry.AIReasoning))
 	if reasonBlob == "" {
-		return false
+		return watchRecheckDisposition{
+			Eligible:       false,
+			Terminal:       true,
+			TerminalStatus: WATCH_RECHECK_INVALIDATED,
+			Reason:         "Watch recheck invalidated: watch has no reusable reason context",
+			OutcomeReason:  "Recheck invalidated because the watch no longer has reusable decision context",
+		}
 	}
-	for _, blocked := range []string{
-		"ACTIVE_MONITORING_EXISTS",
-		"OPPOSITE_SIGNAL_CONFLICT",
-		"LOWER_PRIORITY_CONFLICT",
-		"DUPLICATE_SIGNAL_BUCKET",
-		"SYMBOL_COOLDOWN_ACTIVE",
-		"MAX_FINAL_EXECUTE_LIMIT",
-		"WAIT_RETEST_OR_BREAKOUT_FIRST_CANDLE",
-	} {
+	for _, blocked := range policy.BlockedReasonTokens {
 		if strings.Contains(reasonBlob, blocked) {
-			return false
+			return watchRecheckDisposition{
+				Eligible: false,
+				Reason:   fmt.Sprintf("Watch recheck skipped: blocked by reason token %s", blocked),
+			}
 		}
 	}
-	if strings.Contains(reasonBlob, "M5 ") {
-		return true
-	}
-	for _, recheckSafe := range []string{
-		"AI DECISION IS WAIT",
-		"AI_SKIPPED",
-		"WATCH_ONLY",
-		"WAIT_RETEST",
-		"AI CONFIDENCE",
-		"LOCAL_GATE_WATCH",
-	} {
-		if strings.Contains(reasonBlob, recheckSafe) {
-			return true
+	if isSafeCompressionRecheck(reasonBlob, entry.Playbook) {
+		return watchRecheckDisposition{
+			Eligible: true,
+			Reason:   "Watch recheck allowed: safe compression retest path",
 		}
 	}
-	return false
+	for _, allowed := range policy.AllowedReasonTokens {
+		if strings.Contains(reasonBlob, allowed) {
+			return watchRecheckDisposition{
+				Eligible: true,
+				Reason:   fmt.Sprintf("Watch recheck allowed: matched reason token %s", allowed),
+			}
+		}
+	}
+	return watchRecheckDisposition{
+		Eligible: false,
+		Reason:   "Watch recheck skipped: no allowlisted recheck reason matched",
+	}
 }
 
 func compareWatchRecheckPriority(left, right WatchJournal) int {
@@ -600,7 +719,7 @@ func compareWatchRecheckPriority(left, right WatchJournal) int {
 	return strings.Compare(left.Symbol, right.Symbol)
 }
 
-func (uc *ScannerUsecase) promoteWatchJournalEntry(origin WatchJournal, now time.Time, promotionReason string) error {
+func (uc *ScannerUsecase) promoteWatchJournalEntry(origin WatchJournal, now time.Time, signalID string, promotionReason string) error {
 	return uc.storageUsecase.UpdateWatchJournal(func(current []WatchJournal) ([]WatchJournal, error) {
 		updated := append([]WatchJournal(nil), current...)
 		for i := range updated {
@@ -610,9 +729,41 @@ func (uc *ScannerUsecase) promoteWatchJournalEntry(origin WatchJournal, now time
 			updated[i].Status = WATCH_PROMOTED
 			updated[i].ClosedAt = now
 			updated[i].UpdatedAt = now
-			updated[i].OutcomeReason = "Promoted to FINAL_EXECUTE via secondary watch recheck"
+			updated[i].OutcomeReason = buildWatchRecheckPromotionOutcome(signalID)
 			updated[i].Reason = promotionReason
 			return updated, nil
+		}
+		return updated, nil
+	})
+}
+
+func (uc *ScannerUsecase) applyWatchRecheckTerminalUpdates(updates []watchRecheckEvaluation, now time.Time) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	updateMap := make(map[string]watchRecheckDisposition, len(updates))
+	for _, update := range updates {
+		if !update.disposition.Terminal || update.origin.ID == "" {
+			continue
+		}
+		updateMap[update.origin.ID] = update.disposition
+	}
+	if len(updateMap) == 0 {
+		return nil
+	}
+
+	return uc.storageUsecase.UpdateWatchJournal(func(current []WatchJournal) ([]WatchJournal, error) {
+		updated := append([]WatchJournal(nil), current...)
+		for i := range updated {
+			disposition, ok := updateMap[updated[i].ID]
+			if !ok {
+				continue
+			}
+			updated[i].Status = disposition.TerminalStatus
+			updated[i].ClosedAt = now
+			updated[i].UpdatedAt = now
+			updated[i].Reason = disposition.Reason
+			updated[i].OutcomeReason = disposition.OutcomeReason
 		}
 		return updated, nil
 	})

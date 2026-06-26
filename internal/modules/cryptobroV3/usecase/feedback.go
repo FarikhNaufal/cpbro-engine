@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"cpbro-engine/internal/modules/cryptobroV3/config"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -12,10 +13,40 @@ type FeedbackUsecase struct {
 	storageUsecase *StorageUsecase
 }
 
+type feedbackSourceFiles struct {
+	latestResult  string
+	signalJournal string
+	watchJournal  string
+	decisionAudit string
+}
+
 func NewFeedbackUsecase(storage *StorageUsecase) *FeedbackUsecase {
 	return &FeedbackUsecase{
 		storageUsecase: storage,
 	}
+}
+
+func resolveFeedbackSourceFiles() feedbackSourceFiles {
+	settings := getRuntimeSettings()
+	files := feedbackSourceFiles{
+		latestResult:  strings.TrimSpace(settings.LatestResultFile),
+		signalJournal: strings.TrimSpace(settings.SignalJournalFile),
+		watchJournal:  strings.TrimSpace(settings.WatchJournalFile),
+		decisionAudit: strings.TrimSpace(settings.DecisionAuditFile),
+	}
+	if files.latestResult == "" {
+		files.latestResult = config.DefaultLatestResultFile
+	}
+	if files.signalJournal == "" {
+		files.signalJournal = config.DefaultSignalJournalFile
+	}
+	if files.watchJournal == "" {
+		files.watchJournal = config.DefaultWatchJournalFile
+	}
+	if files.decisionAudit == "" {
+		files.decisionAudit = config.DefaultDecisionAuditFile
+	}
+	return files
 }
 
 // safeRate handles percentage calculation safely
@@ -35,6 +66,13 @@ func safeDiv(val, div float64) float64 {
 }
 
 func maxFloat(left, right float64) float64 {
+	if left > right {
+		return left
+	}
+	return right
+}
+
+func maxEvalInt(left, right int) int {
 	if left > right {
 		return left
 	}
@@ -236,7 +274,7 @@ func isFinalizedSignalJournalForEvaluation(item SignalJournal, now time.Time) bo
 
 func isFinalizedWatchJournalForEvaluation(item WatchJournal, now time.Time) bool {
 	switch item.Status {
-	case VIRTUAL_TP2_HIT, VIRTUAL_SL_HIT, VIRTUAL_EXPIRED:
+	case VIRTUAL_TP2_HIT, VIRTUAL_SL_HIT, VIRTUAL_EXPIRED, WATCH_RECHECK_INVALIDATED, WATCH_RECHECK_EXPIRED:
 		return true
 	case VIRTUAL_TP1_HIT:
 		return isTP1FinalizedForJournal(SignalJournal(item), now)
@@ -409,11 +447,35 @@ func getSampleGuard(sampleSize int) (confidence string, requiresMoreData bool, s
 	}
 }
 
+func freshnessMarker(source string, lastEventAt, now time.Time, freshThreshold, agingThreshold time.Duration) EvaluationFreshnessMarker {
+	marker := EvaluationFreshnessMarker{
+		Source:      source,
+		LastEventAt: lastEventAt,
+		AgeMinutes:  -1,
+		Status:      "MISSING",
+	}
+	if lastEventAt.IsZero() {
+		return marker
+	}
+	age := now.Sub(lastEventAt)
+	marker.AgeMinutes = age.Minutes()
+	switch {
+	case age <= freshThreshold:
+		marker.Status = "FRESH"
+	case age <= agingThreshold:
+		marker.Status = "AGING"
+	default:
+		marker.Status = "STALE"
+	}
+	return marker
+}
+
 // GenerateEvaluationReport compiles win rates, excursions, durations, and detailed threshold/policy recommendations.
 func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	slog.Info("Starting Feedback Loop evaluation report generation...")
 	var sourceFiles []string
 	var completeness DataCompleteness
+	sourceLabels := resolveFeedbackSourceFiles()
 
 	// 1. Load data sources
 	journal, err := uc.storageUsecase.LoadSignalJournal()
@@ -422,7 +484,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	}
 	hasJournal := err == nil && len(journal) > 0
 	if hasJournal {
-		sourceFiles = append(sourceFiles, "signal_journal.json")
+		sourceFiles = append(sourceFiles, sourceLabels.signalJournal)
 		completeness.HasSignalJournal = true
 		completeness.CanEvaluateExecutedOutcome = true
 	}
@@ -433,7 +495,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	}
 	hasWatchJournal := err == nil && len(watchJournal) > 0
 	if hasWatchJournal {
-		sourceFiles = append(sourceFiles, "watch_journal.json")
+		sourceFiles = append(sourceFiles, sourceLabels.watchJournal)
 		completeness.CanEvaluateWatchMissedOpportunity = true
 	}
 
@@ -443,7 +505,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	}
 	hasLatest := err == nil && latestRes != nil && len(latestRes.Signals) > 0
 	if hasLatest {
-		sourceFiles = append(sourceFiles, "latest_result.json")
+		sourceFiles = append(sourceFiles, sourceLabels.latestResult)
 		completeness.HasLatestResult = true
 		completeness.CanEvaluateWatchMissedOpportunity = true
 	}
@@ -454,7 +516,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	}
 	hasAudits := err == nil && len(audits) > 0
 	if hasAudits {
-		sourceFiles = append(sourceFiles, "decision_audit.json")
+		sourceFiles = append(sourceFiles, sourceLabels.decisionAudit)
 		completeness.HasDecisionAudit = true
 		completeness.CanEvaluateAIWait = true
 		completeness.CanEvaluateConflictDowngrade = true
@@ -468,6 +530,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 			ConfigVersion:    GetGlobalConfigRegistry().GetVersion(),
 			SourceFilesUsed:  sourceFiles,
 			DataCompleteness: completeness,
+			FreshnessMarkers: map[string]EvaluationFreshnessMarker{},
 			TotalSignals:     0,
 			Metrics:          make(map[string]float64),
 			PlaybookStats:    make(map[string]PlaybookStats),
@@ -483,7 +546,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 					SampleSize:       0,
 					EvidenceSummary:  "No historical trading signals found in storage files.",
 					ConfidenceLevel:  "LOW",
-					Reason:           "No signals recorded in signal_journal.json, watch_journal.json, or decision_audit.json.",
+					Reason:           fmt.Sprintf("No signals recorded in %s, %s, or %s.", sourceLabels.signalJournal, sourceLabels.watchJournal, sourceLabels.decisionAudit),
 					SuggestedAction:  "Wait for scanner to compile data.",
 					DoNotAutoApply:   true,
 					RequiresMoreData: true,
@@ -541,6 +604,21 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		timeSLCnt   int
 	}
 
+	type memorySliceKey struct {
+		Symbol       string
+		Direction    string
+		MarketRegime string
+		Playbook     string
+	}
+
+	type memorySliceAccum struct {
+		stats             rawStats
+		lastCreatedAt     time.Time
+		lastStatus        string
+		lastOutcomeReason string
+		lastDecisionBrief string
+	}
+
 	pbRaw := make(map[string]*rawStats)
 	regimeRaw := make(map[string]*rawStats)
 	tierRaw := make(map[string]*rawStats)
@@ -548,6 +626,7 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	aiRaw := make(map[string]*rawStats)
 	stalenessRaw := make(map[string]*rawStats)
 	longSetupRaw := make(map[string]*rawStats)
+	memorySliceRaw := make(map[memorySliceKey]*memorySliceAccum)
 
 	type longSetupMeta struct {
 		MarketRegime string
@@ -711,6 +790,25 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		updateRaw(getOrInitRaw(directionRaw, dirKey))
 		updateRaw(getOrInitRaw(aiRaw, aiConfKey))
 		updateRaw(getOrInitRaw(stalenessRaw, stalenessKey))
+		sliceKey := memorySliceKey{
+			Symbol:       strings.TrimSpace(item.Symbol),
+			Direction:    dirKey,
+			MarketRegime: regimeKey,
+			Playbook:     pbKey,
+		}
+		if sliceKey.Symbol == "" {
+			sliceKey.Symbol = "UNKNOWN"
+		}
+		if _, ok := memorySliceRaw[sliceKey]; !ok {
+			memorySliceRaw[sliceKey] = &memorySliceAccum{}
+		}
+		mem := memorySliceRaw[sliceKey]
+		updateRaw(&mem.stats)
+		if item.CreatedAt.After(mem.lastCreatedAt) {
+			mem.lastCreatedAt = item.CreatedAt
+			mem.lastStatus = string(item.Status)
+			mem.lastOutcomeReason = item.OutcomeReason
+		}
 		if item.Direction == LONG {
 			setupKey := regimeKey + "|" + pbKey
 			longSetupIndex[setupKey] = longSetupMeta{
@@ -718,6 +816,34 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 				Playbook:     pbKey,
 			}
 			updateRaw(getOrInitRaw(longSetupRaw, setupKey))
+		}
+	}
+	for _, audit := range audits {
+		sliceKey := memorySliceKey{
+			Symbol:       strings.TrimSpace(audit.Symbol),
+			Direction:    strings.TrimSpace(string(audit.Direction)),
+			MarketRegime: canonicalRegimeLabel(audit.MarketRegime),
+			Playbook:     strings.TrimSpace(string(audit.Playbook)),
+		}
+		if sliceKey.Symbol == "" || sliceKey.Direction == "" || sliceKey.Playbook == "" {
+			continue
+		}
+		if sliceKey.MarketRegime == "" {
+			sliceKey.MarketRegime = string(UNKNOWN)
+		}
+		mem, ok := memorySliceRaw[sliceKey]
+		if !ok {
+			continue
+		}
+		if audit.GeneratedAt.After(mem.lastCreatedAt) && strings.TrimSpace(audit.DecisionBrief) != "" {
+			mem.lastCreatedAt = audit.GeneratedAt
+			mem.lastDecisionBrief = audit.DecisionBrief
+			if mem.lastStatus == "" {
+				mem.lastStatus = string(audit.FinalStatus)
+			}
+			if mem.lastOutcomeReason == "" {
+				mem.lastOutcomeReason = audit.FinalReason
+			}
 		}
 	}
 
@@ -740,10 +866,29 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	// 2b. Evaluate virtual FINAL_WATCH outcomes separately from executable signals.
 	var watchFinalized []WatchJournal
 	var watchTP1Hits, watchTP2Hits, watchSLHits, watchExpiredHits int
+	var watchPromotedCount, watchRecheckExpiredCount, watchRecheckInvalidatedCount int
 	var watchSumMFE, watchSumMAE, watchTotalPnl float64
 	excludedWatchAnomalies := 0
+	var latestWatchEventAt time.Time
 
 	for _, item := range watchJournal {
+		if item.UpdatedAt.After(latestWatchEventAt) {
+			latestWatchEventAt = item.UpdatedAt
+		}
+		if item.ClosedAt.After(latestWatchEventAt) {
+			latestWatchEventAt = item.ClosedAt
+		}
+		if item.CreatedAt.After(latestWatchEventAt) {
+			latestWatchEventAt = item.CreatedAt
+		}
+		switch item.Status {
+		case WATCH_PROMOTED:
+			watchPromotedCount++
+		case WATCH_RECHECK_EXPIRED:
+			watchRecheckExpiredCount++
+		case WATCH_RECHECK_INVALIDATED:
+			watchRecheckInvalidatedCount++
+		}
 		if isJournalTimingAnomalous(SignalJournal(item), sanityProfile) {
 			excludedWatchAnomalies++
 			continue
@@ -778,6 +923,66 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	watchVirtualExpiredRate := safeRate(watchExpiredHits, watchFinalizedCount)
 	watchAverageMFE := safeDiv(watchSumMFE, float64(watchFinalizedCount))
 	watchAverageMAE := safeDiv(watchSumMAE, float64(watchFinalizedCount))
+
+	var promotedFinalizedCount, promotedWins, promotedTP2Hits, promotedSLHits, promotedExpiredHits int
+	var promotedTotalPnl float64
+	var latestSignalEventAt time.Time
+	for _, item := range journal {
+		if item.UpdatedAt.After(latestSignalEventAt) {
+			latestSignalEventAt = item.UpdatedAt
+		}
+		if item.ClosedAt.After(latestSignalEventAt) {
+			latestSignalEventAt = item.ClosedAt
+		}
+		if item.CreatedAt.After(latestSignalEventAt) {
+			latestSignalEventAt = item.CreatedAt
+		}
+		if !isWatchRecheckPromotionReason(item.Reason) {
+			continue
+		}
+		if !isFinalizedSignalJournalForEvaluation(item, now) {
+			continue
+		}
+		promotedFinalizedCount++
+		if isWinningSignalOutcome(item, now) {
+			promotedWins++
+		}
+		if item.Status == TP2_HIT {
+			promotedTP2Hits++
+		}
+		if item.Status == SL_HIT {
+			promotedSLHits++
+		}
+		if item.Status == EXPIRED {
+			promotedExpiredHits++
+		}
+		promotedTotalPnl += realizedEvaluationPnl(item, now)
+	}
+
+	var latestAuditEventAt time.Time
+	for _, audit := range audits {
+		if audit.GeneratedAt.After(latestAuditEventAt) {
+			latestAuditEventAt = audit.GeneratedAt
+		}
+		if audit.CreatedAt.After(latestAuditEventAt) {
+			latestAuditEventAt = audit.CreatedAt
+		}
+	}
+	promotedConversionRate := safeRate(watchPromotedCount, len(watchJournal))
+	promotedWinRate := safeRate(promotedWins, promotedFinalizedCount)
+	promotedTP2Rate := safeRate(promotedTP2Hits, promotedFinalizedCount)
+	promotedSLRate := safeRate(promotedSLHits, promotedFinalizedCount)
+	promotedExpiredRate := safeRate(promotedExpiredHits, promotedFinalizedCount)
+	freshThreshold := time.Duration(maxEvalInt(getRuntimeSettings().WatchRecheckBoundaryMinutes, 1)) * time.Minute
+	agingThreshold := time.Duration(maxEvalInt(getRuntimeSettings().MonitoringMaxHoldMinutes, maxEvalInt(getRuntimeSettings().WatchRecheckMaxAgeMinutes, 1))) * time.Minute
+	if agingThreshold < freshThreshold {
+		agingThreshold = freshThreshold
+	}
+	freshnessMarkers := map[string]EvaluationFreshnessMarker{
+		"signal_journal": freshnessMarker("signal_journal", latestSignalEventAt, now, freshThreshold, agingThreshold),
+		"watch_journal":  freshnessMarker("watch_journal", latestWatchEventAt, now, freshThreshold, agingThreshold),
+		"decision_audit": freshnessMarker("decision_audit", latestAuditEventAt, now, freshThreshold, agingThreshold),
+	}
 
 	// Map raw stats to report models
 	playbookStats := make(map[string]PlaybookStats)
@@ -891,6 +1096,39 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	if len(weakLongSetups) > 5 {
 		weakLongSetups = weakLongSetups[:5]
 	}
+
+	setupMemorySlices := make([]SetupMemorySlice, 0, len(memorySliceRaw))
+	for key, acc := range memorySliceRaw {
+		stats := acc.stats
+		setupMemorySlices = append(setupMemorySlices, SetupMemorySlice{
+			Symbol:             key.Symbol,
+			Direction:          key.Direction,
+			MarketRegime:       key.MarketRegime,
+			Playbook:           key.Playbook,
+			TotalSignals:       stats.total,
+			WinRate:            safeRate(stats.wins, stats.total),
+			TP2Rate:            safeRate(stats.tp2Count, stats.total),
+			SLRate:             safeRate(stats.slCount, stats.total),
+			ExpiredRate:        safeRate(stats.expCount, stats.total),
+			AverageRR:          safeDiv(stats.sumRR, float64(stats.total)),
+			TotalPnlPercentage: stats.sumPnl,
+			LastStatus:         acc.lastStatus,
+			LastOutcomeReason:  acc.lastOutcomeReason,
+			LastDecisionBrief:  acc.lastDecisionBrief,
+		})
+	}
+	sort.Slice(setupMemorySlices, func(i, j int) bool {
+		if setupMemorySlices[i].Symbol != setupMemorySlices[j].Symbol {
+			return setupMemorySlices[i].Symbol < setupMemorySlices[j].Symbol
+		}
+		if setupMemorySlices[i].MarketRegime != setupMemorySlices[j].MarketRegime {
+			return setupMemorySlices[i].MarketRegime < setupMemorySlices[j].MarketRegime
+		}
+		if setupMemorySlices[i].Playbook != setupMemorySlices[j].Playbook {
+			return setupMemorySlices[i].Playbook < setupMemorySlices[j].Playbook
+		}
+		return setupMemorySlices[i].Direction < setupMemorySlices[j].Direction
+	})
 
 	// Find best/worst metrics
 	var bestPb, worstPb string
@@ -1519,10 +1757,10 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 			Playbook:         "ALL",
 			MetricName:       "MISSED_OPPORTUNITY_EVALUATION",
 			MetricValue:      0.0,
-			EvidenceSummary:  "decision_audit.json is not available to track WATCH or AI_MEDIUM signals.",
+			EvidenceSummary:  fmt.Sprintf("%s is not available to track WATCH or AI_MEDIUM signals.", sourceLabels.decisionAudit),
 			ConfidenceLevel:  "LOW",
 			Reason:           "Need decision_audit/watchlist monitoring to evaluate AI_WAIT or AI_MEDIUM.",
-			SuggestedAction:  "Enable and populate decision_audit.json files.",
+			SuggestedAction:  fmt.Sprintf("Enable and populate %s.", sourceLabels.decisionAudit),
 			DoNotAutoApply:   true,
 			RequiresMoreData: true,
 			Severity:         "INFO",
@@ -1858,52 +2096,89 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		return recommendations[i].IssueType < recommendations[j].IssueType
 	})
 
+	learningReviews := make([]LearningReview, 0, len(recommendations))
+	for _, rec := range recommendations {
+		summary := strings.TrimSpace(rec.EvidenceSummary)
+		if summary == "" {
+			summary = strings.TrimSpace(rec.Reason)
+		}
+		learningReviews = append(learningReviews, LearningReview{
+			IssueType:        rec.IssueType,
+			Playbook:         rec.Playbook,
+			MarketRegime:     rec.MarketRegime,
+			Direction:        rec.Direction,
+			PolicyMode:       rec.PolicyMode,
+			Summary:          summary,
+			SuggestedAction:  rec.SuggestedAction,
+			ConfidenceLevel:  rec.ConfidenceLevel,
+			Severity:         rec.Severity,
+			SampleSize:       rec.SampleSize,
+			ReviewOnly:       true,
+			DoNotAutoApply:   true,
+			RequiresMoreData: rec.RequiresMoreData,
+		})
+	}
+
 	// 6. Build Final Report Object
 	report := EvaluationReport{
 		GeneratedAt:      time.Now(),
 		ConfigVersion:    GetGlobalConfigRegistry().GetVersion(),
 		SourceFilesUsed:  sourceFiles,
 		DataCompleteness: completeness,
+		FreshnessMarkers: freshnessMarkers,
 		TotalSignals:     totalCount,
 		Metrics: map[string]float64{
-			"win_rate":                         winRate,
-			"tp1_rate":                         tp1Rate,
-			"tp2_rate":                         tp2Rate,
-			"sl_rate":                          slRate,
-			"expired_rate":                     expiredRate,
-			"average_mfe":                      avgMFE,
-			"average_mae":                      avgMAE,
-			"average_rr":                       avgRR,
-			"average_time_to_tp1":              avgTimeToTP1,
-			"average_time_to_tp2":              avgTimeToTP2,
-			"average_time_to_sl":               avgTimeToSL,
-			"average_holding_time":             avgHoldingTime,
-			"total_pnl_percentage":             totalPnl,
-			"raw_signal_journal_count":         float64(len(journal)),
-			"excluded_signal_anomaly_count":    float64(excludedSignalAnomalies),
-			"watch_total":                      float64(len(watchJournal)),
-			"watch_finalized":                  float64(watchFinalizedCount),
-			"watch_virtual_win_rate":           watchVirtualWinRate,
-			"watch_virtual_tp1_rate":           watchVirtualTP1Rate,
-			"watch_virtual_tp2_rate":           watchVirtualTP2Rate,
-			"watch_virtual_sl_rate":            watchVirtualSLRate,
-			"watch_virtual_expired_rate":       watchVirtualExpiredRate,
-			"watch_average_mfe":                watchAverageMFE,
-			"watch_average_mae":                watchAverageMAE,
-			"watch_total_pnl_percentage":       watchTotalPnl,
-			"raw_watch_journal_count":          float64(len(watchJournal)),
-			"excluded_watch_anomaly_count":     float64(excludedWatchAnomalies),
-			"long_regime_playbook_slice_count": float64(len(longRegimePlaybookStats)),
-			"weak_long_setup_count":            float64(len(weakLongSetups)),
-			"m5_used_audit_count":              float64(m5UsedAuditCount),
-			"m5_confirmed_audit_count":         float64(m5ConfirmedAuditCount),
-			"m5_failed_audit_count":            float64(m5FailedAuditCount),
-			"m5_unavailable_audit_count":       float64(m5UnavailableAuditCount),
-			"m5_invalidated_audit_count":       float64(m5InvalidatedAuditCount),
-			"m5_soft_hard_audit_count":         float64(m5SoftHardAuditCount),
-			"m5_soft_hard_unavailable_count":   float64(m5SoftHardUnavailableCount),
-			"m5_soft_hard_failed_count":        float64(m5SoftHardFailedCount),
-			"m5_execution_violation_count":     float64(m5ExecutionViolationCount),
+			"win_rate":                             winRate,
+			"tp1_rate":                             tp1Rate,
+			"tp2_rate":                             tp2Rate,
+			"sl_rate":                              slRate,
+			"expired_rate":                         expiredRate,
+			"average_mfe":                          avgMFE,
+			"average_mae":                          avgMAE,
+			"average_rr":                           avgRR,
+			"average_time_to_tp1":                  avgTimeToTP1,
+			"average_time_to_tp2":                  avgTimeToTP2,
+			"average_time_to_sl":                   avgTimeToSL,
+			"average_holding_time":                 avgHoldingTime,
+			"total_pnl_percentage":                 totalPnl,
+			"raw_signal_journal_count":             float64(len(journal)),
+			"excluded_signal_anomaly_count":        float64(excludedSignalAnomalies),
+			"watch_total":                          float64(len(watchJournal)),
+			"watch_finalized":                      float64(watchFinalizedCount),
+			"watch_virtual_win_rate":               watchVirtualWinRate,
+			"watch_virtual_tp1_rate":               watchVirtualTP1Rate,
+			"watch_virtual_tp2_rate":               watchVirtualTP2Rate,
+			"watch_virtual_sl_rate":                watchVirtualSLRate,
+			"watch_virtual_expired_rate":           watchVirtualExpiredRate,
+			"watch_average_mfe":                    watchAverageMFE,
+			"watch_average_mae":                    watchAverageMAE,
+			"watch_total_pnl_percentage":           watchTotalPnl,
+			"watch_promoted_count":                 float64(watchPromotedCount),
+			"watch_recheck_expired_count":          float64(watchRecheckExpiredCount),
+			"watch_recheck_invalidated_count":      float64(watchRecheckInvalidatedCount),
+			"watch_to_promote_conversion_rate":     promotedConversionRate,
+			"promoted_finalized_count":             float64(promotedFinalizedCount),
+			"promoted_win_rate":                    promotedWinRate,
+			"promoted_tp2_rate":                    promotedTP2Rate,
+			"promoted_sl_rate":                     promotedSLRate,
+			"promoted_expired_rate":                promotedExpiredRate,
+			"promoted_total_pnl_percentage":        promotedTotalPnl,
+			"raw_watch_journal_count":              float64(len(watchJournal)),
+			"excluded_watch_anomaly_count":         float64(excludedWatchAnomalies),
+			"signal_journal_freshness_age_minutes": freshnessMarkers["signal_journal"].AgeMinutes,
+			"watch_journal_freshness_age_minutes":  freshnessMarkers["watch_journal"].AgeMinutes,
+			"decision_audit_freshness_age_minutes": freshnessMarkers["decision_audit"].AgeMinutes,
+			"long_regime_playbook_slice_count":     float64(len(longRegimePlaybookStats)),
+			"weak_long_setup_count":                float64(len(weakLongSetups)),
+			"m5_used_audit_count":                  float64(m5UsedAuditCount),
+			"m5_confirmed_audit_count":             float64(m5ConfirmedAuditCount),
+			"m5_failed_audit_count":                float64(m5FailedAuditCount),
+			"m5_unavailable_audit_count":           float64(m5UnavailableAuditCount),
+			"m5_invalidated_audit_count":           float64(m5InvalidatedAuditCount),
+			"m5_soft_hard_audit_count":             float64(m5SoftHardAuditCount),
+			"m5_soft_hard_unavailable_count":       float64(m5SoftHardUnavailableCount),
+			"m5_soft_hard_failed_count":            float64(m5SoftHardFailedCount),
+			"m5_execution_violation_count":         float64(m5ExecutionViolationCount),
 		},
 		PlaybookStats:             playbookStats,
 		RegimeStats:               regimeStats,
@@ -1913,6 +2188,8 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		StalenessStats:            stalenessStats,
 		LongRegimePlaybookStats:   longRegimePlaybookStats,
 		WeakLongSetups:            weakLongSetups,
+		SetupMemorySlices:         setupMemorySlices,
+		LearningReviews:           learningReviews,
 		ConflictStats:             conflictStats,
 		CooldownStats:             cooldownStats,
 		GateBugFindings:           gateBugFindings,
@@ -1934,6 +2211,11 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	}
 	if excludedSignalAnomalies > 0 || excludedWatchAnomalies > 0 {
 		report.Notes = fmt.Sprintf("%s Journal sanity quarantine excluded %d signal rows and %d watch rows from evaluation metrics.", report.Notes, excludedSignalAnomalies, excludedWatchAnomalies)
+	}
+	for _, marker := range freshnessMarkers {
+		if marker.Status == "STALE" {
+			report.Notes = fmt.Sprintf("%s Source %s is stale (%.1f minutes old).", report.Notes, marker.Source, marker.AgeMinutes)
+		}
 	}
 	GetGlobalMetrics().SetEvalMetrics(uint64(len(recommendations)), uint64(len(gateBugFindings)))
 	GetGlobalMetrics().SetLastEvaluationTime(report.GeneratedAt)

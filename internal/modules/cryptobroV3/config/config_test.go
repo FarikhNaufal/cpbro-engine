@@ -81,6 +81,11 @@ func TestConfig_NormalizeCompatibilityConfigAuthoritativeSectionsWin(t *testing.
 	t.Setenv("WATCH_COOLDOWN_MINUTES", "11")
 	t.Setenv("UNIVERSE_MAX_SYMBOLS_DEFAULT", "66")
 	t.Setenv("MAX_SYMBOLS_DEFAULT", "22")
+	t.Setenv("MONITORING_MAX_HOLD_MINUTES", "135")
+	t.Setenv("MONITORING_MAX_HOLD_M15_CANDLES", "2")
+	t.Setenv("SCAN_INTERVAL_MODE", "candle_close")
+	t.Setenv("STRATEGY_EVALUATION_MIN_SAMPLE_WARNING", "77")
+	t.Setenv("EVALUATION_MIN_SAMPLE_WARNING", "11")
 
 	cfg, err := LoadConfigFromEnv()
 	if err != nil {
@@ -102,6 +107,15 @@ func TestConfig_NormalizeCompatibilityConfigAuthoritativeSectionsWin(t *testing.
 	if cfg.Concurrency.MaxSymbolsDefault != 66 {
 		t.Fatalf("expected concurrency max symbols mirror to follow universe authoritative value, got %d", cfg.Concurrency.MaxSymbolsDefault)
 	}
+	if cfg.Monitoring.MaxHoldM15Candles != 9 {
+		t.Fatalf("expected monitoring max hold candles to mirror authoritative minutes, got %d", cfg.Monitoring.MaxHoldM15Candles)
+	}
+	if cfg.Scanner.IntervalMode != "m15_close" {
+		t.Fatalf("expected scan interval mode alias to normalize to m15_close, got %s", cfg.Scanner.IntervalMode)
+	}
+	if cfg.Evaluation.MinSampleWarning != 77 {
+		t.Fatalf("expected evaluation min sample mirror to follow strategy authoritative value, got %d", cfg.Evaluation.MinSampleWarning)
+	}
 }
 
 func TestConfig_ValidateConfigNormalizesLegacyMirrors(t *testing.T) {
@@ -115,6 +129,8 @@ func TestConfig_ValidateConfigNormalizesLegacyMirrors(t *testing.T) {
 	cfg.Safety.RequireFreshEntryForExecute = true
 	cfg.Strategy.RequireAIHighForExecute = false
 	cfg.Strategy.RequireFreshEntryForExecute = false
+	cfg.Monitoring.MaxHoldMinutes = 150
+	cfg.Monitoring.MaxHoldM15Candles = 1
 	cfg.Monitoring.MaxCandleConcurrency = 1
 	cfg.Monitoring.WatchCooldownMinutes = 1
 	cfg.Concurrency.MaxMarketDataConcurrency = 1
@@ -137,6 +153,30 @@ func TestConfig_ValidateConfigNormalizesLegacyMirrors(t *testing.T) {
 	}
 	if !cfg.Strategy.RequireAIHighForExecute || !cfg.Strategy.RequireFreshEntryForExecute {
 		t.Fatalf("expected strategy safety flags to normalize to true, got %+v", cfg.Strategy)
+	}
+	if cfg.Monitoring.MaxHoldM15Candles != 10 {
+		t.Fatalf("expected monitoring max hold candles to normalize from authoritative minutes, got %d", cfg.Monitoring.MaxHoldM15Candles)
+	}
+}
+
+func TestConfig_NormalizeCompatibilityConfigDerivesMinutesFromCandles(t *testing.T) {
+	cfg, _ := LoadConfigFromEnv()
+	cfg.Monitoring.MaxHoldMinutes = 0
+	cfg.Monitoring.MaxHoldM15Candles = 6
+
+	normalizeCompatibilityConfig(cfg)
+
+	if cfg.Monitoring.MaxHoldMinutes != 90 {
+		t.Fatalf("expected monitoring max hold minutes derived from candle count, got %d", cfg.Monitoring.MaxHoldMinutes)
+	}
+}
+
+func TestConfig_ValidationRejectsUnsupportedScanIntervalMode(t *testing.T) {
+	cfg, _ := LoadConfigFromEnv()
+	cfg.Scanner.IntervalMode = "poll_interval"
+
+	if err := ValidateConfig(cfg); err == nil {
+		t.Fatalf("expected validation error for unsupported scan interval mode")
 	}
 }
 
@@ -202,6 +242,16 @@ func TestConfig_SafeConfigViewIncludesNewRuntimeSurfaces(t *testing.T) {
 	geminiMap := view["gemini"].(map[string]any)
 	if _, ok := geminiMap["max_concurrency"]; ok {
 		t.Fatalf("expected worker-owned gemini concurrency mirror to be hidden from safe config view")
+	}
+	evaluationMap := view["evaluation"].(map[string]any)
+	if _, ok := evaluationMap["min_sample_warning"]; ok {
+		t.Fatalf("expected strategy-owned evaluation min sample mirrors to be hidden from safe config view")
+	}
+	if _, ok := evaluationMap["min_sample_medium"]; ok {
+		t.Fatalf("expected strategy-owned evaluation min sample medium mirror to be hidden from safe config view")
+	}
+	if _, ok := evaluationMap["min_sample_high"]; ok {
+		t.Fatalf("expected strategy-owned evaluation min sample high mirror to be hidden from safe config view")
 	}
 }
 

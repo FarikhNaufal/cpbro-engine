@@ -151,6 +151,7 @@ func TestObservability_PerformHealthAudit(t *testing.T) {
 	notifier := &mockObsNotifier{failPing: false}
 
 	uc := NewObservabilityUsecase(provider, aiService, notifier, tmpDir)
+	uc.SetStorageFiles("signal_health_test.json", "watch_health_test.json", "custom_health_snapshot.json")
 	uc.SetRealtimeStatusProvider(&mockObsRealtimeStatus{
 		status: RealtimePriceStatus{
 			Enabled:         true,
@@ -168,6 +169,9 @@ func TestObservability_PerformHealthAudit(t *testing.T) {
 	defer SetRuntimeSettings(original)
 	settings := original
 	settings.HealthStorageCheck = true
+	settings.WatchRecheckBoundaryMinutes = 5
+	settings.WatchRecheckMaxAgeMinutes = 12
+	settings.WatchRecheckAllowedPlaybooks = []string{"TREND_PULLBACK", "LIQUIDITY_SWEEP_REVERSAL"}
 	SetRuntimeSettings(settings)
 
 	ctx := context.Background()
@@ -194,9 +198,24 @@ func TestObservability_PerformHealthAudit(t *testing.T) {
 	if !status.RealtimePrice.Enabled || !status.RealtimePrice.Connected || status.RealtimePrice.ActiveSymbols != 2 {
 		t.Errorf("unexpected realtime status: %+v", status.RealtimePrice)
 	}
+	if status.RecheckCadence.BoundaryMinutes != 5 || status.RecheckCadence.MaxAgeMinutes != 12 {
+		t.Errorf("unexpected recheck cadence: %+v", status.RecheckCadence)
+	}
+	if len(status.RecheckCadence.AllowedPlaybooks) != 2 {
+		t.Errorf("expected allowed playbooks in health, got %+v", status.RecheckCadence)
+	}
+	if !status.RolloutReadiness.Ready {
+		t.Fatalf("expected rollout readiness true, got blockers=%v", status.RolloutReadiness.Blockers)
+	}
+	if status.RolloutReadiness.RecommendedPhase == "" {
+		t.Fatal("expected rollout recommended phase to be populated")
+	}
+	if len(status.RolloutReadiness.RollbackCriteria) == 0 {
+		t.Fatal("expected rollback criteria to be populated")
+	}
 
 	// Verify health snapshot file creation
-	snapFile := filepath.Join(tmpDir, "health_snapshot.json")
+	snapFile := filepath.Join(tmpDir, "custom_health_snapshot.json")
 	data, err := os.ReadFile(snapFile)
 	if err != nil {
 		t.Fatalf("failed to read health snapshot file: %v", err)
@@ -229,5 +248,11 @@ func TestObservability_PerformHealthAudit(t *testing.T) {
 	}
 	if failedStatus.TelegramAvailability == "OK" || !strings.Contains(failedStatus.TelegramAvailability, "ERROR") {
 		t.Errorf("Expected Telegram error, got %s", failedStatus.TelegramAvailability)
+	}
+	if failedStatus.RolloutReadiness.Ready {
+		t.Fatalf("expected rollout readiness false on failed dependencies, got %+v", failedStatus.RolloutReadiness)
+	}
+	if len(failedStatus.RolloutReadiness.Blockers) == 0 {
+		t.Fatal("expected rollout blockers on failed health")
 	}
 }

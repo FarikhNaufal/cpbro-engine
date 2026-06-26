@@ -87,44 +87,46 @@ const (
 type Status string
 
 const (
-	RAW_SYMBOL        Status = "RAW_SYMBOL"
-	UNIVERSE_PASS     Status = "UNIVERSE_PASS"
-	UNIVERSE_REJECT   Status = "UNIVERSE_REJECT"
-	STRATEGY_SELECTED Status = "STRATEGY_SELECTED"
-	PLAYBOOK_ELIGIBLE Status = "PLAYBOOK_ELIGIBLE"
-	PLAYBOOK_REJECTED Status = "PLAYBOOK_REJECTED"
-	QUANT_CANDIDATE   Status = "QUANT_CANDIDATE"
-	ARBITER_SELECTED  Status = "ARBITER_SELECTED"
-	ARBITER_REJECTED  Status = "ARBITER_REJECTED"
-	LOCAL_REJECT      Status = "LOCAL_REJECT"
-	LOCAL_WATCH       Status = "LOCAL_WATCH"
-	AI_CANDIDATE      Status = "AI_CANDIDATE"
-	AI_CONFIRM        Status = "AI_CONFIRM"
-	AI_WAIT           Status = "AI_WAIT"
-	AI_REJECT         Status = "AI_REJECT"
-	AI_ERROR          Status = "AI_ERROR"
-	PLAN_VALID        Status = "PLAN_VALID"
-	PLAN_NEED_RETEST  Status = "PLAN_NEED_RETEST"
-	PLAN_CONFLICT     Status = "PLAN_CONFLICT"
-	FRESH             Status = "FRESH"
-	LATE              Status = "LATE"
-	MISSED            Status = "MISSED"
-	FINAL_EXECUTE     Status = "FINAL_EXECUTE"
-	FINAL_WATCH       Status = "FINAL_WATCH"
-	FINAL_REJECT      Status = "FINAL_REJECT"
-	AI_ERROR_REVIEW   Status = "AI_ERROR_REVIEW"
-	MONITORING        Status = "MONITORING"
-	WATCH_MONITORING  Status = "WATCH_MONITORING"
-	TP1_HIT           Status = "TP1_HIT"
-	TP2_HIT           Status = "TP2_HIT"
-	SL_HIT            Status = "SL_HIT"
-	EXPIRED           Status = "EXPIRED"
-	BREAKEVEN         Status = "BREAKEVEN"
-	VIRTUAL_TP1_HIT   Status = "VIRTUAL_TP1_HIT"
-	VIRTUAL_TP2_HIT   Status = "VIRTUAL_TP2_HIT"
-	VIRTUAL_SL_HIT    Status = "VIRTUAL_SL_HIT"
-	VIRTUAL_EXPIRED   Status = "VIRTUAL_EXPIRED"
-	WATCH_PROMOTED    Status = "WATCH_PROMOTED"
+	RAW_SYMBOL                Status = "RAW_SYMBOL"
+	UNIVERSE_PASS             Status = "UNIVERSE_PASS"
+	UNIVERSE_REJECT           Status = "UNIVERSE_REJECT"
+	STRATEGY_SELECTED         Status = "STRATEGY_SELECTED"
+	PLAYBOOK_ELIGIBLE         Status = "PLAYBOOK_ELIGIBLE"
+	PLAYBOOK_REJECTED         Status = "PLAYBOOK_REJECTED"
+	QUANT_CANDIDATE           Status = "QUANT_CANDIDATE"
+	ARBITER_SELECTED          Status = "ARBITER_SELECTED"
+	ARBITER_REJECTED          Status = "ARBITER_REJECTED"
+	LOCAL_REJECT              Status = "LOCAL_REJECT"
+	LOCAL_WATCH               Status = "LOCAL_WATCH"
+	AI_CANDIDATE              Status = "AI_CANDIDATE"
+	AI_CONFIRM                Status = "AI_CONFIRM"
+	AI_WAIT                   Status = "AI_WAIT"
+	AI_REJECT                 Status = "AI_REJECT"
+	AI_ERROR                  Status = "AI_ERROR"
+	PLAN_VALID                Status = "PLAN_VALID"
+	PLAN_NEED_RETEST          Status = "PLAN_NEED_RETEST"
+	PLAN_CONFLICT             Status = "PLAN_CONFLICT"
+	FRESH                     Status = "FRESH"
+	LATE                      Status = "LATE"
+	MISSED                    Status = "MISSED"
+	FINAL_EXECUTE             Status = "FINAL_EXECUTE"
+	FINAL_WATCH               Status = "FINAL_WATCH"
+	FINAL_REJECT              Status = "FINAL_REJECT"
+	AI_ERROR_REVIEW           Status = "AI_ERROR_REVIEW"
+	MONITORING                Status = "MONITORING"
+	WATCH_MONITORING          Status = "WATCH_MONITORING"
+	TP1_HIT                   Status = "TP1_HIT"
+	TP2_HIT                   Status = "TP2_HIT"
+	SL_HIT                    Status = "SL_HIT"
+	EXPIRED                   Status = "EXPIRED"
+	BREAKEVEN                 Status = "BREAKEVEN"
+	VIRTUAL_TP1_HIT           Status = "VIRTUAL_TP1_HIT"
+	VIRTUAL_TP2_HIT           Status = "VIRTUAL_TP2_HIT"
+	VIRTUAL_SL_HIT            Status = "VIRTUAL_SL_HIT"
+	VIRTUAL_EXPIRED           Status = "VIRTUAL_EXPIRED"
+	WATCH_PROMOTED            Status = "WATCH_PROMOTED"
+	WATCH_RECHECK_INVALIDATED Status = "WATCH_RECHECK_INVALIDATED"
+	WATCH_RECHECK_EXPIRED     Status = "WATCH_RECHECK_EXPIRED"
 )
 
 type M5ConfirmationMode string
@@ -528,6 +530,7 @@ type DecisionAudit struct {
 	FinalReasonAfterConflict  string    `json:"final_reason_after_conflict"`
 	FinalStatus               Status    `json:"final_status"`
 	FinalReason               string    `json:"final_reason"`
+	DecisionBrief             string    `json:"decision_brief,omitempty"`
 	FinalPrimaryReasonLayer   string    `json:"final_primary_reason_layer,omitempty"`
 	FinalReasonBreakdown      []string  `json:"final_reason_breakdown,omitempty"`
 	ConflictReason            string    `json:"conflict_reason"`
@@ -591,6 +594,13 @@ type DataCompleteness struct {
 	CanEvaluateConflictDowngrade      bool `json:"can_evaluate_conflict_downgrade"`
 }
 
+type EvaluationFreshnessMarker struct {
+	Source      string    `json:"source"`
+	LastEventAt time.Time `json:"last_event_at"`
+	AgeMinutes  float64   `json:"age_minutes"`
+	Status      string    `json:"status"`
+}
+
 type PlaybookStats struct {
 	TotalSignals         int     `json:"total_signals"`
 	WinRate              float64 `json:"win_rate"`
@@ -649,40 +659,76 @@ type SetupDiagnosticStats struct {
 	TotalPnlPercentage float64 `json:"total_pnl_percentage"`
 }
 
+type SetupMemorySlice struct {
+	Symbol             string  `json:"symbol"`
+	Direction          string  `json:"direction"`
+	MarketRegime       string  `json:"market_regime"`
+	Playbook           string  `json:"playbook"`
+	TotalSignals       int     `json:"total_signals"`
+	WinRate            float64 `json:"win_rate"`
+	TP2Rate            float64 `json:"tp2_rate"`
+	SLRate             float64 `json:"sl_rate"`
+	ExpiredRate        float64 `json:"expired_rate"`
+	AverageRR          float64 `json:"average_rr"`
+	TotalPnlPercentage float64 `json:"total_pnl_percentage"`
+	LastStatus         string  `json:"last_status"`
+	LastOutcomeReason  string  `json:"last_outcome_reason,omitempty"`
+	LastDecisionBrief  string  `json:"last_decision_brief,omitempty"`
+}
+
+type LearningReview struct {
+	IssueType        string `json:"issue_type"`
+	Playbook         string `json:"playbook"`
+	MarketRegime     string `json:"market_regime,omitempty"`
+	Direction        string `json:"direction,omitempty"`
+	PolicyMode       string `json:"policy_mode,omitempty"`
+	Summary          string `json:"summary"`
+	SuggestedAction  string `json:"suggested_action,omitempty"`
+	ConfidenceLevel  string `json:"confidence_level,omitempty"`
+	Severity         string `json:"severity,omitempty"`
+	SampleSize       int    `json:"sample_size,omitempty"`
+	ReviewOnly       bool   `json:"review_only"`
+	DoNotAutoApply   bool   `json:"do_not_auto_apply"`
+	RequiresMoreData bool   `json:"requires_more_data"`
+}
+
 type EvaluationReport struct {
-	SchemaVersion             string                    `json:"schema_version,omitempty"`
-	ConfigVersion             string                    `json:"config_version,omitempty"`
-	GeneratedAt               time.Time                 `json:"generated_at"`
-	SourceFilesUsed           []string                  `json:"source_files_used"`
-	DataCompleteness          DataCompleteness          `json:"data_completeness"`
-	TotalSignals              int                       `json:"total_signals"`
-	Metrics                   map[string]float64        `json:"metrics"`
-	PlaybookStats             map[string]PlaybookStats  `json:"playbook_stats"`
-	RegimeStats               map[string]RegimeStats    `json:"regime_stats"`
-	TierStats                 map[string]TierStats      `json:"tier_stats"`
-	DirectionStats            map[string]DirectionStats `json:"direction_stats"`
-	AIStats                   map[string]AIStats        `json:"ai_stats"`
-	StalenessStats            map[string]StalenessStats `json:"staleness_stats"`
-	LongRegimePlaybookStats   []SetupDiagnosticStats    `json:"long_regime_playbook_stats,omitempty"`
-	WeakLongSetups            []SetupDiagnosticStats    `json:"weak_long_setups,omitempty"`
-	ConflictStats             map[string]int            `json:"conflict_stats,omitempty"`
-	CooldownStats             map[string]int            `json:"cooldown_stats,omitempty"`
-	GateBugFindings           []string                  `json:"gate_bug_findings"`
-	Recommendations           []ThresholdRecommendation `json:"recommendations"`
-	BestPlaybook              string                    `json:"best_playbook"`
-	WorstPlaybook             string                    `json:"worst_playbook"`
-	SetupYangSeringLangsungSL string                    `json:"setup_yang_sering_langsung_sl"`
-	SetupYangSeringExpired    string                    `json:"setup_yang_sering_expired"`
-	SetupYangSeringStale      string                    `json:"setup_yang_sering_stale"`
-	RegimeYangPalingBuruk     string                    `json:"regime_yang_paling_buruk"`
-	TierYangPalingBuruk       string                    `json:"tier_yang_paling_buruk"`
-	DirectionYangPalingBuruk  string                    `json:"direction_yang_paling_buruk"`
-	PlaybookDenganMAETerbesar string                    `json:"playbook_dengan_mae_terbesar"`
-	PlaybookDenganExpiredRate string                    `json:"playbook_dengan_expired_rate_terbesar"`
-	PlaybookDenganTP1Terbaik  string                    `json:"playbook_dengan_tp1_rate_terbaik"`
-	PlaybookDenganTP2Follow   string                    `json:"playbook_dengan_tp2_follow_through_terbaik"`
-	Notes                     string                    `json:"notes"`
-	Status                    Status                    `json:"status"`
+	SchemaVersion             string                               `json:"schema_version,omitempty"`
+	ConfigVersion             string                               `json:"config_version,omitempty"`
+	GeneratedAt               time.Time                            `json:"generated_at"`
+	SourceFilesUsed           []string                             `json:"source_files_used"`
+	DataCompleteness          DataCompleteness                     `json:"data_completeness"`
+	FreshnessMarkers          map[string]EvaluationFreshnessMarker `json:"freshness_markers,omitempty"`
+	TotalSignals              int                                  `json:"total_signals"`
+	Metrics                   map[string]float64                   `json:"metrics"`
+	PlaybookStats             map[string]PlaybookStats             `json:"playbook_stats"`
+	RegimeStats               map[string]RegimeStats               `json:"regime_stats"`
+	TierStats                 map[string]TierStats                 `json:"tier_stats"`
+	DirectionStats            map[string]DirectionStats            `json:"direction_stats"`
+	AIStats                   map[string]AIStats                   `json:"ai_stats"`
+	StalenessStats            map[string]StalenessStats            `json:"staleness_stats"`
+	LongRegimePlaybookStats   []SetupDiagnosticStats               `json:"long_regime_playbook_stats,omitempty"`
+	WeakLongSetups            []SetupDiagnosticStats               `json:"weak_long_setups,omitempty"`
+	SetupMemorySlices         []SetupMemorySlice                   `json:"setup_memory_slices,omitempty"`
+	LearningReviews           []LearningReview                     `json:"learning_reviews,omitempty"`
+	ConflictStats             map[string]int                       `json:"conflict_stats,omitempty"`
+	CooldownStats             map[string]int                       `json:"cooldown_stats,omitempty"`
+	GateBugFindings           []string                             `json:"gate_bug_findings"`
+	Recommendations           []ThresholdRecommendation            `json:"recommendations"`
+	BestPlaybook              string                               `json:"best_playbook"`
+	WorstPlaybook             string                               `json:"worst_playbook"`
+	SetupYangSeringLangsungSL string                               `json:"setup_yang_sering_langsung_sl"`
+	SetupYangSeringExpired    string                               `json:"setup_yang_sering_expired"`
+	SetupYangSeringStale      string                               `json:"setup_yang_sering_stale"`
+	RegimeYangPalingBuruk     string                               `json:"regime_yang_paling_buruk"`
+	TierYangPalingBuruk       string                               `json:"tier_yang_paling_buruk"`
+	DirectionYangPalingBuruk  string                               `json:"direction_yang_paling_buruk"`
+	PlaybookDenganMAETerbesar string                               `json:"playbook_dengan_mae_terbesar"`
+	PlaybookDenganExpiredRate string                               `json:"playbook_dengan_expired_rate_terbesar"`
+	PlaybookDenganTP1Terbaik  string                               `json:"playbook_dengan_tp1_rate_terbaik"`
+	PlaybookDenganTP2Follow   string                               `json:"playbook_dengan_tp2_follow_through_terbaik"`
+	Notes                     string                               `json:"notes"`
+	Status                    Status                               `json:"status"`
 }
 
 type ScannerSummaryV3 struct {

@@ -226,3 +226,45 @@ func TestDecisionAudit_NewTruthFields_AreExposed(t *testing.T) {
 		t.Fatalf("unexpected breakdown item: %v", breakdown[0])
 	}
 }
+
+func TestDecisionAudit_DecisionBrief_IsExposed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir := t.TempDir()
+
+	raw := []byte(`[
+		{
+			"scan_id":"scan-brief",
+			"symbol":"SOLUSDT",
+			"final_status":"FINAL_WATCH",
+			"final_reason":"Need retest",
+			"decision_brief":"FINAL_WATCH | TREND_PULLBACK | ai=WAIT/HIGH | reason=Need retest",
+			"created_at":"2026-06-18T09:30:00Z"
+		}
+	]`)
+	_ = os.WriteFile(filepath.Join(dir, "decision_audit.json"), raw, 0644)
+
+	st, _ := service.NewJSONStorageService(dir)
+	h := &Handler{storageUC: usecase.NewStorageUsecase(st)}
+
+	r := gin.New()
+	r.GET("/decision-audit", h.GetDecisionAudit)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/decision-audit", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp APIResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	dataBytes, _ := json.Marshal(resp.Data)
+	var d map[string]any
+	_ = json.Unmarshal(dataBytes, &d)
+
+	items := d["items"].([]any)
+	row := items[0].(map[string]any)
+	if row["decision_brief"] == "" {
+		t.Fatal("expected decision_brief to be exposed")
+	}
+}

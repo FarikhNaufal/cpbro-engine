@@ -1,25 +1,33 @@
 package dto
 
+type RolloutReadiness struct {
+	Ready            bool     `json:"ready"`
+	RecommendedPhase string   `json:"recommended_phase"`
+	Blockers         []string `json:"blockers,omitempty"`
+	RollbackCriteria []string `json:"rollback_criteria,omitempty"`
+}
+
 type HealthResponse struct {
-	AppName                  string         `json:"app_name"`
-	AppVersion               string         `json:"app_version"`
-	AppEnv                   string         `json:"app_env"`
-	Mode                     string         `json:"mode"`
-	AlertOnly                bool           `json:"alert_only"`
-	BinanceReadOnly          bool           `json:"binance_read_only"`
-	ScannerRunning           bool           `json:"scanner_running"`
-	LastScanTime             string         `json:"last_scan_time"`
-	LastEvaluationTime       string         `json:"last_evaluation_time"`
-	StorageAvailable         bool           `json:"storage_available"`
-	SwaggerEnabled           bool           `json:"swagger_enabled,omitempty"`
-	UptimeSeconds            float64        `json:"uptime_seconds,omitempty"`
-	Status                   string         `json:"status"`
-	Warnings                 []string       `json:"warnings,omitempty"`
-	WebsocketEnabled         bool           `json:"websocket_enabled,omitempty"`
-	WebsocketConnected       bool           `json:"websocket_connected,omitempty"`
-	WebsocketActiveSymbols   int            `json:"websocket_active_symbols,omitempty"`
-	WebsocketLastMessageTime string         `json:"websocket_last_message_time,omitempty"`
-	SafeConfig               map[string]any `json:"safe_config,omitempty"`
+	AppName                  string           `json:"app_name"`
+	AppVersion               string           `json:"app_version"`
+	AppEnv                   string           `json:"app_env"`
+	Mode                     string           `json:"mode"`
+	AlertOnly                bool             `json:"alert_only"`
+	BinanceReadOnly          bool             `json:"binance_read_only"`
+	ScannerRunning           bool             `json:"scanner_running"`
+	LastScanTime             string           `json:"last_scan_time"`
+	LastEvaluationTime       string           `json:"last_evaluation_time"`
+	StorageAvailable         bool             `json:"storage_available"`
+	SwaggerEnabled           bool             `json:"swagger_enabled,omitempty"`
+	UptimeSeconds            float64          `json:"uptime_seconds,omitempty"`
+	Status                   string           `json:"status"`
+	Warnings                 []string         `json:"warnings,omitempty"`
+	WebsocketEnabled         bool             `json:"websocket_enabled,omitempty"`
+	WebsocketConnected       bool             `json:"websocket_connected,omitempty"`
+	WebsocketActiveSymbols   int              `json:"websocket_active_symbols,omitempty"`
+	WebsocketLastMessageTime string           `json:"websocket_last_message_time,omitempty"`
+	RolloutReadiness         RolloutReadiness `json:"rollout_readiness,omitempty"`
+	SafeConfig               map[string]any   `json:"safe_config,omitempty"`
 }
 
 type Signal struct {
@@ -74,6 +82,7 @@ type ArbiterSelectedDetail struct {
 	StalenessStatus string `json:"staleness_status"`
 	FinalStatus     string `json:"final_status"`
 	FinalReason     string `json:"final_reason"`
+	DecisionBrief   string `json:"decision_brief,omitempty"`
 }
 
 type FunnelReasonCount struct {
@@ -285,6 +294,39 @@ type SetupDiagnosticStats struct {
 	TotalPnlPercentage float64 `json:"total_pnl_percentage"`
 }
 
+type SetupMemorySlice struct {
+	Symbol             string  `json:"symbol"`
+	Direction          string  `json:"direction"`
+	MarketRegime       string  `json:"market_regime"`
+	Playbook           string  `json:"playbook"`
+	TotalSignals       int     `json:"total_signals"`
+	WinRate            float64 `json:"win_rate"`
+	TP2Rate            float64 `json:"tp2_rate"`
+	SLRate             float64 `json:"sl_rate"`
+	ExpiredRate        float64 `json:"expired_rate"`
+	AverageRR          float64 `json:"average_rr"`
+	TotalPnlPercentage float64 `json:"total_pnl_percentage"`
+	LastStatus         string  `json:"last_status"`
+	LastOutcomeReason  string  `json:"last_outcome_reason,omitempty"`
+	LastDecisionBrief  string  `json:"last_decision_brief,omitempty"`
+}
+
+type LearningReview struct {
+	IssueType        string `json:"issue_type"`
+	Playbook         string `json:"playbook"`
+	MarketRegime     string `json:"market_regime,omitempty"`
+	Direction        string `json:"direction,omitempty"`
+	PolicyMode       string `json:"policy_mode,omitempty"`
+	Summary          string `json:"summary"`
+	SuggestedAction  string `json:"suggested_action,omitempty"`
+	ConfidenceLevel  string `json:"confidence_level,omitempty"`
+	Severity         string `json:"severity,omitempty"`
+	SampleSize       int    `json:"sample_size,omitempty"`
+	ReviewOnly       bool   `json:"review_only"`
+	DoNotAutoApply   bool   `json:"do_not_auto_apply"`
+	RequiresMoreData bool   `json:"requires_more_data"`
+}
+
 type GateBugFinding string
 
 type NamedPlaybookStats struct {
@@ -329,6 +371,8 @@ type EvaluationResponse struct {
 	StalenessStats            []NamedStalenessStats     `json:"staleness_stats"`
 	LongRegimePlaybookStats   []SetupDiagnosticStats    `json:"long_regime_playbook_stats"`
 	WeakLongSetups            []SetupDiagnosticStats    `json:"weak_long_setups"`
+	SetupMemorySlices         []SetupMemorySlice        `json:"setup_memory_slices"`
+	LearningReviews           []LearningReview          `json:"learning_reviews"`
 	ConflictStats             []NamedIntStat            `json:"conflict_stats"`
 	CooldownStats             []NamedIntStat            `json:"cooldown_stats"`
 	GateBugFindings           []GateBugFinding          `json:"gate_bug_findings"`
@@ -386,6 +430,7 @@ type DecisionAuditRow struct {
 	FinalReasonAfterConflict  string   `json:"final_reason_after_conflict"`
 	FinalStatus               string   `json:"final_status"`
 	FinalReason               string   `json:"final_reason"`
+	DecisionBrief             string   `json:"decision_brief,omitempty"`
 	FinalPrimaryReasonLayer   string   `json:"final_primary_reason_layer,omitempty"`
 	FinalReasonBreakdown      []string `json:"final_reason_breakdown,omitempty"`
 	ConflictReason            string   `json:"conflict_reason"`

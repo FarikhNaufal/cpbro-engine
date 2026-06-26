@@ -11,10 +11,22 @@ type AICandidateSelectorUsecase struct {
 	minScoreThreshold float64
 }
 
+const defaultAICandidateEligibilityScore = 7.5
+
 func NewAICandidateSelectorUsecase(minScore float64) *AICandidateSelectorUsecase {
 	return &AICandidateSelectorUsecase{
-		minScoreThreshold: minScore,
+		minScoreThreshold: normalizeAICandidateEligibilityScore(minScore),
 	}
+}
+
+func normalizeAICandidateEligibilityScore(minScore float64) float64 {
+	if minScore <= 0 {
+		return defaultAICandidateEligibilityScore
+	}
+	if minScore > 10 {
+		return defaultAICandidateEligibilityScore
+	}
+	return minScore
 }
 
 // IsEligible filters out weak setups, sending only high-scoring setups to the Gemini API.
@@ -72,7 +84,10 @@ func (uc *AICandidateSelectorUsecase) SelectCandidates(candidates []QuantResult,
 		if isChaos {
 			limit = 1
 		} else {
-			limit = 3
+			limit = getRuntimeSettings().GeminiMaxCandidatesDefault
+			if limit <= 0 {
+				limit = 3
+			}
 		}
 	}
 

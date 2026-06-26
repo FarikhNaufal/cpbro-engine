@@ -26,6 +26,17 @@ type BinanceRealtimePriceConfig struct {
 	ForceRestart     time.Duration
 }
 
+const (
+	defaultRealtimePriceStaleAfter   = 15 * time.Second
+	defaultRealtimeReconnectDelay    = 5 * time.Second
+	defaultRealtimeForceRestartAfter = 23 * time.Hour
+	defaultRealtimeReadDeadline      = 10 * time.Minute
+	defaultRealtimeMaxBackoffDelay   = 60 * time.Second
+	defaultRealtimePongWriteTimeout  = 5 * time.Second
+	defaultRealtimeUpdateDebounce    = 300 * time.Millisecond
+	defaultRealtimeIdlePollInterval  = 2 * time.Second
+)
+
 type BinanceRealtimePriceStream struct {
 	cfg    BinanceRealtimePriceConfig
 	dialer *websocket.Dialer
@@ -77,13 +88,13 @@ func NewBinanceRealtimePriceStream(cfg BinanceRealtimePriceConfig) *BinanceRealt
 		cfg.MaxActiveSymbols = 50
 	}
 	if cfg.ReconnectDelay <= 0 {
-		cfg.ReconnectDelay = 5 * time.Second
+		cfg.ReconnectDelay = defaultRealtimeReconnectDelay
 	}
 	if cfg.StaleAfter <= 0 {
-		cfg.StaleAfter = 15 * time.Second
+		cfg.StaleAfter = defaultRealtimePriceStaleAfter
 	}
 	if cfg.ForceRestart <= 0 {
-		cfg.ForceRestart = 23 * time.Hour
+		cfg.ForceRestart = defaultRealtimeForceRestartAfter
 	}
 
 	return &BinanceRealtimePriceStream{
@@ -220,7 +231,7 @@ func (s *BinanceRealtimePriceStream) run(ctx context.Context) {
 				return
 			case <-s.updateCh:
 				continue
-			case <-time.After(2 * time.Second):
+			case <-time.After(defaultRealtimeIdlePollInterval):
 				continue
 			}
 		}
@@ -236,8 +247,8 @@ func (s *BinanceRealtimePriceStream) run(ctx context.Context) {
 		if failures > 0 {
 			backoffFactor := 1 << (failures - 1)
 			delay = s.cfg.ReconnectDelay * time.Duration(backoffFactor)
-			if delay > 60*time.Second {
-				delay = 60 * time.Second
+			if delay > defaultRealtimeMaxBackoffDelay {
+				delay = defaultRealtimeMaxBackoffDelay
 			}
 		}
 
@@ -281,7 +292,7 @@ func (s *BinanceRealtimePriceStream) runConnection(ctx context.Context, symbols 
 	slog.Info("Successfully connected to Binance realtime price stream", "symbols_count", len(symbols))
 
 	startedAt := time.Now()
-	readDeadline := 10 * time.Minute
+	readDeadline := defaultRealtimeReadDeadline
 	_ = conn.SetReadDeadline(time.Now().Add(readDeadline))
 	conn.SetPongHandler(func(appData string) error {
 		return conn.SetReadDeadline(time.Now().Add(readDeadline))
@@ -290,7 +301,7 @@ func (s *BinanceRealtimePriceStream) runConnection(ctx context.Context, symbols 
 		_ = conn.SetReadDeadline(time.Now().Add(readDeadline))
 		s.writeMu.Lock()
 		defer s.writeMu.Unlock()
-		return conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(5*time.Second))
+		return conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(defaultRealtimePongWriteTimeout))
 	})
 
 	for {
@@ -419,7 +430,7 @@ func (s *BinanceRealtimePriceStream) signalUpdate() {
 }
 
 func (s *BinanceRealtimePriceStream) scheduleReconnect() {
-	debounce := 300 * time.Millisecond
+	debounce := defaultRealtimeUpdateDebounce
 	if s.cfg.ReconnectDelay > 0 && s.cfg.ReconnectDelay < debounce {
 		debounce = s.cfg.ReconnectDelay
 	}

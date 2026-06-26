@@ -3,8 +3,17 @@ package usecase
 import "cpbro-engine/internal/modules/cryptobroV3/dto"
 
 const (
-	defaultSweepVolumeRatio       = 1.3
-	defaultCompressionVolumeRatio = 1.2
+	defaultSweepVolumeRatio                   = 1.3
+	defaultCompressionVolumeRatio             = 1.2
+	defaultRotationActivityThresholdAlt       = 0.45
+	defaultRotationActivityThresholdDefensive = 0.65
+	defaultRotationActivityThresholdLowVol    = 0.50
+	defaultRotationActivityThresholdDefault   = 0.55
+	defaultRotationPrefetchRatio              = 0.15
+	defaultRotationPrefetchRatioAlt           = 0.20
+	defaultRotationPrefetchRatioDefensive     = 0.10
+	defaultUniverseHotBoost                   = 1.25
+	defaultUniverseMaxHotBoost                = 1.5
 )
 
 func compressionNeutralBreadthLower() float64 {

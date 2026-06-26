@@ -50,6 +50,17 @@ type bootstrapFetchMeta struct {
 	CacheAge time.Duration
 }
 
+func bootstrapProvenanceLabel(source bootstrapSource) string {
+	switch source {
+	case bootstrapSourceLive:
+		return "fresh"
+	case bootstrapSourceCache:
+		return "cache_fallback"
+	default:
+		return "unavailable"
+	}
+}
+
 type cachedClosedCandles struct {
 	candles    []dto.Candle
 	validUntil time.Time
@@ -61,8 +72,11 @@ type cachedFloat64 struct {
 }
 
 const (
-	maxClosedCandleCacheEntries = 512
-	maxOpenInterestCacheEntries = 512
+	maxClosedCandleCacheEntries   = 512
+	maxOpenInterestCacheEntries   = 512
+	defaultMarketBootstrapTimeout = 20 * time.Second
+	defaultMarketInitialTimeout   = 10 * time.Second
+	defaultMarketTaskTimeout      = 5 * time.Second
 )
 
 type MarketDataUsecaseConfig struct {
@@ -74,10 +88,10 @@ type MarketDataUsecaseConfig struct {
 
 func NewMarketDataUsecase(provider MarketDataProvider, configs ...MarketDataUsecaseConfig) *MarketDataUsecase {
 	cfg := MarketDataUsecaseConfig{
-		BootstrapTimeout: 20 * time.Second,
-		InitialTimeout:   10 * time.Second,
-		EnrichTimeout:    15 * time.Second,
-		GlobalCacheTTL:   30 * time.Second,
+		BootstrapTimeout: defaultMarketBootstrapTimeout,
+		InitialTimeout:   defaultMarketInitialTimeout,
+		EnrichTimeout:    defaultClosedCandleCacheTTL,
+		GlobalCacheTTL:   defaultOpenInterestCacheTTL,
 	}
 	if len(configs) > 0 {
 		in := configs[0]
@@ -124,6 +138,7 @@ func (uc *MarketDataUsecase) FetchAllFuturesTickers24hWithMeta(ctx context.Conte
 	if err == nil {
 		uc.storeTickerCache(tickers, time.Now())
 		GetGlobalMetrics().ClearBootstrapTickerCacheAge()
+		GetGlobalMetrics().SetBootstrapTickerSource(string(bootstrapSourceLive))
 		return tickers, bootstrapFetchMeta{Source: bootstrapSourceLive}, nil
 	}
 
@@ -134,6 +149,7 @@ func (uc *MarketDataUsecase) FetchAllFuturesTickers24hWithMeta(ctx context.Conte
 		return cached, bootstrapFetchMeta{Source: bootstrapSourceCache, CacheAge: cacheAge}, nil
 	}
 
+	GetGlobalMetrics().SetBootstrapTickerSource(string(bootstrapSourceNone))
 	return nil, bootstrapFetchMeta{Source: bootstrapSourceNone}, err
 }
 
@@ -153,6 +169,7 @@ func (uc *MarketDataUsecase) FetchPremiumFundingRatesWithMeta(ctx context.Contex
 	if err == nil {
 		uc.storeFundingCache(funding, time.Now())
 		GetGlobalMetrics().ClearBootstrapFundingCacheAge()
+		GetGlobalMetrics().SetBootstrapFundingSource(string(bootstrapSourceLive))
 		return funding, bootstrapFetchMeta{Source: bootstrapSourceLive}, nil
 	}
 
@@ -163,6 +180,7 @@ func (uc *MarketDataUsecase) FetchPremiumFundingRatesWithMeta(ctx context.Contex
 		return cached, bootstrapFetchMeta{Source: bootstrapSourceCache, CacheAge: cacheAge}, nil
 	}
 
+	GetGlobalMetrics().SetBootstrapFundingSource(string(bootstrapSourceNone))
 	return nil, bootstrapFetchMeta{Source: bootstrapSourceNone}, err
 }
 
@@ -285,7 +303,7 @@ func (uc *MarketDataUsecase) EnrichMarketData(ctx context.Context, base MarketDa
 				return
 			}
 
-			reqCtx, cancelReq := context.WithTimeout(rootCtx, 5*time.Second)
+			reqCtx, cancelReq := context.WithTimeout(rootCtx, defaultMarketTaskTimeout)
 			defer cancelReq()
 
 			if err := t.fn(reqCtx); err != nil {
@@ -427,7 +445,7 @@ func (uc *MarketDataUsecase) fetchClosedCandlesCached(ctx context.Context, symbo
 		return nil, err
 	}
 
-	validUntil := now.Add(15 * time.Second)
+	validUntil := now.Add(defaultClosedCandleCacheTTL)
 	if next := nextClosedCandleAvailability(candles, interval); !next.IsZero() && next.After(now) {
 		validUntil = next
 	}
@@ -464,7 +482,7 @@ func (uc *MarketDataUsecase) fetchOpenInterestCached(ctx context.Context, symbol
 	pruneExpiredFloatCache(uc.oiCache, now, maxOpenInterestCacheEntries)
 	uc.oiCache[symbol] = cachedFloat64{
 		value:      value,
-		validUntil: now.Add(30 * time.Second),
+		validUntil: now.Add(defaultOpenInterestCacheTTL),
 	}
 	pruneExpiredFloatCache(uc.oiCache, now, maxOpenInterestCacheEntries)
 	uc.oiCacheMu.Unlock()
@@ -487,7 +505,7 @@ func nextClosedCandleAvailability(candles []dto.Candle, interval string) time.Ti
 		return time.Time{}
 	}
 
-	return lastOpen.Add(tf * 2)
+	return lastOpen.Add(tf * closedCandleAvailabilityFactor)
 }
 
 func pruneExpiredClosedCandleCache(cache map[string]cachedClosedCandles, now time.Time, maxEntries int) {
@@ -533,7 +551,7 @@ func intervalToDuration(interval string) (time.Duration, bool) {
 	case "5m":
 		return 5 * time.Minute, true
 	case "15m":
-		return 15 * time.Minute, true
+		return defaultClosedCandleTimeframe, true
 	case "1h":
 		return time.Hour, true
 	case "4h":

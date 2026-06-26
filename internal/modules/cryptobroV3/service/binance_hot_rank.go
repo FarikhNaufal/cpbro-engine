@@ -32,13 +32,15 @@ type BinanceHotRankConfig struct {
 	SmartMoneyChains []string
 }
 
+const defaultBinanceHotRankRequestTimeout = 10 * time.Second
+
 func NewBinanceHotRankService() *BinanceHotRankService {
 	return NewBinanceHotRankServiceWithConfig(BinanceHotRankConfig{})
 }
 
 func NewBinanceHotRankServiceWithConfig(cfg BinanceHotRankConfig) *BinanceHotRankService {
 	if cfg.RequestTimeout <= 0 {
-		cfg.RequestTimeout = 10 * time.Second
+		cfg.RequestTimeout = defaultBinanceHotRankRequestTimeout
 	}
 	if cfg.CacheTTL <= 0 {
 		cfg.CacheTTL = 10 * time.Minute

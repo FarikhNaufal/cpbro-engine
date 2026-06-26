@@ -1,6 +1,7 @@
 package service
 
 import (
+	"cpbro-engine/internal/modules/cryptobroV3/config"
 	"encoding/json"
 	"errors"
 	"os"
@@ -15,15 +16,56 @@ import (
 type JSONStorageService struct {
 	mu         sync.RWMutex
 	storageDir string
+	files      JSONStorageFiles
+}
+
+type JSONStorageFiles struct {
+	LatestResultFile     string
+	SignalHistoryFile    string
+	SignalJournalFile    string
+	WatchJournalFile     string
+	AIAuditCacheFile     string
+	EvaluationReportFile string
+	DecisionAuditFile    string
 }
 
 func NewJSONStorageService(storageDir string) (*JSONStorageService, error) {
+	return NewJSONStorageServiceWithFiles(storageDir, JSONStorageFiles{})
+}
+
+func NewJSONStorageServiceWithFiles(storageDir string, files JSONStorageFiles) (*JSONStorageService, error) {
 	if err := os.MkdirAll(storageDir, 0755); err != nil {
 		return nil, err
 	}
 	return &JSONStorageService{
 		storageDir: storageDir,
+		files:      normalizeJSONStorageFiles(files),
 	}, nil
+}
+
+func normalizeJSONStorageFiles(files JSONStorageFiles) JSONStorageFiles {
+	if strings.TrimSpace(files.LatestResultFile) == "" {
+		files.LatestResultFile = config.DefaultLatestResultFile
+	}
+	if strings.TrimSpace(files.SignalHistoryFile) == "" {
+		files.SignalHistoryFile = config.DefaultSignalHistoryFile
+	}
+	if strings.TrimSpace(files.SignalJournalFile) == "" {
+		files.SignalJournalFile = config.DefaultSignalJournalFile
+	}
+	if strings.TrimSpace(files.WatchJournalFile) == "" {
+		files.WatchJournalFile = config.DefaultWatchJournalFile
+	}
+	if strings.TrimSpace(files.AIAuditCacheFile) == "" {
+		files.AIAuditCacheFile = config.DefaultAIAuditCacheFile
+	}
+	if strings.TrimSpace(files.EvaluationReportFile) == "" {
+		files.EvaluationReportFile = config.DefaultEvaluationReportFile
+	}
+	if strings.TrimSpace(files.DecisionAuditFile) == "" {
+		files.DecisionAuditFile = config.DefaultDecisionAuditFile
+	}
+	return files
 }
 
 func (s *JSONStorageService) readJSON(filename string, dest interface{}) error {
@@ -74,31 +116,31 @@ func (s *JSONStorageService) writeJSON(filename string, data interface{}) error 
 
 func (s *JSONStorageService) LoadLatestResult() (*entity.LatestResult, error) {
 	var res entity.LatestResult
-	if err := s.readJSON("latest_result.json", &res); err != nil {
+	if err := s.readJSON(s.files.LatestResultFile, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
 }
 
 func (s *JSONStorageService) SaveLatestResult(res *entity.LatestResult) error {
-	return s.writeJSON("latest_result.json", res)
+	return s.writeJSON(s.files.LatestResultFile, res)
 }
 
 func (s *JSONStorageService) LoadSignalHistory() (*entity.SignalHistory, error) {
 	var hist entity.SignalHistory
-	if err := s.readJSON("signal_history.json", &hist); err != nil {
+	if err := s.readJSON(s.files.SignalHistoryFile, &hist); err != nil {
 		return nil, err
 	}
 	return &hist, nil
 }
 
 func (s *JSONStorageService) SaveSignalHistory(hist *entity.SignalHistory) error {
-	return s.writeJSON("signal_history.json", hist)
+	return s.writeJSON(s.files.SignalHistoryFile, hist)
 }
 
 func (s *JSONStorageService) LoadSignalJournal() ([]usecase.SignalJournal, error) {
 	var journal []usecase.SignalJournal
-	if err := s.readJSON("signal_journal.json", &journal); err != nil {
+	if err := s.readJSON(s.files.SignalJournalFile, &journal); err != nil {
 		return nil, err
 	}
 	if journal == nil {
@@ -108,12 +150,12 @@ func (s *JSONStorageService) LoadSignalJournal() ([]usecase.SignalJournal, error
 }
 
 func (s *JSONStorageService) SaveSignalJournal(journal []usecase.SignalJournal) error {
-	return s.writeJSON("signal_journal.json", journal)
+	return s.writeJSON(s.files.SignalJournalFile, journal)
 }
 
 func (s *JSONStorageService) LoadWatchJournal() ([]usecase.WatchJournal, error) {
 	var journal []usecase.WatchJournal
-	if err := s.readJSON("watch_journal.json", &journal); err != nil {
+	if err := s.readJSON(s.files.WatchJournalFile, &journal); err != nil {
 		return nil, err
 	}
 	if journal == nil {
@@ -131,31 +173,31 @@ func (s *JSONStorageService) FindWatchJournalCandidates(probe usecase.WatchJourn
 }
 
 func (s *JSONStorageService) SaveWatchJournal(journal []usecase.WatchJournal) error {
-	return s.writeJSON("watch_journal.json", journal)
+	return s.writeJSON(s.files.WatchJournalFile, journal)
 }
 
 func (s *JSONStorageService) UpdateSignalJournal(update func([]usecase.SignalJournal) ([]usecase.SignalJournal, error)) error {
-	return updateJSONSliceFile(s, "signal_journal.json", update)
+	return updateJSONSliceFile(s, s.files.SignalJournalFile, update)
 }
 
 func (s *JSONStorageService) UpsertSignalJournalEntries(entries []usecase.SignalJournal) error {
-	return upsertSignalJournalFile(s, "signal_journal.json", entries)
+	return upsertSignalJournalFile(s, s.files.SignalJournalFile, entries)
 }
 
 func (s *JSONStorageService) AppendSignalJournal(entry usecase.SignalJournal) error {
-	return appendJSONSliceFile(s, "signal_journal.json", entry)
+	return appendJSONSliceFile(s, s.files.SignalJournalFile, entry)
 }
 
 func (s *JSONStorageService) UpdateWatchJournal(update func([]usecase.WatchJournal) ([]usecase.WatchJournal, error)) error {
-	return updateJSONSliceFile(s, "watch_journal.json", update)
+	return updateJSONSliceFile(s, s.files.WatchJournalFile, update)
 }
 
 func (s *JSONStorageService) UpsertWatchJournalEntries(entries []usecase.WatchJournal) error {
-	return upsertWatchJournalFile(s, "watch_journal.json", entries)
+	return upsertWatchJournalFile(s, s.files.WatchJournalFile, entries)
 }
 
 func (s *JSONStorageService) AppendWatchJournal(entry usecase.WatchJournal) error {
-	return appendJSONSliceFile(s, "watch_journal.json", entry)
+	return appendJSONSliceFile(s, s.files.WatchJournalFile, entry)
 }
 
 func filterMatchingWatchJournalCandidates(journal []usecase.WatchJournal, probe usecase.WatchJournal) []usecase.WatchJournal {
@@ -329,7 +371,7 @@ func journalEntriesMatch(left, right usecase.SignalJournal) bool {
 
 func (s *JSONStorageService) LoadAIAuditCache() (*entity.AIAuditCache, error) {
 	var cache entity.AIAuditCache
-	if err := s.readJSON("ai_audit_cache.json", &cache); err != nil {
+	if err := s.readJSON(s.files.AIAuditCacheFile, &cache); err != nil {
 		return nil, err
 	}
 	if cache.CacheMap == nil {
@@ -342,7 +384,7 @@ func (s *JSONStorageService) UpdateAIAuditCache(update func(*entity.AIAuditCache
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	filename := "ai_audit_cache.json"
+	filename := s.files.AIAuditCacheFile
 	path := filepath.Join(s.storageDir, filename)
 
 	var cache entity.AIAuditCache
@@ -378,24 +420,24 @@ func (s *JSONStorageService) UpdateAIAuditCache(update func(*entity.AIAuditCache
 }
 
 func (s *JSONStorageService) SaveAIAuditCache(cache *entity.AIAuditCache) error {
-	return s.writeJSON("ai_audit_cache.json", cache)
+	return s.writeJSON(s.files.AIAuditCacheFile, cache)
 }
 
 func (s *JSONStorageService) LoadEvaluationReport() (*usecase.EvaluationReport, error) {
 	var report usecase.EvaluationReport
-	if err := s.readJSON("evaluation_report.json", &report); err != nil {
+	if err := s.readJSON(s.files.EvaluationReportFile, &report); err != nil {
 		return nil, err
 	}
 	return &report, nil
 }
 
 func (s *JSONStorageService) SaveEvaluationReport(report *usecase.EvaluationReport) error {
-	return s.writeJSON("evaluation_report.json", report)
+	return s.writeJSON(s.files.EvaluationReportFile, report)
 }
 
 func (s *JSONStorageService) LoadDecisionAudits() ([]usecase.DecisionAudit, error) {
 	var audits []usecase.DecisionAudit
-	if err := s.readJSON("decision_audit.json", &audits); err != nil {
+	if err := s.readJSON(s.files.DecisionAuditFile, &audits); err != nil {
 		return nil, err
 	}
 	if audits == nil {
@@ -405,7 +447,7 @@ func (s *JSONStorageService) LoadDecisionAudits() ([]usecase.DecisionAudit, erro
 }
 
 func (s *JSONStorageService) SaveDecisionAudits(audits []usecase.DecisionAudit) error {
-	return s.writeJSON("decision_audit.json", audits)
+	return s.writeJSON(s.files.DecisionAuditFile, audits)
 }
 
 func (s *JSONStorageService) AppendDecisionAudits(entries []usecase.DecisionAudit) error {
@@ -416,7 +458,7 @@ func (s *JSONStorageService) AppendDecisionAudits(entries []usecase.DecisionAudi
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	filename := "decision_audit.json"
+	filename := s.files.DecisionAuditFile
 	path := filepath.Join(s.storageDir, filename)
 
 	var audits []usecase.DecisionAudit
@@ -450,7 +492,7 @@ func (s *JSONStorageService) AppendDecisionAudit(entry usecase.DecisionAudit) er
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	filename := "decision_audit.json"
+	filename := s.files.DecisionAuditFile
 	path := filepath.Join(s.storageDir, filename)
 
 	var audits []usecase.DecisionAudit

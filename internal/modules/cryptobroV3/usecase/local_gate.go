@@ -313,7 +313,7 @@ func (uc *LocalGateUsecase) EvaluateWithContext(ctx context.Context, quant Quant
 	if profile.RejectADXExpansion {
 		maxADX := profile.MaxADX
 		if maxADX <= 0 {
-			maxADX = 30.0
+			maxADX = safetyADXExpansionCeiling
 		}
 		if adx > maxADX {
 			return LocalGateResult{

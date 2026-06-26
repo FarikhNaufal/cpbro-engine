@@ -291,7 +291,7 @@ func (uc *PlaybookQuantEngineUsecase) RunEngineWithPreparedContext(
 		adxVal := techSnap.IndicatorValues[IndicatorADX]
 
 		if direction == LONG {
-			if adxVal > 30.0 && h4Trend == "BEARISH" {
+			if adxVal > safetyADXExpansionCeiling && h4Trend == "BEARISH" {
 				res.Direction = WAIT
 				res.IndicatorMet = false
 				res.Reason = "LONG range edge reversal rejected due to strong bearish trend expansion"
@@ -304,7 +304,7 @@ func (uc *PlaybookQuantEngineUsecase) RunEngineWithPreparedContext(
 			}
 			res.Reason = "LONG range edge reversal near support"
 		} else { // SHORT
-			if adxVal > 30.0 && h4Trend == "BULLISH" {
+			if adxVal > safetyADXExpansionCeiling && h4Trend == "BULLISH" {
 				res.Direction = WAIT
 				res.IndicatorMet = false
 				res.Reason = "SHORT range edge reversal rejected due to strong bullish trend expansion"
@@ -398,7 +398,7 @@ func (uc *PlaybookQuantEngineUsecase) RunEngineWithPreparedContext(
 }
 
 func (uc *PlaybookQuantEngineUsecase) prepareContext(data MarketData) (preparedQuantContext, bool) {
-	m15Closed := GetClosedCandlesOnly(data.M15Candles, 15*time.Minute)
+	m15Closed := GetClosedCandlesOnly(data.M15Candles, defaultClosedCandleTimeframe)
 	h1Closed := GetClosedCandlesOnly(data.H1Candles, time.Hour)
 	h4Closed := GetClosedCandlesOnly(data.H4Candles, 4*time.Hour)
 
