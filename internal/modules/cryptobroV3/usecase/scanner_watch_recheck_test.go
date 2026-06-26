@@ -9,6 +9,15 @@ import (
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 )
 
+func staleCandles(candles []dto.Candle, offset time.Duration) []dto.Candle {
+	out := make([]dto.Candle, len(candles))
+	copy(out, candles)
+	for i := range out {
+		out[i].Time = out[i].Time.Add(-offset)
+	}
+	return out
+}
+
 func TestSelectWatchRecheckCandidates(t *testing.T) {
 	original := getRuntimeSettings()
 	t.Cleanup(func() { SetRuntimeSettings(original) })
@@ -294,5 +303,113 @@ func TestScannerUsecase_RunWatchRecheckPromotesEligibleWatch(t *testing.T) {
 
 	if len(mockNotify.signalMsgs) != 1 {
 		t.Fatalf("expected 1 notification message, got %d", len(mockNotify.signalMsgs))
+	}
+}
+
+func TestScannerUsecase_RunWatchRecheck_StaleContextDoesNotInvalidateWatch(t *testing.T) {
+	now := time.Now()
+	tickers := []dto.Ticker24h{
+		{Symbol: "BTCUSDT", LastPrice: 50000.0, PriceChangePercent: 2.0, QuoteVolume: 1000000000.0},
+		{Symbol: "ETHUSDT", LastPrice: 3000.0, PriceChangePercent: 1.5, QuoteVolume: 500000000.0},
+		{Symbol: "SOLUSDT", LastPrice: 100.0, PriceChangePercent: 1.0, QuoteVolume: 200000000.0},
+	}
+	fundingRates := map[string]float64{
+		"BTCUSDT": 0.0001,
+		"SOLUSDT": 0.0001,
+	}
+
+	staleM15 := staleCandles(generateFreshCandles(100.0), 4*time.Hour)
+	freshH1 := generateFreshCandles(100.0)
+	freshH4 := generateFreshCandles(100.0)
+	btcM15 := generateFreshCandles(50000.0)
+	btcH1 := generateFreshCandles(50000.0)
+	btcH4 := generateFreshCandles(50000.0)
+
+	mockProvider := &mockMarketDataProvider{
+		tickers:      tickers,
+		fundingRates: fundingRates,
+		m15Candles:   map[string][]dto.Candle{"SOLUSDT": staleM15, "BTCUSDT": btcM15},
+		h1Candles:    map[string][]dto.Candle{"SOLUSDT": freshH1, "BTCUSDT": btcH1},
+		h4Candles:    map[string][]dto.Candle{"SOLUSDT": freshH4, "BTCUSDT": btcH4},
+		prices:       map[string]float64{"SOLUSDT": 100.0, "BTCUSDT": 50000.0},
+	}
+
+	mockStorage := &mockStorageRepo{
+		journal: []SignalJournal{},
+		watchJournal: []WatchJournal{
+			{
+				ID:          "watch_stale_sol",
+				Symbol:      "SOLUSDT",
+				Direction:   LONG,
+				Playbook:    TREND_PULLBACK,
+				Status:      WATCH_MONITORING,
+				CreatedAt:   now.Add(-4 * time.Minute),
+				UpdatedAt:   now.Add(-4 * time.Minute),
+				ExpiresAt:   now.Add(90 * time.Minute),
+				Reason:      "AI decision is WAIT",
+				AIReasoning: "AI decision is WAIT pending fresh M15 confirmation",
+				Tier:        TierA,
+				Timeframe:   "M15",
+			},
+		},
+		audits: []DecisionAudit{},
+	}
+
+	storageUC := NewStorageUsecase(mockStorage)
+	marketDataUC := NewMarketDataUsecase(mockProvider)
+	localGateUC := NewLocalGateUsecase()
+	localGateUC.SetMarketData(marketDataUC)
+	uc := NewScannerUsecase(
+		marketDataUC,
+		NewMarketPolicyUsecase(),
+		NewUniverseUsecase(),
+		NewStrategySelectorUsecase(),
+		NewPlaybookEligibilityUsecase(),
+		NewPlaybookQuantEngineUsecase(),
+		NewScoringUsecase(),
+		NewCandidateArbiterUsecase(),
+		localGateUC,
+		NewAICandidateSelectorUsecase(7.5),
+		NewAIAuditorUsecase(&mockAIAuditor{}, storageUC),
+		NewPlanReconciliationUsecase(),
+		NewStalenessUsecase(30*time.Minute),
+		NewFinalGateUsecase(),
+		NewConflictResolverUsecase(),
+		NewSignalNotificationUsecase(&mockNotification{}, storageUC),
+		NewOpsNotificationUsecase(&mockNotification{}),
+		NewMonitoringUsecase(mockProvider, storageUC),
+		NewFeedbackUsecase(storageUC),
+		storageUC,
+	)
+
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.WatchRecheckBoundaryMinutes = 5
+	settings.WatchRecheckMaxAgeMinutes = 12
+	settings.WatchRecheckBatchLimit = 4
+	settings.WatchRecheckAllowedPlaybooks = []string{"TREND_PULLBACK"}
+	SetRuntimeSettings(settings)
+
+	summary, err := uc.RunWatchRecheck(context.Background(), dto.ScanRequest{TriggerTime: now})
+	if err != nil {
+		t.Fatalf("RunWatchRecheck failed: %v", err)
+	}
+	if summary.Invalidated != 0 || summary.Expired != 0 || summary.Promoted != 0 {
+		t.Fatalf("expected stale context to be skipped, got summary=%+v", summary)
+	}
+
+	watchJournal, err := storageUC.LoadWatchJournal()
+	if err != nil {
+		t.Fatalf("failed to load watch journal: %v", err)
+	}
+	if len(watchJournal) != 1 {
+		t.Fatalf("expected 1 watch journal entry, got %d", len(watchJournal))
+	}
+	if watchJournal[0].Status != WATCH_MONITORING {
+		t.Fatalf("expected stale watch to remain monitoring, got %s", watchJournal[0].Status)
+	}
+	if !watchJournal[0].ClosedAt.IsZero() {
+		t.Fatalf("expected stale watch to remain open, got closed_at=%v", watchJournal[0].ClosedAt)
 	}
 }

@@ -97,13 +97,13 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 	}
 	previousLatest, _ := uc.storageUsecase.LoadLatestResult()
 
-	tickers, err := uc.marketDataUsecase.FetchAllFuturesTickers24h(ctx)
+	tickers, tickersMeta, err := uc.marketDataUsecase.FetchAllFuturesTickers24hWithMeta(ctx)
 	if err != nil {
 		metrics.IncrementRecheckFail()
 		metrics.IncrementMarketDataError()
 		return summary, fmt.Errorf("watch recheck ticker bootstrap failed: %w", err)
 	}
-	fundingRates, err := uc.marketDataUsecase.FetchPremiumFundingRates(ctx)
+	fundingRates, fundingMeta, err := uc.marketDataUsecase.FetchPremiumFundingRatesWithMeta(ctx)
 	if err != nil {
 		metrics.IncrementRecheckFail()
 		metrics.IncrementMarketDataError()
@@ -286,6 +286,8 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 			CreatedAt:                 now,
 			HypotheticalEntry:         entryPrice,
 		}
+		applyPolicySnapshotToDecisionAudit(&audit, policy, false)
+		applyBootstrapProvenanceToDecisionAudit(&audit, tickersMeta, fundingMeta)
 		if candCtx.localGateResult.M5Summary != nil {
 			audit.M5ConfirmationUsed = candCtx.localGateResult.M5Summary.Used
 			audit.M5ConfirmationMode = string(candCtx.localGateResult.M5Summary.Mode)
@@ -311,7 +313,7 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 			AuditResponse: candCtx.auditResponse,
 		})
 
-		_ = uc.storageUsecase.SaveSignalToJournal(SignalJournal{
+		journalEntry := SignalJournal{
 			ID:                      signalID,
 			ConfigVersion:           GetGlobalConfigRegistry().GetVersion(),
 			Symbol:                  pair,
@@ -356,7 +358,9 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 			HotOverlaySelected:      origin.HotOverlaySelected,
 			TechnicalSnapshot:       candCtx.quantResult.TechnicalSnapshot,
 			StructureSnapshot:       candCtx.quantResult.StructureSnapshot,
-		})
+		}
+		applyPolicySnapshotToSignalJournal(&journalEntry, policy)
+		_ = uc.storageUsecase.SaveSignalToJournal(journalEntry)
 
 		_ = uc.promoteWatchJournalEntry(origin, now, signalID, promotionReason)
 	}
@@ -420,11 +424,8 @@ func (uc *ScannerUsecase) evaluateWatchRecheckCandidate(
 		return watchRecheckEvaluation{
 			origin: entry,
 			disposition: watchRecheckDisposition{
-				Eligible:       false,
-				Terminal:       true,
-				TerminalStatus: WATCH_RECHECK_INVALIDATED,
-				Reason:         "Watch recheck invalidated: latest M15 context is stale",
-				OutcomeReason:  "Recheck invalidated because fresh M15 context was unavailable",
+				Eligible: false,
+				Reason:   "Watch recheck skipped: latest M15 context is stale",
 			},
 		}
 	}
@@ -444,11 +445,8 @@ func (uc *ScannerUsecase) evaluateWatchRecheckCandidate(
 		return watchRecheckEvaluation{
 			origin: entry,
 			disposition: watchRecheckDisposition{
-				Eligible:       false,
-				Terminal:       true,
-				TerminalStatus: WATCH_RECHECK_INVALIDATED,
-				Reason:         "Watch recheck invalidated: prepared context no longer valid",
-				OutcomeReason:  "Recheck invalidated because market context no longer supports the original setup",
+				Eligible: false,
+				Reason:   "Watch recheck skipped: prepared context is not yet reusable",
 			},
 		}
 	}
@@ -469,11 +467,8 @@ func (uc *ScannerUsecase) evaluateWatchRecheckCandidate(
 		return watchRecheckEvaluation{
 			origin: entry,
 			disposition: watchRecheckDisposition{
-				Eligible:       false,
-				Terminal:       true,
-				TerminalStatus: WATCH_RECHECK_INVALIDATED,
-				Reason:         "Watch recheck invalidated: playbook eligibility no longer holds",
-				OutcomeReason:  "Recheck invalidated because the original playbook setup no longer qualifies",
+				Eligible: false,
+				Reason:   "Watch recheck skipped: playbook eligibility not yet satisfied",
 			},
 		}
 	}
@@ -485,11 +480,8 @@ func (uc *ScannerUsecase) evaluateWatchRecheckCandidate(
 		return watchRecheckEvaluation{
 			origin: entry,
 			disposition: watchRecheckDisposition{
-				Eligible:       false,
-				Terminal:       true,
-				TerminalStatus: WATCH_RECHECK_INVALIDATED,
-				Reason:         "Watch recheck invalidated: quant path no longer produces a tradable plan",
-				OutcomeReason:  "Recheck invalidated because the quant engine no longer supports the original setup",
+				Eligible: false,
+				Reason:   "Watch recheck skipped: quant path is not yet tradable",
 			},
 		}
 	}

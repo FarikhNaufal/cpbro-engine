@@ -962,6 +962,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			CreatedAt:                 time.Now(),
 			HypotheticalEntry:         entryPrice,
 		}
+		applyPolicySnapshotToDecisionAudit(&audit, policy, compressionFallbackActive)
+		applyBootstrapProvenanceToDecisionAudit(&audit, tickersMeta, fundingMeta)
 		if candCtx.localGateResult.M5Summary != nil {
 			audit.M5ConfirmationUsed = candCtx.localGateResult.M5Summary.Used
 			audit.M5ConfirmationMode = string(candCtx.localGateResult.M5Summary.Mode)
@@ -1005,7 +1007,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			finalSignals = append(finalSignals, sigRes)
 
 			// Save to virtual journal
-			_ = uc.storageUsecase.SaveSignalToJournal(SignalJournal{
+			journalEntry := SignalJournal{
 				ID:                      now.Format("20060102150405") + "_" + pair,
 				ConfigVersion:           GetGlobalConfigRegistry().GetVersion(),
 				Symbol:                  pair,
@@ -1049,7 +1051,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				HotOverlaySelected:      candidateMap[pair].HotOverlaySelected,
 				TechnicalSnapshot:       candCtx.quantResult.TechnicalSnapshot,
 				StructureSnapshot:       candCtx.quantResult.StructureSnapshot,
-			})
+			}
+			applyPolicySnapshotToSignalJournal(&journalEntry, policy)
+			_ = uc.storageUsecase.SaveSignalToJournal(journalEntry)
 		} else if finalDecision.Status == FINAL_WATCH {
 			totalFinalWatch++
 			reason := firstNonEmpty(finalDecision.WatchReason, finalDecision.Reason)
@@ -1077,7 +1081,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				HotRankType:        candidateMap[pair].HotRankType,
 				HotOverlaySelected: candidateMap[pair].HotOverlaySelected,
 			})
-			_ = uc.storageUsecase.SaveWatchToJournal(WatchJournal{
+			watchEntry := WatchJournal{
 				ID:                      "watch_" + now.Format("20060102150405") + "_" + pair,
 				ConfigVersion:           GetGlobalConfigRegistry().GetVersion(),
 				Symbol:                  pair,
@@ -1122,7 +1126,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				HotOverlaySelected:      candidateMap[pair].HotOverlaySelected,
 				TechnicalSnapshot:       candCtx.quantResult.TechnicalSnapshot,
 				StructureSnapshot:       candCtx.quantResult.StructureSnapshot,
-			})
+			}
+			applyPolicySnapshotToSignalJournal(&watchEntry, policy)
+			_ = uc.storageUsecase.SaveWatchToJournal(watchEntry)
 		} else {
 			totalFinalReject++
 			reason := firstNonEmpty(finalDecision.RejectReason, finalDecision.Reason)
@@ -1316,6 +1322,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		Duration:     time.Since(scanStart).String(),
 		Signals:      finalSignals,
 	}
+	applyPolicySnapshotToLatestResult(latestResult, policy)
+	applyBootstrapProvenanceToLatestResult(latestResult, tickersMeta, fundingMeta)
 
 	if err := uc.storageUsecase.SaveLatestResult(latestResult); err != nil {
 		slog.Error("Failed to save latest scan result to storage", "error", err)

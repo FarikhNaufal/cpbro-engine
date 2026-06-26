@@ -201,6 +201,9 @@ func TestObservability_PerformHealthAudit(t *testing.T) {
 	if status.RecheckCadence.BoundaryMinutes != 5 || status.RecheckCadence.MaxAgeMinutes != 12 {
 		t.Errorf("unexpected recheck cadence: %+v", status.RecheckCadence)
 	}
+	if !status.RecheckCadence.BoundaryCloseAware || status.RecheckCadence.PrimaryGuardSeconds < 0 {
+		t.Errorf("expected boundary-close-aware recheck cadence, got %+v", status.RecheckCadence)
+	}
 	if len(status.RecheckCadence.AllowedPlaybooks) != 2 {
 		t.Errorf("expected allowed playbooks in health, got %+v", status.RecheckCadence)
 	}

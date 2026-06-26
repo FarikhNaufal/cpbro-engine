@@ -30,9 +30,11 @@ type RealtimePriceStatus struct {
 
 type RecheckCadenceStatus struct {
 	Enabled                 bool     `json:"enabled"`
+	BoundaryCloseAware      bool     `json:"boundary_close_aware"`
 	PreventOverlap          bool     `json:"prevent_overlap"`
 	SharedPipelineGuard     bool     `json:"shared_pipeline_guard"`
 	SkipPrimaryBoundary     bool     `json:"skip_primary_boundary"`
+	PrimaryGuardSeconds     int      `json:"primary_guard_seconds"`
 	PrimaryBoundaryMinutes  int      `json:"primary_boundary_minutes"`
 	BoundaryMinutes         int      `json:"boundary_minutes"`
 	CloseBufferSeconds      int      `json:"close_buffer_seconds"`
@@ -368,9 +370,11 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 	settings := getRuntimeSettings()
 	recheckCadence := RecheckCadenceStatus{
 		Enabled:                 RecheckWorkerRunning.Load(),
+		BoundaryCloseAware:      true,
 		PreventOverlap:          settings.ScanPreventOverlap,
 		SharedPipelineGuard:     settings.ScanPreventOverlap,
 		SkipPrimaryBoundary:     true,
+		PrimaryGuardSeconds:     settings.ScanCloseCandleBufferSeconds,
 		PrimaryBoundaryMinutes:  settings.ScanBoundaryMinutes,
 		BoundaryMinutes:         recheckPolicy.BoundaryMinutes,
 		CloseBufferSeconds:      settings.ScanCloseCandleBufferSeconds,

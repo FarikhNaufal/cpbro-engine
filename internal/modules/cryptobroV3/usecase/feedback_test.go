@@ -351,6 +351,76 @@ func TestFeedback_GateBugStalenessRespectsFreshRequirement(t *testing.T) {
 	}
 }
 
+func TestFeedback_GateBugAIConfidenceUsesStoredSignalSnapshot(t *testing.T) {
+	journal := make([]usecase.SignalJournal, 12)
+	for i := 0; i < 12; i++ {
+		journal[i] = usecase.SignalJournal{
+			ID:                        "high_vol_exec",
+			Symbol:                    "ETHUSDT",
+			Playbook:                  usecase.TREND_PULLBACK,
+			Status:                    usecase.TP2_HIT,
+			MarketRegime:              string(usecase.HIGH_VOL),
+			Tier:                      usecase.TierA,
+			AIConfidence:              "MEDIUM",
+			PolicyLongMode:            string(usecase.NORMAL),
+			PolicyShortMode:           string(usecase.NORMAL),
+			PolicyRequireAIConfidence: string(usecase.AIConfidenceMedium),
+			PolicyAllowedPlaybooks:    []string{string(usecase.TREND_PULLBACK), string(usecase.LIQUIDITY_SWEEP_REVERSAL)},
+			EntryPrice:                100,
+			TP1:                       103,
+			TP2:                       106,
+		}
+	}
+
+	repo := &mockFeedbackStorageRepo{journal: journal}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	for _, rec := range repo.report.Recommendations {
+		if rec.IssueType == "GATE_BUG" && strings.Contains(rec.EvidenceSummary, "AI confidence was MEDIUM") {
+			t.Fatalf("did not expect AI confidence gate bug when stored signal snapshot required only MEDIUM: %+v", rec)
+		}
+	}
+}
+
+func TestFeedback_GateBugStalenessUsesStoredAuditSnapshot(t *testing.T) {
+	audits := make([]usecase.DecisionAudit, 12)
+	for i := 0; i < 12; i++ {
+		audits[i] = usecase.DecisionAudit{
+			Symbol:                    "BTCUSDT",
+			Playbook:                  usecase.LIQUIDITY_SWEEP_REVERSAL,
+			MarketRegime:              string(usecase.HIGH_VOL),
+			Tier:                      usecase.TierA,
+			AIConfidence:              "HIGH",
+			FinalStatus:               usecase.FINAL_EXECUTE,
+			StalenessStatus:           "LATE",
+			PolicyLongMode:            string(usecase.NORMAL),
+			PolicyShortMode:           string(usecase.NORMAL),
+			PolicyRequireFreshEntry:   false,
+			PolicyAllowedPlaybooks:    []string{string(usecase.LIQUIDITY_SWEEP_REVERSAL), string(usecase.TREND_PULLBACK)},
+			PolicyRequireAIConfidence: string(usecase.AIConfidenceHigh),
+		}
+	}
+
+	repo := &mockFeedbackStorageRepo{audits: audits}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	for _, rec := range repo.report.Recommendations {
+		if rec.IssueType == "GATE_BUG" && strings.Contains(rec.EvidenceSummary, "Staleness was LATE") {
+			t.Fatalf("did not expect stale-entry gate bug when stored audit snapshot did not require fresh entry: %+v", rec)
+		}
+	}
+}
+
 // 4. Test AI MEDIUM evaluation without decision_audit.json
 func TestFeedback_AIMediumNoDecisionAudit(t *testing.T) {
 	// Create sufficient sample journal, but audits is nil

@@ -176,6 +176,22 @@ func TestEvaluateWatchRecheckTick(t *testing.T) {
 		}
 	})
 
+	t.Run("skip inside primary guard window", func(t *testing.T) {
+		guardBuffer := 30 * time.Second
+		now := base.Add(14 * time.Minute).Add(45 * time.Second)
+		decision := evaluateWatchRecheckTick(now, base, recheckBoundary, primaryBoundary, guardBuffer)
+		if decision.ShouldRun {
+			t.Fatal("expected primary guard window to block recheck")
+		}
+		if decision.SkipReason != "primary_guard_window" {
+			t.Fatalf("expected primary_guard_window, got %s", decision.SkipReason)
+		}
+		expectedNextPrimary := base.Add(15 * time.Minute)
+		if !decision.NextPrimaryBoundary.Equal(expectedNextPrimary) {
+			t.Fatalf("expected next primary boundary %v, got %v", expectedNextPrimary, decision.NextPrimaryBoundary)
+		}
+	})
+
 	t.Run("skip duplicate boundary", func(t *testing.T) {
 		lastRun := base.Add(10 * time.Minute)
 		now := base.Add(10 * time.Minute).Add(7 * time.Second)

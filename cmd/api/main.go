@@ -30,9 +30,10 @@ const (
 )
 
 type watchRecheckTickDecision struct {
-	Boundary   time.Time
-	ShouldRun  bool
-	SkipReason string
+	Boundary            time.Time
+	ShouldRun           bool
+	SkipReason          string
+	NextPrimaryBoundary time.Time
 }
 
 func notificationTime(t time.Time) string {
@@ -449,7 +450,7 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 			if boundary.After(lastRun) && now.Sub(boundary) >= time.Duration(bufferSec)*time.Second {
 				lastRun = boundary
 
-				go func() {
+				go func(boundary time.Time) {
 					defer func() {
 						if r := recover(); r != nil {
 							slog.Error("PANIC RECOVERY in background scan worker", "panic", r)
@@ -496,7 +497,7 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 						}
 					}
 
-				}()
+				}(boundary)
 			}
 		}
 	}
@@ -589,7 +590,7 @@ func startWatchRecheckWorker(ctx context.Context, cfg *config.Config, scannerUC 
 			}
 			boundary := decision.Boundary
 			lastRun = boundary
-			slog.Info("Watch recheck boundary reached", "worker", "watch_recheck", "boundary", boundary.Format("15:04:05"), "boundary_minutes", recheckBoundaryMinutes, "primary_boundary_minutes", cfg.Scanner.BoundaryMinutes)
+			slog.Info("Watch recheck boundary reached", "worker", "watch_recheck", "boundary", boundary.Format("15:04:05"), "next_primary_boundary", decision.NextPrimaryBoundary.Format("15:04:05"), "boundary_minutes", recheckBoundaryMinutes, "primary_boundary_minutes", cfg.Scanner.BoundaryMinutes)
 
 			go func(boundary time.Time) {
 				defer func() {
@@ -623,16 +624,23 @@ func evaluateWatchRecheckTick(now time.Time, lastRun time.Time, recheckBoundaryD
 		return watchRecheckTickDecision{ShouldRun: false, SkipReason: "invalid_recheck_boundary"}
 	}
 	boundary := now.Truncate(recheckBoundaryDuration)
+	nextPrimaryBoundary := time.Time{}
+	if primaryBoundaryDuration > 0 {
+		nextPrimaryBoundary = boundary.Truncate(primaryBoundaryDuration).Add(primaryBoundaryDuration)
+	}
 	if primaryBoundaryDuration > 0 && boundary.Equal(boundary.Truncate(primaryBoundaryDuration)) {
-		return watchRecheckTickDecision{Boundary: boundary, ShouldRun: false, SkipReason: "primary_boundary"}
+		return watchRecheckTickDecision{Boundary: boundary, NextPrimaryBoundary: nextPrimaryBoundary, ShouldRun: false, SkipReason: "primary_boundary"}
 	}
 	if !boundary.After(lastRun) {
-		return watchRecheckTickDecision{Boundary: boundary, ShouldRun: false, SkipReason: "already_processed_boundary"}
+		return watchRecheckTickDecision{Boundary: boundary, NextPrimaryBoundary: nextPrimaryBoundary, ShouldRun: false, SkipReason: "already_processed_boundary"}
 	}
 	if closeBuffer > 0 && now.Sub(boundary) < closeBuffer {
-		return watchRecheckTickDecision{Boundary: boundary, ShouldRun: false, SkipReason: "close_buffer_not_elapsed"}
+		return watchRecheckTickDecision{Boundary: boundary, NextPrimaryBoundary: nextPrimaryBoundary, ShouldRun: false, SkipReason: "close_buffer_not_elapsed"}
 	}
-	return watchRecheckTickDecision{Boundary: boundary, ShouldRun: true}
+	if primaryBoundaryDuration > 0 && !nextPrimaryBoundary.IsZero() && nextPrimaryBoundary.After(now) && nextPrimaryBoundary.Sub(now) <= closeBuffer {
+		return watchRecheckTickDecision{Boundary: boundary, NextPrimaryBoundary: nextPrimaryBoundary, ShouldRun: false, SkipReason: "primary_guard_window"}
+	}
+	return watchRecheckTickDecision{Boundary: boundary, NextPrimaryBoundary: nextPrimaryBoundary, ShouldRun: true}
 }
 
 func tryStartBackgroundRun(flag *atomic.Bool, workerName string) bool {

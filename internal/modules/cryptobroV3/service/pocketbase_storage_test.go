@@ -19,6 +19,191 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+func TestPocketBaseStorageService_LoadWatchJournal_PrefersNewerLocalTerminalState(t *testing.T) {
+	now := time.Now().UTC()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/collections/_superusers/auth-with-password":
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": "testtoken"})
+			return
+		case r.Method == http.MethodGet && r.URL.Path == "/api/collections/watch_journals/records":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"page":       1,
+				"perPage":    200,
+				"totalItems": 1,
+				"totalPages": 1,
+				"items": []map[string]any{
+					{
+						"id":         "pb-watch-1",
+						"signal_id":  "watch_1",
+						"symbol":     "SOLUSDT",
+						"direction":  "LONG",
+						"playbook":   "TREND_PULLBACK",
+						"status":     "WATCH_MONITORING",
+						"created_at": now.Add(-20 * time.Minute).Format(time.RFC3339Nano),
+						"updated_at": now.Add(-15 * time.Minute).Format(time.RFC3339Nano),
+						"expires_at": now.Add(45 * time.Minute).Format(time.RFC3339Nano),
+					},
+				},
+			})
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	})
+
+	httpClient := &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, r)
+			return rr.Result(), nil
+		}),
+	}
+
+	tmpDir := t.TempDir()
+	fallback, err := NewJSONStorageService(filepath.Join(tmpDir, "storage"))
+	if err != nil {
+		t.Fatalf("NewJSONStorageService: %v", err)
+	}
+	if err := fallback.SaveWatchJournal([]usecase.WatchJournal{
+		{
+			ID:        "watch_1",
+			Symbol:    "SOLUSDT",
+			Direction: usecase.LONG,
+			Playbook:  usecase.TREND_PULLBACK,
+			Status:    usecase.WATCH_RECHECK_EXPIRED,
+			CreatedAt: now.Add(-20 * time.Minute),
+			UpdatedAt: now.Add(-2 * time.Minute),
+			ClosedAt:  now.Add(-2 * time.Minute),
+			ExpiresAt: now.Add(-1 * time.Minute),
+			Reason:    "local terminal state",
+		},
+	}); err != nil {
+		t.Fatalf("SaveWatchJournal: %v", err)
+	}
+
+	client, err := NewPocketBaseClientWithHTTPClient("http://pocketbase.local", httpClient, 2*time.Second, PocketBaseAuthModeSuperuser, "", "admin@example.com", "pass", 1)
+	if err != nil {
+		t.Fatalf("NewPocketBaseClient: %v", err)
+	}
+
+	st, err := NewPocketBaseStorageService(fallback, client, "pocketbase_first")
+	if err != nil {
+		t.Fatalf("NewPocketBaseStorageService: %v", err)
+	}
+
+	journal, err := st.LoadWatchJournal()
+	if err != nil {
+		t.Fatalf("LoadWatchJournal: %v", err)
+	}
+	if len(journal) != 1 {
+		t.Fatalf("expected 1 watch journal row, got %d", len(journal))
+	}
+	if journal[0].Status != usecase.WATCH_RECHECK_EXPIRED {
+		t.Fatalf("expected local terminal status to win, got %+v", journal[0])
+	}
+	if journal[0].ClosedAt.IsZero() {
+		t.Fatalf("expected merged watch journal to keep local close timestamp, got %+v", journal[0])
+	}
+}
+
+func TestPocketBaseStorageService_LoadSignalJournal_PrefersLocalPolicySnapshot(t *testing.T) {
+	now := time.Now().UTC()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/collections/_superusers/auth-with-password":
+			_ = json.NewEncoder(w).Encode(map[string]any{"token": "testtoken"})
+			return
+		case r.Method == http.MethodGet && r.URL.Path == "/api/collections/signal_journals/records":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"page":       1,
+				"perPage":    200,
+				"totalItems": 1,
+				"totalPages": 1,
+				"items": []map[string]any{
+					{
+						"id":                        "pb-signal-1",
+						"signal_id":                 "sig_1",
+						"symbol":                    "BTCUSDT",
+						"direction":                 "LONG",
+						"playbook":                  "TREND_PULLBACK",
+						"status":                    "MONITORING",
+						"policy_mode":               "NORMAL",
+						"market_regime":             "ALT_SUPPORTIVE",
+						"created_at":                now.Add(-20 * time.Minute).Format(time.RFC3339Nano),
+						"updated_at":                now.Add(-10 * time.Minute).Format(time.RFC3339Nano),
+						"expires_at":                now.Add(45 * time.Minute).Format(time.RFC3339Nano),
+						"threshold_profile_summary": "remote row without snapshot",
+					},
+				},
+			})
+			return
+		default:
+			http.NotFound(w, r)
+			return
+		}
+	})
+
+	httpClient := &http.Client{
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, r)
+			return rr.Result(), nil
+		}),
+	}
+
+	tmpDir := t.TempDir()
+	fallback, err := NewJSONStorageService(filepath.Join(tmpDir, "storage"))
+	if err != nil {
+		t.Fatalf("NewJSONStorageService: %v", err)
+	}
+	if err := fallback.SaveSignalJournal([]usecase.SignalJournal{
+		{
+			ID:                        "sig_1",
+			Symbol:                    "BTCUSDT",
+			Direction:                 usecase.LONG,
+			Playbook:                  usecase.TREND_PULLBACK,
+			Status:                    usecase.MONITORING,
+			PolicyMode:                string(usecase.NORMAL),
+			PolicyLongMode:            string(usecase.NORMAL),
+			PolicyShortMode:           string(usecase.SWEEP_ONLY),
+			PolicyRequireAIConfidence: string(usecase.AIConfidenceHigh),
+			PolicyAllowedPlaybooks:    []string{string(usecase.TREND_PULLBACK), string(usecase.LIQUIDITY_SWEEP_REVERSAL)},
+			PolicyReason:              "local snapshot should survive pb sync",
+			CreatedAt:                 now.Add(-20 * time.Minute),
+			UpdatedAt:                 now.Add(-25 * time.Minute),
+			ExpiresAt:                 now.Add(45 * time.Minute),
+		},
+	}); err != nil {
+		t.Fatalf("SaveSignalJournal: %v", err)
+	}
+
+	client, err := NewPocketBaseClientWithHTTPClient("http://pocketbase.local", httpClient, 2*time.Second, PocketBaseAuthModeSuperuser, "", "admin@example.com", "pass", 1)
+	if err != nil {
+		t.Fatalf("NewPocketBaseClient: %v", err)
+	}
+
+	st, err := NewPocketBaseStorageService(fallback, client, "pocketbase_first")
+	if err != nil {
+		t.Fatalf("NewPocketBaseStorageService: %v", err)
+	}
+
+	journal, err := st.LoadSignalJournal()
+	if err != nil {
+		t.Fatalf("LoadSignalJournal: %v", err)
+	}
+	if len(journal) != 1 {
+		t.Fatalf("expected 1 signal journal row, got %d", len(journal))
+	}
+	if journal[0].PolicyLongMode != string(usecase.NORMAL) || journal[0].PolicyShortMode != string(usecase.SWEEP_ONLY) {
+		t.Fatalf("expected local policy snapshot to win, got %+v", journal[0])
+	}
+	if journal[0].PolicyRequireAIConfidence != string(usecase.AIConfidenceHigh) {
+		t.Fatalf("expected local effective AI requirement to survive, got %+v", journal[0])
+	}
+}
+
 func TestPocketBaseStorageService_SignalJournalAppendAndLoad(t *testing.T) {
 	var mu sync.Mutex
 	var createdSignal map[string]any
@@ -85,18 +270,24 @@ func TestPocketBaseStorageService_SignalJournalAppendAndLoad(t *testing.T) {
 	}
 
 	entry := usecase.SignalJournal{
-		ID:         "sig_1",
-		Symbol:     "BTCUSDT",
-		Direction:  usecase.LONG,
-		Playbook:   usecase.TREND_PULLBACK,
-		EntryPrice: 100,
-		StopLoss:   98,
-		TP1:        105,
-		TP2:        110,
-		RR:         2.5,
-		Status:     usecase.MONITORING,
-		CreatedAt:  time.Now().UTC(),
-		ExpiresAt:  time.Now().UTC().Add(2 * time.Hour),
+		ID:                        "sig_1",
+		Symbol:                    "BTCUSDT",
+		Direction:                 usecase.LONG,
+		Playbook:                  usecase.TREND_PULLBACK,
+		EntryPrice:                100,
+		StopLoss:                  98,
+		TP1:                       105,
+		TP2:                       110,
+		RR:                        2.5,
+		Status:                    usecase.MONITORING,
+		PolicyLongMode:            string(usecase.NORMAL),
+		PolicyShortMode:           string(usecase.SWEEP_ONLY),
+		PolicyRequireAIConfidence: string(usecase.AIConfidenceHigh),
+		PolicyRequireFreshEntry:   true,
+		PolicyAllowedPlaybooks:    []string{string(usecase.TREND_PULLBACK), string(usecase.LIQUIDITY_SWEEP_REVERSAL)},
+		PolicyReason:              "snapshot payload check",
+		CreatedAt:                 time.Now().UTC(),
+		ExpiresAt:                 time.Now().UTC().Add(2 * time.Hour),
 	}
 
 	if err := st.AppendSignalJournal(entry); err != nil {
@@ -112,6 +303,12 @@ func TestPocketBaseStorageService_SignalJournalAppendAndLoad(t *testing.T) {
 	}
 	if journal[0].ID != "sig_1" || journal[0].Symbol != "BTCUSDT" {
 		t.Fatalf("unexpected journal row: %+v", journal[0])
+	}
+	if createdSignal["policy_long_mode"] != string(usecase.NORMAL) || createdSignal["policy_short_mode"] != string(usecase.SWEEP_ONLY) {
+		t.Fatalf("expected PB payload to include policy mode snapshot, got %+v", createdSignal)
+	}
+	if createdSignal["policy_require_ai_confidence"] != string(usecase.AIConfidenceHigh) {
+		t.Fatalf("expected PB payload to include effective AI confidence snapshot, got %+v", createdSignal)
 	}
 }
 

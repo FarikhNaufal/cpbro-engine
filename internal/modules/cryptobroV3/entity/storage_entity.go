@@ -42,11 +42,20 @@ type LatestResult struct {
 	ScanID                          string                   `json:"scan_id"`
 	MarketPolicy                    string                   `json:"market_policy"`
 	MarketRegime                    string                   `json:"market_regime"`
+	ActivePolicyLongMode            string                   `json:"active_policy_long_mode,omitempty"`
+	ActivePolicyShortMode           string                   `json:"active_policy_short_mode,omitempty"`
+	ActivePolicyRequireAIConfidence string                   `json:"active_policy_require_ai_confidence,omitempty"`
+	ActivePolicyRequireFreshEntry   bool                     `json:"active_policy_require_fresh_entry,omitempty"`
+	ActivePolicyAllowedPlaybooks    []string                 `json:"active_policy_allowed_playbooks,omitempty"`
 	MacroVolatility                 string                   `json:"macro_volatility,omitempty"`
 	MarketBreadth                   float64                  `json:"market_breadth,omitempty"`
 	MedianAbsMove24h                float64                  `json:"median_abs_move_24h,omitempty"`
 	ActiveMoveShare                 float64                  `json:"active_move_share,omitempty"`
 	QuietMoveShare                  float64                  `json:"quiet_move_share,omitempty"`
+	BootstrapTickerSource           string                   `json:"bootstrap_ticker_source,omitempty"`
+	BootstrapTickerCacheAgeSeconds  uint64                   `json:"bootstrap_ticker_cache_age_seconds,omitempty"`
+	BootstrapFundingSource          string                   `json:"bootstrap_funding_source,omitempty"`
+	BootstrapFundingCacheAgeSeconds uint64                   `json:"bootstrap_funding_cache_age_seconds,omitempty"`
 	TotalTickers                    int                      `json:"total_tickers"`
 	TotalUniversePass               int                      `json:"total_universe_pass"`
 	TotalUniverseRejected           int                      `json:"total_universe_rejected"`

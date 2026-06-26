@@ -144,17 +144,17 @@ func (s *PocketBaseStorageService) LoadSignalJournal() ([]usecase.SignalJournal,
 		out = append(out, j)
 	}
 
-	// Ensure deterministic ordering (newest first) if created_at missing.
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
-	if len(out) > 0 {
-		if err := s.fallback.SaveSignalJournal(out); err != nil {
+	merged := mergeSignalJournalSources(out, localJournal)
+	sort.Slice(merged, func(i, j int) bool { return merged[i].CreatedAt.After(merged[j].CreatedAt) })
+	if len(merged) > 0 {
+		if err := s.fallback.SaveSignalJournal(merged); err != nil {
 			slog.Warn("JSON fallback signal_journals sync failed after PocketBase load", "error", err)
 		}
 	}
-	if len(out) == 0 {
+	if len(merged) == 0 {
 		return []usecase.SignalJournal{}, nil
 	}
-	return out, nil
+	return merged, nil
 }
 
 func (s *PocketBaseStorageService) SaveSignalJournal(journal []usecase.SignalJournal) error {
@@ -220,6 +220,24 @@ func (s *PocketBaseStorageService) saveSignalJournalUnlocked(journal []usecase.S
 				shouldUpdate = true
 			}
 			if extTsl, _ := extRecord["time_to_sl"].(string); extTsl != entry.TimeToSL {
+				shouldUpdate = true
+			}
+			if extPolicyLongMode, _ := extRecord["policy_long_mode"].(string); extPolicyLongMode != entry.PolicyLongMode {
+				shouldUpdate = true
+			}
+			if extPolicyShortMode, _ := extRecord["policy_short_mode"].(string); extPolicyShortMode != entry.PolicyShortMode {
+				shouldUpdate = true
+			}
+			if extPolicyAIConfidence, _ := extRecord["policy_require_ai_confidence"].(string); extPolicyAIConfidence != entry.PolicyRequireAIConfidence {
+				shouldUpdate = true
+			}
+			if toBool(extRecord["policy_require_fresh_entry"]) != entry.PolicyRequireFreshEntry {
+				shouldUpdate = true
+			}
+			if !sameStringSlice(toStringSlice(extRecord["policy_allowed_playbooks"]), entry.PolicyAllowedPlaybooks) {
+				shouldUpdate = true
+			}
+			if extPolicyReason, _ := extRecord["policy_reason"].(string); extPolicyReason != entry.PolicyReason {
 				shouldUpdate = true
 			}
 		}
@@ -369,6 +387,9 @@ func (s *PocketBaseStorageService) LoadWatchJournal() ([]usecase.WatchJournal, e
 		}
 		out = append(out, j)
 	}
+	if localErr == nil && len(localJournal) > 0 {
+		out = mergeWatchJournalSources(out, localJournal)
+	}
 
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	if len(out) > 0 {
@@ -421,6 +442,10 @@ func (s *PocketBaseStorageService) FindWatchJournalCandidates(probe usecase.Watc
 			continue
 		}
 		out = append(out, usecase.WatchJournal(j))
+	}
+	localJournal, localErr := s.fallback.LoadWatchJournal()
+	if localErr == nil && len(localJournal) > 0 {
+		out = filterMatchingWatchJournalCandidates(mergeWatchJournalSources(out, localJournal), probe)
 	}
 
 	sort.Slice(out, func(i, j int) bool {
@@ -735,6 +760,153 @@ func cloneValues(v url.Values) url.Values {
 	return out
 }
 
+func mergeSignalJournalSources(primary, secondary []usecase.SignalJournal) []usecase.SignalJournal {
+	if len(primary) == 0 {
+		return append([]usecase.SignalJournal(nil), secondary...)
+	}
+	if len(secondary) == 0 {
+		return append([]usecase.SignalJournal(nil), primary...)
+	}
+
+	merged := make(map[string]usecase.SignalJournal, len(primary)+len(secondary))
+	for _, entry := range primary {
+		merged[signalJournalMergeKey(entry)] = entry
+	}
+	for _, entry := range secondary {
+		key := signalJournalMergeKey(entry)
+		existing, ok := merged[key]
+		if !ok || shouldPreferLocalSignalJournal(existing, entry) {
+			merged[key] = entry
+		}
+	}
+
+	out := make([]usecase.SignalJournal, 0, len(merged))
+	for _, entry := range merged {
+		out = append(out, entry)
+	}
+	return out
+}
+
+func signalJournalMergeKey(entry usecase.SignalJournal) string {
+	if id := strings.TrimSpace(entry.ID); id != "" {
+		return "id:" + id
+	}
+	return strings.Join([]string{
+		strings.TrimSpace(entry.Symbol),
+		string(entry.Direction),
+		string(entry.Playbook),
+		entry.CreatedAt.UTC().Format(time.RFC3339Nano),
+	}, "|")
+}
+
+func shouldPreferLocalSignalJournal(remote, local usecase.SignalJournal) bool {
+	if hasSignalJournalPolicySnapshot(local) && !hasSignalJournalPolicySnapshot(remote) {
+		return true
+	}
+	if isTerminalSignalJournalStatus(local.Status) && !isTerminalSignalJournalStatus(remote.Status) {
+		return true
+	}
+	if local.ClosedAt.After(remote.ClosedAt) {
+		return true
+	}
+	if local.UpdatedAt.After(remote.UpdatedAt) {
+		return true
+	}
+	if local.Status != remote.Status && local.CreatedAt.After(remote.CreatedAt) {
+		return true
+	}
+	return false
+}
+
+func hasSignalJournalPolicySnapshot(entry usecase.SignalJournal) bool {
+	return strings.TrimSpace(entry.PolicyLongMode) != "" ||
+		strings.TrimSpace(entry.PolicyShortMode) != "" ||
+		strings.TrimSpace(entry.PolicyRequireAIConfidence) != "" ||
+		len(entry.PolicyAllowedPlaybooks) > 0 ||
+		strings.TrimSpace(entry.PolicyReason) != ""
+}
+
+func isTerminalSignalJournalStatus(status usecase.Status) bool {
+	switch status {
+	case usecase.TP1_HIT,
+		usecase.TP2_HIT,
+		usecase.SL_HIT,
+		usecase.EXPIRED:
+		return true
+	default:
+		return false
+	}
+}
+
+func mergeWatchJournalSources(primary, secondary []usecase.WatchJournal) []usecase.WatchJournal {
+	if len(primary) == 0 {
+		return append([]usecase.WatchJournal(nil), secondary...)
+	}
+	if len(secondary) == 0 {
+		return append([]usecase.WatchJournal(nil), primary...)
+	}
+
+	merged := make(map[string]usecase.WatchJournal, len(primary)+len(secondary))
+	for _, entry := range primary {
+		merged[watchJournalMergeKey(entry)] = entry
+	}
+	for _, entry := range secondary {
+		key := watchJournalMergeKey(entry)
+		existing, ok := merged[key]
+		if !ok || shouldPreferLocalWatchJournal(existing, entry) {
+			merged[key] = entry
+		}
+	}
+
+	out := make([]usecase.WatchJournal, 0, len(merged))
+	for _, entry := range merged {
+		out = append(out, entry)
+	}
+	return out
+}
+
+func watchJournalMergeKey(entry usecase.WatchJournal) string {
+	if id := strings.TrimSpace(entry.ID); id != "" {
+		return "id:" + id
+	}
+	return strings.Join([]string{
+		strings.TrimSpace(entry.Symbol),
+		string(entry.Direction),
+		string(entry.Playbook),
+		entry.CreatedAt.UTC().Format(time.RFC3339Nano),
+	}, "|")
+}
+
+func shouldPreferLocalWatchJournal(remote, local usecase.WatchJournal) bool {
+	if isTerminalWatchJournalStatus(local.Status) && !isTerminalWatchJournalStatus(remote.Status) {
+		return true
+	}
+	if local.ClosedAt.After(remote.ClosedAt) {
+		return true
+	}
+	if local.UpdatedAt.After(remote.UpdatedAt) {
+		return true
+	}
+	if local.Status != remote.Status && local.CreatedAt.After(remote.CreatedAt) {
+		return true
+	}
+	return false
+}
+
+func isTerminalWatchJournalStatus(status usecase.Status) bool {
+	switch status {
+	case usecase.VIRTUAL_TP2_HIT,
+		usecase.VIRTUAL_SL_HIT,
+		usecase.VIRTUAL_EXPIRED,
+		usecase.WATCH_PROMOTED,
+		usecase.WATCH_RECHECK_INVALIDATED,
+		usecase.WATCH_RECHECK_EXPIRED:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *PocketBaseStorageService) saveJournalUnlocked(collection string, journal []usecase.SignalJournal) error {
 	ctx, cancel := context.WithTimeout(context.Background(), defaultPocketBaseSaveTimeout)
 	defer cancel()
@@ -784,6 +956,24 @@ func (s *PocketBaseStorageService) saveJournalUnlocked(collection string, journa
 				shouldUpdate = true
 			}
 			if extTsl, _ := extRecord["time_to_sl"].(string); extTsl != entry.TimeToSL {
+				shouldUpdate = true
+			}
+			if extPolicyLongMode, _ := extRecord["policy_long_mode"].(string); extPolicyLongMode != entry.PolicyLongMode {
+				shouldUpdate = true
+			}
+			if extPolicyShortMode, _ := extRecord["policy_short_mode"].(string); extPolicyShortMode != entry.PolicyShortMode {
+				shouldUpdate = true
+			}
+			if extPolicyAIConfidence, _ := extRecord["policy_require_ai_confidence"].(string); extPolicyAIConfidence != entry.PolicyRequireAIConfidence {
+				shouldUpdate = true
+			}
+			if toBool(extRecord["policy_require_fresh_entry"]) != entry.PolicyRequireFreshEntry {
+				shouldUpdate = true
+			}
+			if !sameStringSlice(toStringSlice(extRecord["policy_allowed_playbooks"]), entry.PolicyAllowedPlaybooks) {
+				shouldUpdate = true
+			}
+			if extPolicyReason, _ := extRecord["policy_reason"].(string); extPolicyReason != entry.PolicyReason {
 				shouldUpdate = true
 			}
 		}
@@ -932,50 +1122,56 @@ func makeEvaluationID(t time.Time) string {
 
 func encodeSignalJournal(e usecase.SignalJournal) map[string]any {
 	out := map[string]any{
-		"schema_version":            e.SchemaVersion,
-		"config_version":            e.ConfigVersion,
-		"signal_id":                 e.ID,
-		"symbol":                    e.Symbol,
-		"direction":                 string(e.Direction),
-		"playbook":                  string(e.Playbook),
-		"entry":                     e.EntryPrice,
-		"sl":                        e.StopLoss,
-		"tp1":                       e.TP1,
-		"tp2":                       e.TP2,
-		"rr":                        e.RR,
-		"score":                     e.QuantScore,
-		"ai_confidence":             e.AIConfidence,
-		"market_regime":             e.MarketRegime,
-		"policy_mode":               e.PolicyMode,
-		"threshold_profile_summary": e.ThresholdProfileSummary,
-		"breakout_level":            e.BreakoutLevel,
-		"retest_touches":            e.RetestTouches,
-		"retest_hold":               e.RetestHold,
-		"has_derivatives_evidence":  e.HasDerivativesEvidence,
-		"created_at":                formatPBTime(e.CreatedAt),
-		"expires_at":                formatPBTime(e.ExpiresAt),
-		"status":                    string(e.Status),
-		"mfe":                       e.MFE,
-		"mae":                       e.MAE,
-		"time_to_tp1":               e.TimeToTP1,
-		"time_to_tp2":               e.TimeToTP2,
-		"time_to_sl":                e.TimeToSL,
-		"outcome_reason":            e.OutcomeReason,
-		"entry_timing":              e.EntryTiming,
-		"tier":                      string(e.Tier),
-		"timeframe":                 e.Timeframe,
-		"latest_price":              e.LatestPrice,
-		"take_profit":               e.TakeProfit,
-		"ai_sentiment":              e.AISentiment,
-		"ai_reasoning":              e.AIReasoning,
-		"pnl_percentage":            e.PnlPercentage,
-		"updated_at":                formatPBTime(e.UpdatedAt),
-		"closed_at":                 formatPBTime(e.ClosedAt),
-		"reason":                    e.Reason,
-		"notification_status":       e.NotificationStatus,
-		"notification_error":        e.NotificationError,
-		"technical_snapshot":        e.TechnicalSnapshot,
-		"structure_snapshot":        e.StructureSnapshot,
+		"schema_version":               e.SchemaVersion,
+		"config_version":               e.ConfigVersion,
+		"signal_id":                    e.ID,
+		"symbol":                       e.Symbol,
+		"direction":                    string(e.Direction),
+		"playbook":                     string(e.Playbook),
+		"entry":                        e.EntryPrice,
+		"sl":                           e.StopLoss,
+		"tp1":                          e.TP1,
+		"tp2":                          e.TP2,
+		"rr":                           e.RR,
+		"score":                        e.QuantScore,
+		"ai_confidence":                e.AIConfidence,
+		"market_regime":                e.MarketRegime,
+		"policy_mode":                  e.PolicyMode,
+		"policy_long_mode":             e.PolicyLongMode,
+		"policy_short_mode":            e.PolicyShortMode,
+		"policy_require_ai_confidence": e.PolicyRequireAIConfidence,
+		"policy_require_fresh_entry":   e.PolicyRequireFreshEntry,
+		"policy_allowed_playbooks":     append([]string(nil), e.PolicyAllowedPlaybooks...),
+		"policy_reason":                e.PolicyReason,
+		"threshold_profile_summary":    e.ThresholdProfileSummary,
+		"breakout_level":               e.BreakoutLevel,
+		"retest_touches":               e.RetestTouches,
+		"retest_hold":                  e.RetestHold,
+		"has_derivatives_evidence":     e.HasDerivativesEvidence,
+		"created_at":                   formatPBTime(e.CreatedAt),
+		"expires_at":                   formatPBTime(e.ExpiresAt),
+		"status":                       string(e.Status),
+		"mfe":                          e.MFE,
+		"mae":                          e.MAE,
+		"time_to_tp1":                  e.TimeToTP1,
+		"time_to_tp2":                  e.TimeToTP2,
+		"time_to_sl":                   e.TimeToSL,
+		"outcome_reason":               e.OutcomeReason,
+		"entry_timing":                 e.EntryTiming,
+		"tier":                         string(e.Tier),
+		"timeframe":                    e.Timeframe,
+		"latest_price":                 e.LatestPrice,
+		"take_profit":                  e.TakeProfit,
+		"ai_sentiment":                 e.AISentiment,
+		"ai_reasoning":                 e.AIReasoning,
+		"pnl_percentage":               e.PnlPercentage,
+		"updated_at":                   formatPBTime(e.UpdatedAt),
+		"closed_at":                    formatPBTime(e.ClosedAt),
+		"reason":                       e.Reason,
+		"notification_status":          e.NotificationStatus,
+		"notification_error":           e.NotificationError,
+		"technical_snapshot":           e.TechnicalSnapshot,
+		"structure_snapshot":           e.StructureSnapshot,
 	}
 	if e.IsHot {
 		out["hot_info"] = map[string]any{
@@ -1018,6 +1214,14 @@ func decodeSignalJournal(m map[string]any) (usecase.SignalJournal, error) {
 	out.AIConfidence, _ = m["ai_confidence"].(string)
 	out.MarketRegime, _ = m["market_regime"].(string)
 	out.PolicyMode, _ = m["policy_mode"].(string)
+	out.PolicyLongMode, _ = m["policy_long_mode"].(string)
+	out.PolicyShortMode, _ = m["policy_short_mode"].(string)
+	out.PolicyRequireAIConfidence, _ = m["policy_require_ai_confidence"].(string)
+	out.PolicyRequireFreshEntry = toBool(m["policy_require_fresh_entry"])
+	if values := toStringSlice(m["policy_allowed_playbooks"]); len(values) > 0 {
+		out.PolicyAllowedPlaybooks = values
+	}
+	out.PolicyReason, _ = m["policy_reason"].(string)
 	out.ThresholdProfileSummary, _ = m["threshold_profile_summary"].(string)
 	out.BreakoutLevel = toFloat(m["breakout_level"])
 	out.RetestTouches = toFloat(m["retest_touches"])
@@ -1269,4 +1473,46 @@ func toBool(v any) bool {
 	default:
 		return false
 	}
+}
+
+func toStringSlice(v any) []string {
+	switch x := v.(type) {
+	case []string:
+		return append([]string(nil), x...)
+	case []any:
+		out := make([]string, 0, len(x))
+		for _, item := range x {
+			if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		if strings.TrimSpace(x) == "" {
+			return nil
+		}
+		var out []string
+		if err := json.Unmarshal([]byte(x), &out); err == nil {
+			filtered := out[:0]
+			for _, item := range out {
+				if strings.TrimSpace(item) != "" {
+					filtered = append(filtered, item)
+				}
+			}
+			return filtered
+		}
+	}
+	return nil
+}
+
+func sameStringSlice(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }

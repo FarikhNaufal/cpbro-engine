@@ -20,6 +20,11 @@ type feedbackSourceFiles struct {
 	decisionAudit string
 }
 
+type feedbackExecutionConfig struct {
+	RequiredAIConfidence AIConfidence
+	RequireFreshEntry    bool
+}
+
 func NewFeedbackUsecase(storage *StorageUsecase) *FeedbackUsecase {
 	return &FeedbackUsecase{
 		storageUsecase: storage,
@@ -182,10 +187,155 @@ func resolveFeedbackPolicyForRegime(label string) MarketPolicy {
 	}
 }
 
-func resolveFeedbackExecutionConfig(playbook Playbook, regimeLabel string, tier Tier) (MarketPolicy, PlaybookThresholdProfile) {
+func normalizeFeedbackPolicyMode(value string) (PolicyMode, bool) {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case string(NORMAL):
+		return NORMAL, true
+	case string(SWEEP_ONLY):
+		return SWEEP_ONLY, true
+	case string(REVERSAL_ONLY):
+		return REVERSAL_ONLY, true
+	case string(PULLBACK_ONLY):
+		return PULLBACK_ONLY, true
+	case string(BREAKOUT_RETEST_ONLY):
+		return BREAKOUT_RETEST_ONLY, true
+	case string(DISABLED):
+		return DISABLED, true
+	default:
+		return "", false
+	}
+}
+
+func normalizeFeedbackAIConfidence(value string) (AIConfidence, bool) {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case string(AIConfidenceHigh):
+		return AIConfidenceHigh, true
+	case string(AIConfidenceMedium):
+		return AIConfidenceMedium, true
+	case string(AIConfidenceLow):
+		return AIConfidenceLow, true
+	default:
+		return "", false
+	}
+}
+
+func normalizeFeedbackPlaybook(value string) (Playbook, bool) {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case string(TREND_PULLBACK):
+		return TREND_PULLBACK, true
+	case string(LIQUIDITY_SWEEP_REVERSAL):
+		return LIQUIDITY_SWEEP_REVERSAL, true
+	case string(COMPRESSION_BREAKOUT_RETEST):
+		return COMPRESSION_BREAKOUT_RETEST, true
+	case string(RANGE_EDGE_REVERSAL):
+		return RANGE_EDGE_REVERSAL, true
+	case string(CROWDED_POSITIONING_SQUEEZE):
+		return CROWDED_POSITIONING_SQUEEZE, true
+	default:
+		return "", false
+	}
+}
+
+func normalizeFeedbackAllowedPlaybooks(values []string) []Playbook {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]Playbook, 0, len(values))
+	seen := make(map[Playbook]struct{}, len(values))
+	for _, raw := range values {
+		playbook, ok := normalizeFeedbackPlaybook(raw)
+		if !ok {
+			continue
+		}
+		if _, exists := seen[playbook]; exists {
+			continue
+		}
+		seen[playbook] = struct{}{}
+		out = append(out, playbook)
+	}
+	return out
+}
+
+func hasFeedbackPolicySnapshot(longMode, shortMode, requiredAIConfidence string, allowedPlaybooks []string, reason string) bool {
+	return strings.TrimSpace(longMode) != "" ||
+		strings.TrimSpace(shortMode) != "" ||
+		strings.TrimSpace(requiredAIConfidence) != "" ||
+		len(allowedPlaybooks) > 0 ||
+		strings.TrimSpace(reason) != ""
+}
+
+func resolveFeedbackPolicyWithSnapshot(regimeLabel, longMode, shortMode, requiredAIConfidence string, requireFreshEntry bool, allowedPlaybooks []string, reason string) (MarketPolicy, bool) {
 	policy := resolveFeedbackPolicyForRegime(regimeLabel)
+	snapshotPresent := hasFeedbackPolicySnapshot(longMode, shortMode, requiredAIConfidence, allowedPlaybooks, reason)
+	if !snapshotPresent {
+		return policy, false
+	}
+
+	if mode, ok := normalizeFeedbackPolicyMode(longMode); ok {
+		policy.LongMode = mode
+	}
+	if mode, ok := normalizeFeedbackPolicyMode(shortMode); ok {
+		policy.ShortMode = mode
+	}
+	if confidence, ok := normalizeFeedbackAIConfidence(requiredAIConfidence); ok {
+		policy.RequireAIConfidence = confidence
+	}
+	policy.RequireFreshEntry = requireFreshEntry
+	if normalizedPlaybooks := normalizeFeedbackAllowedPlaybooks(allowedPlaybooks); len(normalizedPlaybooks) > 0 {
+		policy.AllowedPlaybooks = normalizedPlaybooks
+	}
+	if trimmedReason := strings.TrimSpace(reason); trimmedReason != "" {
+		policy.Reason = trimmedReason
+	}
+	return policy, true
+}
+
+func buildFeedbackExecutionConfig(policy MarketPolicy, playbook Playbook, tier Tier) feedbackExecutionConfig {
 	profile := GetPlaybookThresholdProfile(playbook, policy, tier)
-	return policy, profile
+	return feedbackExecutionConfig{
+		RequiredAIConfidence: effectiveRequiredAIConfidence(policy, profile),
+		RequireFreshEntry:    effectiveRequireFreshEntry(policy),
+	}
+}
+
+func resolveFeedbackExecutionConfigFromSignal(item SignalJournal) feedbackExecutionConfig {
+	policy, snapshotPresent := resolveFeedbackPolicyWithSnapshot(
+		item.MarketRegime,
+		item.PolicyLongMode,
+		item.PolicyShortMode,
+		item.PolicyRequireAIConfidence,
+		item.PolicyRequireFreshEntry,
+		item.PolicyAllowedPlaybooks,
+		item.PolicyReason,
+	)
+	cfg := buildFeedbackExecutionConfig(policy, item.Playbook, item.Tier)
+	if confidence, ok := normalizeFeedbackAIConfidence(item.PolicyRequireAIConfidence); ok {
+		cfg.RequiredAIConfidence = confidence
+	}
+	if snapshotPresent {
+		cfg.RequireFreshEntry = item.PolicyRequireFreshEntry
+	}
+	return cfg
+}
+
+func resolveFeedbackExecutionConfigFromAudit(audit DecisionAudit) feedbackExecutionConfig {
+	policy, snapshotPresent := resolveFeedbackPolicyWithSnapshot(
+		audit.MarketRegime,
+		audit.PolicyLongMode,
+		audit.PolicyShortMode,
+		audit.PolicyRequireAIConfidence,
+		audit.PolicyRequireFreshEntry,
+		audit.PolicyAllowedPlaybooks,
+		audit.PolicyReason,
+	)
+	cfg := buildFeedbackExecutionConfig(policy, audit.Playbook, audit.Tier)
+	if confidence, ok := normalizeFeedbackAIConfidence(audit.PolicyRequireAIConfidence); ok {
+		cfg.RequiredAIConfidence = confidence
+	}
+	if snapshotPresent {
+		cfg.RequireFreshEntry = audit.PolicyRequireFreshEntry
+	}
+	return cfg
 }
 
 func feedbackPolicyModeForDirection(policy MarketPolicy, direction Direction) string {
@@ -1335,16 +1485,15 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		if item.Status == TP1_HIT || item.Status == TP2_HIT || item.Status == SL_HIT {
 			// Sinyal tereksekusi (FINAL_EXECUTE)
 			pb := string(item.Playbook)
-			policy, profile := resolveFeedbackExecutionConfig(item.Playbook, item.MarketRegime, item.Tier)
+			execCfg := resolveFeedbackExecutionConfigFromSignal(item)
 
 			// 1. AI confidence below required policy/profile confidence.
-			requiredAIConfidence := effectiveRequiredAIConfidence(policy, profile)
-			if item.AIConfidence != "" && !meetsRequiredAIConfidence(item.AIConfidence, requiredAIConfidence) {
-				addGateBug(pb, "GATE_BUG: AI confidence was "+item.AIConfidence+" but execution required "+string(requiredAIConfidence)+" on "+item.Symbol)
+			if item.AIConfidence != "" && !meetsRequiredAIConfidence(item.AIConfidence, execCfg.RequiredAIConfidence) {
+				addGateBug(pb, "GATE_BUG: AI confidence was "+item.AIConfidence+" but execution required "+string(execCfg.RequiredAIConfidence)+" on "+item.Symbol)
 			}
 
 			// 2. Staleness not FRESH only when fresh entry is actually required.
-			if effectiveRequireFreshEntry(policy) && (item.EntryTiming == "LATE" || strings.Contains(strings.ToLower(item.ThresholdProfileSummary), "staleness: late")) {
+			if execCfg.RequireFreshEntry && (item.EntryTiming == "LATE" || strings.Contains(strings.ToLower(item.ThresholdProfileSummary), "staleness: late")) {
 				addGateBug(pb, "GATE_BUG: Staleness was not FRESH but signal was executed on "+item.Symbol)
 			}
 
@@ -1369,13 +1518,12 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		for _, a := range audits {
 			if a.FinalStatus == FINAL_EXECUTE {
 				pb := string(a.Playbook)
-				policy, profile := resolveFeedbackExecutionConfig(a.Playbook, a.MarketRegime, a.Tier)
-				requiredAIConfidence := effectiveRequiredAIConfidence(policy, profile)
+				execCfg := resolveFeedbackExecutionConfigFromAudit(a)
 
-				if a.AIConfidence != "" && !meetsRequiredAIConfidence(a.AIConfidence, requiredAIConfidence) {
-					addGateBug(pb, "GATE_BUG: AI confidence was "+a.AIConfidence+" but final status is FINAL_EXECUTE while required confidence is "+string(requiredAIConfidence)+" on "+a.Symbol)
+				if a.AIConfidence != "" && !meetsRequiredAIConfidence(a.AIConfidence, execCfg.RequiredAIConfidence) {
+					addGateBug(pb, "GATE_BUG: AI confidence was "+a.AIConfidence+" but final status is FINAL_EXECUTE while required confidence is "+string(execCfg.RequiredAIConfidence)+" on "+a.Symbol)
 				}
-				if effectiveRequireFreshEntry(policy) && a.StalenessStatus == "LATE" {
+				if execCfg.RequireFreshEntry && a.StalenessStatus == "LATE" {
 					addGateBug(pb, "GATE_BUG: Staleness was LATE but final status is FINAL_EXECUTE on "+a.Symbol)
 				}
 

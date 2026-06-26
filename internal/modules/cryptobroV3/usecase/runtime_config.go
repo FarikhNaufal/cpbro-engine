@@ -63,6 +63,17 @@ func effectiveRequiredAIConfidence(policy MarketPolicy, profile PlaybookThreshol
 	return required
 }
 
+func effectiveRequiredAIConfidenceForPolicy(policy MarketPolicy) AIConfidence {
+	required := policy.RequireAIConfidence
+	if required == "" {
+		required = AIConfidenceMedium
+	}
+	if getRequireAIHighForExecute() {
+		return AIConfidenceHigh
+	}
+	return required
+}
+
 func effectiveRequireFreshEntry(policy MarketPolicy) bool {
 	return policy.RequireFreshEntry || getRequireFreshEntryForExecute()
 }
