@@ -1,10 +1,10 @@
 {
-  "version": "v1.0.0",
+  "version": "v1.1.0",
   "profiles": {
     "TREND_PULLBACK": {
       "playbook": "TREND_PULLBACK",
-      "min_score_ai": 7.0,
-      "min_score_execute": 7.3,
+      "min_score_ai": 6.5,
+      "min_score_execute": 6.8,
       "min_rr": 1.5,
       "min_adx": 20.0,
       "require_adx": true,
@@ -22,8 +22,8 @@
     },
     "LIQUIDITY_SWEEP_REVERSAL": {
       "playbook": "LIQUIDITY_SWEEP_REVERSAL",
-      "min_score_ai": 7.0,
-      "min_score_execute": 7.3,
+      "min_score_ai": 6.5,
+      "min_score_execute": 6.8,
       "min_rr": 1.7,
       "min_adx": 0.0,
       "require_adx": false,
@@ -43,8 +43,8 @@
     },
     "COMPRESSION_BREAKOUT_RETEST": {
       "playbook": "COMPRESSION_BREAKOUT_RETEST",
-      "min_score_ai": 7.0,
-      "min_score_execute": 7.3,
+      "min_score_ai": 6.5,
+      "min_score_execute": 6.8,
       "min_rr": 1.6,
       "min_adx": 0.0,
       "require_adx": false,
@@ -61,8 +61,8 @@
     },
     "RANGE_EDGE_REVERSAL": {
       "playbook": "RANGE_EDGE_REVERSAL",
-      "min_score_ai": 7.2,
-      "min_score_execute": 7.5,
+      "min_score_ai": 6.8,
+      "min_score_execute": 7.0,
       "min_rr": 1.7,
       "min_adx": 0.0,
       "max_adx": 30.0,

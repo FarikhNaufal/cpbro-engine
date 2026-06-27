@@ -1,5 +1,5 @@
 {
-  "version": "v1.1.0",
+  "version": "v1.0.0",
   "policies": {
     "DEFAULT": {
       "allow_long": true,
@@ -25,7 +25,7 @@
       "staleness_atr_multiplier": 1.5,
       "cooldown_minutes": 15,
       "hot_max_boost": 1.25,
-      "hot_prefetch_slot_ratio": 0.45
+      "hot_prefetch_slot_ratio": 0.25
     },
     "BTC_CHAOS": {
       "allow_long": true,
@@ -51,7 +51,7 @@
       "staleness_atr_multiplier": 0.5,
       "cooldown_minutes": 15,
       "hot_max_boost": 1.10,
-      "hot_prefetch_slot_ratio": 0.45
+      "hot_prefetch_slot_ratio": 0.15
     },
     "BTC_DOMINANCE": {
       "allow_long": true,
@@ -77,7 +77,7 @@
       "staleness_atr_multiplier": 1.5,
       "cooldown_minutes": 15,
       "hot_max_boost": 1.20,
-      "hot_prefetch_slot_ratio": 0.45
+      "hot_prefetch_slot_ratio": 0.20
     },
     "ALT_SUPPORTIVE": {
       "allow_long": true,
@@ -103,7 +103,7 @@
       "staleness_atr_multiplier": 1.5,
       "cooldown_minutes": 15,
       "hot_max_boost": 1.35,
-      "hot_prefetch_slot_ratio": 0.45
+      "hot_prefetch_slot_ratio": 0.30
     },
     "RISK_OFF": {
       "allow_long": true,
@@ -129,7 +129,7 @@
       "staleness_atr_multiplier": 1.5,
       "cooldown_minutes": 15,
       "hot_max_boost": 1.15,
-      "hot_prefetch_slot_ratio": 0.45
+      "hot_prefetch_slot_ratio": 0.20
     },
     "CHOP_RANGE": {
       "allow_long": true,
@@ -155,7 +155,7 @@
       "staleness_atr_multiplier": 1.5,
       "cooldown_minutes": 15,
       "hot_max_boost": 1.20,
-      "hot_prefetch_slot_ratio": 0.45
+      "hot_prefetch_slot_ratio": 0.25
     },
     "COMPRESSION": {
       "allow_long": true,
@@ -181,7 +181,7 @@
       "staleness_atr_multiplier": 1.5,
       "cooldown_minutes": 15,
       "hot_max_boost": 1.25,
-      "hot_prefetch_slot_ratio": 0.45
+      "hot_prefetch_slot_ratio": 0.25
     }
   }
 }
