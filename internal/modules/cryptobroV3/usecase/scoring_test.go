@@ -287,6 +287,113 @@ func TestScoring_Penalties(t *testing.T) {
 		assert.Contains(t, quant.Reason, "Poor Risk-to-Reward ratio")
 	})
 
+	t.Run("HIGH_VOL keeps valid sweep setup near execution band", func(t *testing.T) {
+		policyDefault := MarketPolicy{
+			AllowLong:  true,
+			AllowShort: true,
+			LongMode:   NORMAL,
+			ShortMode:  NORMAL,
+			Regime:     DEFAULT,
+		}
+		policyHighVol := policyDefault
+		policyHighVol.Regime = HIGH_VOL
+
+		quantDefault := &QuantResult{
+			Playbook:     LIQUIDITY_SWEEP_REVERSAL,
+			Direction:    LONG,
+			IndicatorMet: true,
+			TriggerPrice: 100.0,
+			StopLoss:     98.0,
+			TakeProfit:   105.0,
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI: 50.0,
+				IndicatorValues: map[string]float64{
+					IndicatorSweepLow:      1.0,
+					IndicatorWickRejection: 1.0,
+					IndicatorVolumeSpike:   1.0,
+					IndicatorPARejection:   1.0,
+				},
+			},
+		}
+		quantHighVol := &QuantResult{
+			Playbook:     LIQUIDITY_SWEEP_REVERSAL,
+			Direction:    LONG,
+			IndicatorMet: true,
+			TriggerPrice: 100.0,
+			StopLoss:     98.0,
+			TakeProfit:   105.0,
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI: 50.0,
+				IndicatorValues: map[string]float64{
+					IndicatorSweepLow:      1.0,
+					IndicatorWickRejection: 1.0,
+					IndicatorVolumeSpike:   1.0,
+					IndicatorPARejection:   1.0,
+				},
+			},
+		}
+
+		scoreDefault := uc.Calculate(quantDefault, LONG, policyDefault)
+		scoreHighVol := uc.Calculate(quantHighVol, LONG, policyHighVol)
+
+		assert.InDelta(t, scoreDefault, scoreHighVol, 0.01, "HIGH_VOL should not blanket-penalize a valid sweep setup")
+	})
+
+	t.Run("HIGH_VOL softens but does not erase trend pullback penalty", func(t *testing.T) {
+		policyDefault := MarketPolicy{
+			AllowLong:  true,
+			AllowShort: true,
+			LongMode:   NORMAL,
+			ShortMode:  NORMAL,
+			Regime:     DEFAULT,
+		}
+		policyHighVol := policyDefault
+		policyHighVol.Regime = HIGH_VOL
+
+		quantDefault := &QuantResult{
+			Playbook:     TREND_PULLBACK,
+			Direction:    LONG,
+			IndicatorMet: true,
+			TriggerPrice: 100.0,
+			StopLoss:     98.0,
+			TakeProfit:   105.0,
+			H4Trend:      "BULLISH",
+			H1Trend:      "BULLISH",
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI:  45.0,
+				MACD: 1.0,
+				IndicatorValues: map[string]float64{
+					IndicatorADX:         25.0,
+					IndicatorVolumeSpike: 1.0,
+				},
+			},
+		}
+		quantHighVol := &QuantResult{
+			Playbook:     TREND_PULLBACK,
+			Direction:    LONG,
+			IndicatorMet: true,
+			TriggerPrice: 100.0,
+			StopLoss:     98.0,
+			TakeProfit:   105.0,
+			H4Trend:      "BULLISH",
+			H1Trend:      "BULLISH",
+			TechnicalSnapshot: TechnicalSnapshot{
+				RSI:  45.0,
+				MACD: 1.0,
+				IndicatorValues: map[string]float64{
+					IndicatorADX:         25.0,
+					IndicatorVolumeSpike: 1.0,
+				},
+			},
+		}
+
+		scoreDefault := uc.Calculate(quantDefault, LONG, policyDefault)
+		scoreHighVol := uc.Calculate(quantHighVol, LONG, policyHighVol)
+
+		assert.True(t, scoreDefault > scoreHighVol, "HIGH_VOL should still penalize trend pullback slightly")
+		assert.InDelta(t, scoreDefault-0.5, scoreHighVol, 0.01, "HIGH_VOL trend pullback penalty should be limited to 0.5 score")
+	})
+
 	t.Run("Tier C chaos penalty applies only to Tier C", func(t *testing.T) {
 		policy := MarketPolicy{
 			AllowLong:  true,

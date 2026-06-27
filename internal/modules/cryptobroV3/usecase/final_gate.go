@@ -123,14 +123,16 @@ func (uc *FinalGateUsecase) Evaluate(
 		if primaryRejectLayer == "" {
 			primaryRejectLayer = layer
 		}
+		GetGlobalMetrics().IncrementRuleReject(layer)
 	}
 
-	addWatch := func(layer string, reason string) {
+addWatch := func(layer string, reason string) {
 		watchReasons = append(watchReasons, reason)
 		watchBreakdown = append(watchBreakdown, FormatReasonBreakdown(layer, reason))
 		if primaryWatchLayer == "" {
 			primaryWatchLayer = layer
 		}
+		GetGlobalMetrics().IncrementRuleWatch(layer)
 	}
 
 	// Detect AI Error Policy
@@ -153,9 +155,17 @@ func (uc *FinalGateUsecase) Evaluate(
 	switch aiSource {
 	case AIAuditSourceSyntheticLocalGate:
 	case AIAuditSourceSyntheticQuota:
-		addWatch("AI_QUOTA", "AI candidate skipped due policy MaxAICandidates quota")
+		if policy.AllowAIQuotaWatch {
+			addWatch("AI_QUOTA", "AI candidate skipped due policy MaxAICandidates quota")
+		} else {
+			addReject("AI_QUOTA", "AI candidate skipped due policy MaxAICandidates quota")
+		}
 	case AIAuditSourceSyntheticDisabled:
-		addWatch("AI_DISABLED", "AI audit disabled by configuration")
+		if policy.AllowAIDisabledWatch {
+			addWatch("AI_DISABLED", "AI audit disabled by configuration")
+		} else {
+			addReject("AI_DISABLED", "AI audit disabled by configuration")
+		}
 	default:
 		if aiAudit.Decision == "REJECT" {
 			addReject("AI_VERDICT", "AI decision is REJECT")
@@ -258,7 +268,9 @@ func (uc *FinalGateUsecase) Evaluate(
 	sl := quant.TradePlan.StopLoss
 	rrActual := 0.0
 
-	if latestPrice > 0 && tp > 0 && sl > 0 {
+	if latestPrice <= 0 {
+		addReject("RR_ACTUAL", "latestPrice unavailable for RR calculation")
+	} else if tp > 0 && sl > 0 {
 		if quant.Direction == LONG {
 			risk := latestPrice - sl
 			reward := tp - latestPrice
@@ -273,6 +285,7 @@ func (uc *FinalGateUsecase) Evaluate(
 			}
 		}
 	} else if entry > 0 && tp > 0 && sl > 0 {
+		// Fallback to entry price if latestPrice not available (should not happen due to earlier check)
 		if quant.Direction == LONG {
 			risk := entry - sl
 			reward := tp - entry

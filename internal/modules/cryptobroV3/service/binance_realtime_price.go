@@ -245,11 +245,18 @@ func (s *BinanceRealtimePriceStream) run(ctx context.Context) {
 		failures := s.consecutiveFailures
 		s.mu.RUnlock()
 		if failures > 0 {
+			// Exponential backoff: delay = base * 2^(failures-1) with jitter
 			backoffFactor := 1 << (failures - 1)
+			if backoffFactor > 32 {
+				backoffFactor = 32 // Cap exponential growth
+			}
 			delay = s.cfg.ReconnectDelay * time.Duration(backoffFactor)
 			if delay > defaultRealtimeMaxBackoffDelay {
 				delay = defaultRealtimeMaxBackoffDelay
 			}
+			// Add ±20% jitter to prevent thundering herd on simultaneous reconnects
+			jitter := time.Duration(float64(delay) * (0.8 + 0.4*float64(time.Now().UnixNano()%100)/100.0))
+			delay = jitter
 		}
 
 		select {

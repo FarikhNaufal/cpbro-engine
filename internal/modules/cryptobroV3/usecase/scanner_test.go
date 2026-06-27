@@ -1397,8 +1397,8 @@ func TestScanner_PrefetchSlotReservation(t *testing.T) {
 	}
 	t.Logf("Parsed deferred symbols: %+v", deferred)
 
-	expectedSelected := []string{"SOLUSDT", "ADAUSDT", "ETHUSDT", "XRPUSDT"}
-	expectedDeferred := []string{"DOGEUSDT", "LTCUSDT"}
+	expectedSelected := []string{"SOLUSDT", "ADAUSDT", "DOGEUSDT", "ETHUSDT"}
+	expectedDeferred := []string{"XRPUSDT", "LTCUSDT"}
 
 	for _, sym := range expectedSelected {
 		if deferred[sym] {

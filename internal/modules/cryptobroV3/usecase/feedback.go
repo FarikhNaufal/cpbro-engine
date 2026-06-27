@@ -441,6 +441,43 @@ func watchHasTP1Achievement(item WatchJournal) bool {
 	return item.TimeToTP1 != "" || item.Status == VIRTUAL_TP1_HIT || item.Status == VIRTUAL_TP2_HIT
 }
 
+// ExtractAIAttribution returns a normalized AI attribution tag for evaluating watch outcome correlation with AI rationale.
+// Groups watch entries by their AI decision pattern to enable per-rationale performance analysis.
+func ExtractAIAttribution(item WatchJournal) string {
+	reason := strings.ToUpper(item.AIReasoning)
+
+	// Categorize by common AI reasoning patterns
+	switch {
+	case strings.Contains(reason, "VOLUME") || strings.Contains(reason, "VOL_CONFIRM"):
+		return "AI_VOLUME_CONCERN"
+	case strings.Contains(reason, "OVEREXTEND") || strings.Contains(reason, "EXHAUST"):
+		return "AI_OVEREXTENDED"
+	case strings.Contains(reason, "RETEST") || strings.Contains(reason, "WAIT_RETEST"):
+		return "AI_RETEST_REQUIRED"
+	case strings.Contains(reason, "FOLLOW_THROUGH") || strings.Contains(reason, "MOMENTUM"):
+		return "AI_MOMENTUM_CONCERN"
+	case strings.Contains(reason, "RISK") || strings.Contains(reason, "VOLATILITY"):
+		return "AI_RISK_CONCERN"
+	case strings.Contains(reason, "LATE") || strings.Contains(reason, "TIMING"):
+		return "AI_TIMING_CONCERN"
+	case strings.Contains(reason, "STRUCTURE") || strings.Contains(reason, "TREND"):
+		return "AI_STRUCTURE_CONCERN"
+	case strings.Contains(reason, "AI_ERROR") || reason == "":
+		return "AI_NO_RATIONALE"
+	default:
+		return "AI_GENERIC_WAIT"
+	}
+}
+
+// AIAttributionStats aggregates watch outcomes per AI attribution tag.
+type AIAttributionStats struct {
+	AttributionTag string
+	Total          int
+	Wins           int
+	Losses         int
+	WinRate        float64
+}
+
 func isWinningSignalOutcome(item SignalJournal, now time.Time) bool {
 	switch item.Status {
 	case TP2_HIT:

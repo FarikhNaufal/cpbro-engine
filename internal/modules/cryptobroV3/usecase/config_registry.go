@@ -73,11 +73,13 @@ func NewDefaultConfigRegistry() *ConfigRegistry {
 // In case of any read/syntax errors, it logs warnings and falls back to safe configurations.
 func LoadConfigRegistry(policyPath, playbookPath string) (*ConfigRegistry, error) {
 	registry := NewDefaultConfigRegistry()
+	auditor := GetGlobalConfigAuditor()
 
 	// 1. Load policy config
 	policyData, err := os.ReadFile(policyPath)
 	if err != nil {
 		slog.Warn("Failed to read policy config file, using code defaults", "path", policyPath, "error", err)
+		auditor.RecordConfigLoad("policy", "default-code", policyPath, "startup")
 	} else {
 		hash := sha256.Sum256(policyData)
 		registry.policyHash = fmt.Sprintf("%x", hash[:4])
@@ -85,6 +87,7 @@ func LoadConfigRegistry(policyPath, playbookPath string) (*ConfigRegistry, error
 		var policyConf PolicyProfileConfig
 		if err := json.Unmarshal(policyData, &policyConf); err != nil {
 			slog.Warn("Failed to parse policy config JSON, using code defaults", "path", policyPath, "error", err)
+			auditor.RecordConfigLoad("policy", "default-code", policyPath, "startup")
 		} else {
 			registry.policyVersion = policyConf.Version
 			if registry.policyVersion == "" {
@@ -94,6 +97,7 @@ func LoadConfigRegistry(policyPath, playbookPath string) (*ConfigRegistry, error
 			for k, v := range policyConf.Policies {
 				registry.policies[k] = validateAndClampPolicy(k, v)
 			}
+			auditor.RecordConfigLoad("policy", registry.policyVersion, policyPath, "startup")
 		}
 	}
 
@@ -101,6 +105,7 @@ func LoadConfigRegistry(policyPath, playbookPath string) (*ConfigRegistry, error
 	playbookData, err := os.ReadFile(playbookPath)
 	if err != nil {
 		slog.Warn("Failed to read playbook threshold config file, using code defaults", "path", playbookPath, "error", err)
+		auditor.RecordConfigLoad("playbook", "default-code", playbookPath, "startup")
 	} else {
 		hash := sha256.Sum256(playbookData)
 		registry.playbookHash = fmt.Sprintf("%x", hash[:4])
@@ -108,6 +113,7 @@ func LoadConfigRegistry(policyPath, playbookPath string) (*ConfigRegistry, error
 		var playbookConf PlaybookThresholdProfileConfig
 		if err := json.Unmarshal(playbookData, &playbookConf); err != nil {
 			slog.Warn("Failed to parse playbook threshold config JSON, using code defaults", "path", playbookPath, "error", err)
+			auditor.RecordConfigLoad("playbook", "default-code", playbookPath, "startup")
 		} else {
 			registry.playbookVersion = playbookConf.Version
 			if registry.playbookVersion == "" {
@@ -117,6 +123,7 @@ func LoadConfigRegistry(policyPath, playbookPath string) (*ConfigRegistry, error
 			for k, v := range playbookConf.Profiles {
 				registry.profiles[k] = validateAndClampProfile(k, v)
 			}
+			auditor.RecordConfigLoad("playbook", registry.playbookVersion, playbookPath, "startup")
 		}
 	}
 
@@ -515,8 +522,8 @@ func getDefaultProfiles() map[Playbook]PlaybookThresholdProfile {
 	return map[Playbook]PlaybookThresholdProfile{
 		TREND_PULLBACK: {
 			Playbook:                     TREND_PULLBACK,
-			MinScoreAI:                   7.0,
-			MinScoreExecute:              7.3,
+			MinScoreAI:                   6.5,
+			MinScoreExecute:              6.8,
 			MinRR:                        1.5,
 			MinADX:                       20.0,
 			RequireADX:                   true,
@@ -533,8 +540,8 @@ func getDefaultProfiles() map[Playbook]PlaybookThresholdProfile {
 		},
 		LIQUIDITY_SWEEP_REVERSAL: {
 			Playbook:                  LIQUIDITY_SWEEP_REVERSAL,
-			MinScoreAI:                7.0,
-			MinScoreExecute:           7.3,
+			MinScoreAI:                6.5,
+			MinScoreExecute:           6.8,
 			MinRR:                     1.7,
 			MinADX:                    0.0,
 			RequireADX:                false,
@@ -553,8 +560,8 @@ func getDefaultProfiles() map[Playbook]PlaybookThresholdProfile {
 		},
 		COMPRESSION_BREAKOUT_RETEST: {
 			Playbook:                 COMPRESSION_BREAKOUT_RETEST,
-			MinScoreAI:               7.0,
-			MinScoreExecute:          7.3,
+			MinScoreAI:               6.5,
+			MinScoreExecute:          6.8,
 			MinRR:                    1.6,
 			MinADX:                   0.0,
 			RequireADX:               false,
@@ -571,8 +578,8 @@ func getDefaultProfiles() map[Playbook]PlaybookThresholdProfile {
 		},
 		RANGE_EDGE_REVERSAL: {
 			Playbook:                 RANGE_EDGE_REVERSAL,
-			MinScoreAI:               7.2,
-			MinScoreExecute:          7.5,
+			MinScoreAI:               6.8,
+			MinScoreExecute:          7.0,
 			MinRR:                    1.7,
 			MinADX:                   0.0,
 			MaxADX:                   30.0,

@@ -741,8 +741,8 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 					Decision:        "WAIT",
 					IsApproved:      false,
 					Sentiment:       "NEUTRAL",
-					Confidence:      "LOW",
-					ConfidenceScore: 0.3,
+					Confidence:      "MEDIUM",
+					ConfidenceScore: 0.5,
 					Reasoning:       "AI_AUDIT_DISABLED: AI audit disabled by configuration; forcing non-executable WATCH verdict",
 					Reason:          "AI_AUDIT_DISABLED",
 					SuggestedAction: "WATCH_ONLY",
@@ -1405,7 +1405,7 @@ func resolveMarketDataPrefetchLimit(policy MarketPolicy, totalCandidates int) in
 		floor = 10
 	case HIGH_VOL:
 		floor = 10
-		hardCeiling = 20
+		hardCeiling = 30
 	case CHOP_RANGE:
 		floor = 12
 	case BTC_DOMINANCE:

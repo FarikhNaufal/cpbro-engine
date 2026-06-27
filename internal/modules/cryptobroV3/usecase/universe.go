@@ -257,7 +257,7 @@ func calculateUniverseCompositeScore(policy MarketPolicy, candidate UniverseCand
 	liquidityGatedActivity := candidate.ActivityScore * candidate.LiquidityScore
 	hotScore := 0.0
 	if candidate.IsHot {
-		hotScore = clampUniverseUnit(candidate.HotScore/100.0) * clampUniverseHotBoost(policy.HotMaxBoost) * candidate.LiquidityScore
+		hotScore = clampUniverseUnit(candidate.HotScore/100.0) * clampUniverseHotBoost(policy.HotMaxBoost)
 	}
 
 	return (candidate.LiquidityScore * liquidityWeight) +
@@ -269,19 +269,19 @@ func getUniverseRankingWeights(policy MarketPolicy) (liquidity float64, activity
 	settings := getRuntimeSettings()
 	switch policy.EffectiveRegime() {
 	case ALT_SUPPORTIVE:
-		return settings.UniverseWeightLiquidityAlt, settings.UniverseWeightActivityAlt, settings.UniverseWeightHotAlt
+		return 0.30, settings.UniverseWeightActivityAlt, 0.45
 	case COMPRESSION:
-		return settings.UniverseWeightLiquidityCompression, settings.UniverseWeightActivityCompression, settings.UniverseWeightHotCompression
+		return 0.30, settings.UniverseWeightActivityCompression, 0.45
 	case RISK_OFF:
-		return settings.UniverseWeightLiquidityRiskOff, settings.UniverseWeightActivityRiskOff, settings.UniverseWeightHotRiskOff
+		return 0.30, settings.UniverseWeightActivityRiskOff, 0.45
 	case BTC_CHAOS, HIGH_VOL:
-		return settings.UniverseWeightLiquidityChaos, settings.UniverseWeightActivityChaos, settings.UniverseWeightHotChaos
+		return 0.30, settings.UniverseWeightActivityChaos, 0.45
 	case LOW_VOL, CHOP_RANGE:
-		return settings.UniverseWeightLiquidityLowVol, settings.UniverseWeightActivityLowVol, settings.UniverseWeightHotLowVol
+		return 0.30, settings.UniverseWeightActivityLowVol, 0.45
 	case BTC_DOMINANCE:
-		return settings.UniverseWeightLiquidityDominance, settings.UniverseWeightActivityDominance, settings.UniverseWeightHotDominance
+		return 0.30, settings.UniverseWeightActivityDominance, 0.45
 	default:
-		return settings.UniverseWeightLiquidityDefault, settings.UniverseWeightActivityDefault, settings.UniverseWeightHotDefault
+		return 0.30, settings.UniverseWeightActivityDefault, 0.45
 	}
 }
 

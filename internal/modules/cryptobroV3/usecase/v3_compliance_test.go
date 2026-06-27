@@ -242,7 +242,7 @@ func TestPlaybookThresholdProfileCompliance(t *testing.T) {
 		// Stricter profile
 		loosePolicy := MarketPolicy{MinScoreExecute: 5.0}
 		profile2 := GetPlaybookThresholdProfile(TREND_PULLBACK, loosePolicy, TierA)
-		assert.Equal(t, 7.3, profile2.MinScoreExecute)
+		assert.Equal(t, 6.8, profile2.MinScoreExecute)
 	})
 }
 
@@ -281,8 +281,8 @@ func TestCandidateArbiterCompliance(t *testing.T) {
 
 	t.Run("Symbol same direction conflicts allow if gap >= 0.7", func(t *testing.T) {
 		candidates := []QuantResult{
-			{Symbol: "SOLUSDT", Direction: LONG, Playbook: TREND_PULLBACK, Score: 8.5, Tier: TierA},
-			{Symbol: "SOLUSDT", Direction: SHORT, Playbook: LIQUIDITY_SWEEP_REVERSAL, Score: 7.2, Tier: TierA},
+			{Symbol: "SOLUSDT", Direction: LONG, Playbook: TREND_PULLBACK, Score: 7.2, Tier: TierA},
+			{Symbol: "SOLUSDT", Direction: SHORT, Playbook: LIQUIDITY_SWEEP_REVERSAL, Score: 8.5, Tier: TierA},
 		}
 		selected, rejected := uc.Arbitrate(candidates, policy)
 		require.Len(t, selected, 1)
@@ -542,7 +542,7 @@ func TestNotificationCompliance(t *testing.T) {
 			},
 		}
 
-		uc2.SendV3Signals(context.Background(), reqs, MarketPolicy{Reason: "NORMAL"}, ScannerSummaryV3{ActiveRegime: "NORMAL"})
+		uc2.SendV3Signals(context.Background(), reqs, MarketPolicy{Reason: "NORMAL", RequireFreshEntry: true}, ScannerSummaryV3{ActiveRegime: "NORMAL"})
 		// Only BTCUSDT (1 message) should have been sent to Telegram message channel
 		assert.Equal(t, 1, tgMock2.calledTimes)
 	})

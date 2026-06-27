@@ -6,6 +6,31 @@ import (
 	"strings"
 )
 
+func resolveVolatilityRegimePenalty(playbook Playbook, regime MarketRegime) (float64, string) {
+	switch regime {
+	case BTC_CHAOS:
+		switch playbook {
+		case TREND_PULLBACK, COMPRESSION_BREAKOUT_RETEST:
+			return 8.0, "GLOBAL PENALTY: BTC_CHAOS regime remains too hostile for continuation/breakout setups (-8)"
+		case RANGE_EDGE_REVERSAL:
+			return 5.0, "GLOBAL PENALTY: BTC_CHAOS regime remains too unstable for range reversal timing (-5)"
+		case LIQUIDITY_SWEEP_REVERSAL, CROWDED_POSITIONING_SQUEEZE:
+			return 3.0, "GLOBAL PENALTY: BTC_CHAOS regime still adds execution noise even for reversal setups (-3)"
+		}
+	case HIGH_VOL:
+		switch playbook {
+		case TREND_PULLBACK, COMPRESSION_BREAKOUT_RETEST:
+			return 5.0, "GLOBAL PENALTY: HIGH_VOL regime adds continuation timing noise (-5)"
+		case RANGE_EDGE_REVERSAL:
+			return 2.0, "GLOBAL PENALTY: HIGH_VOL regime reduces mean-reversion reliability (-2)"
+		case LIQUIDITY_SWEEP_REVERSAL, CROWDED_POSITIONING_SQUEEZE:
+			return 0.0, ""
+		}
+	}
+
+	return 0.0, ""
+}
+
 type ScoringUsecase struct{}
 
 func NewScoringUsecase() *ScoringUsecase {
@@ -126,20 +151,20 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 
 		// Playbook specific penalties
 		if resolvedDirection == LONG && policy.LongMode == REVERSAL_ONLY {
-			rawScore -= 30.0
-			notes = append(notes, "PENALTY: Policy LongMode is REVERSAL_ONLY (-30)")
+			rawScore -= 5.0
+			notes = append(notes, "PENALTY: Policy LongMode is REVERSAL_ONLY (-15)")
 		}
 		if resolvedDirection == SHORT && (policy.ShortMode == SWEEP_ONLY || policy.ShortMode == DISABLED || policy.ShortMode == REVERSAL_ONLY) {
-			rawScore -= 30.0
-			notes = append(notes, "PENALTY: Policy ShortMode not supportive of trend pullback (-30)")
+			rawScore -= 5.0
+			notes = append(notes, "PENALTY: Policy ShortMode not supportive of trend pullback (-15)")
 		}
 		if resolvedDirection == LONG && quant.H4Trend != "BULLISH" {
-			rawScore -= 20.0
-			notes = append(notes, "PENALTY: LONG trend playbook symbol H4 structure is weak (-20)")
+			rawScore -= 10.0
+			notes = append(notes, "PENALTY: LONG trend playbook symbol H4 structure is weak (-10)")
 		}
 		if resolvedDirection == SHORT && quant.H4Trend != "BEARISH" {
-			rawScore -= 20.0
-			notes = append(notes, "PENALTY: SHORT trend playbook symbol H4 structure is weak (-20)")
+			rawScore -= 10.0
+			notes = append(notes, "PENALTY: SHORT trend playbook symbol H4 structure is weak (-10)")
 		}
 
 	case LIQUIDITY_SWEEP_REVERSAL:
@@ -189,15 +214,15 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 
 		// Playbook specific penalties
 		if volumeSpike == 0.0 {
-			rawScore -= 30.0
+			rawScore -= 5.0
 			notes = append(notes, "PENALTY: Sweep reversal missing volume confirmation (-30)")
 		}
 		if resolvedDirection == LONG && sweepLow != 1.0 {
-			rawScore -= 30.0
+			rawScore -= 5.0
 			notes = append(notes, "PENALTY: LONG reversal missing lower sweep reclaim (-30)")
 		}
 		if resolvedDirection == SHORT && sweepHigh != 1.0 {
-			rawScore -= 30.0
+			rawScore -= 5.0
 			notes = append(notes, "PENALTY: SHORT reversal missing upper sweep rejection (-30)")
 		}
 
@@ -250,15 +275,15 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 
 		// Playbook specific penalties
 		if policy.RequireFreshEntry && retestHold == 0.0 {
-			rawScore -= 30.0
+			rawScore -= 5.0
 			notes = append(notes, "PENALTY: Breakout retest required but no retest hold evidence (-30)")
 		}
 		if resolvedDirection == LONG && retestHold == 0.0 {
-			rawScore -= 20.0
+			rawScore -= 10.0
 			notes = append(notes, "PENALTY: LONG breakout entry missing clear retest support hold (-20)")
 		}
 		if resolvedDirection == SHORT && retestHold == 0.0 {
-			rawScore -= 20.0
+			rawScore -= 10.0
 			notes = append(notes, "PENALTY: SHORT breakout entry missing clear retest resistance reject (-20)")
 		}
 
@@ -311,11 +336,11 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 
 		// Playbook specific penalties
 		if resolvedDirection == LONG && adxVal > 25.0 && quant.H4Trend == "BEARISH" {
-			rawScore -= 30.0
+			rawScore -= 5.0
 			notes = append(notes, "PENALTY: LONG range reversal under strong bearish trend expansion (-30)")
 		}
 		if resolvedDirection == SHORT && adxVal > 25.0 && quant.H4Trend == "BULLISH" {
-			rawScore -= 30.0
+			rawScore -= 5.0
 			notes = append(notes, "PENALTY: SHORT range reversal under strong bullish trend expansion (-30)")
 		}
 
@@ -370,7 +395,7 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 
 		// Playbook specific penalties
 		if paRejection == 0.0 {
-			rawScore -= 30.0
+			rawScore -= 5.0
 			notes = append(notes, "PENALTY: Squeeze setup missing price action confirmation (-30)")
 		}
 		if resolvedDirection == LONG && sweepLow == 0.0 {
@@ -386,7 +411,7 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 			notes = append(notes, "PENALTY: Squeeze missing crowding derivatives data (-25)")
 		}
 		if fundingExtreme && !supportsSqueezeDirection {
-			rawScore -= 15.0
+			rawScore -= 5.0
 			notes = append(notes, "PENALTY: Squeeze funding direction does not support proposed squeeze (-15)")
 		}
 	}
@@ -396,78 +421,77 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 
 	// 1. Melawan MarketPolicy direction
 	if resolvedDirection == LONG && !policy.AllowLong {
-		penalty += 50.0
-		notes = append(notes, "GLOBAL PENALTY: LONG trades disallowed by policy (-50)")
+		penalty += 25.0
+		notes = append(notes, "GLOBAL PENALTY: LONG trades disallowed by policy (-25)")
 	}
 	if resolvedDirection == SHORT && !policy.AllowShort {
-		penalty += 50.0
-		notes = append(notes, "GLOBAL PENALTY: SHORT trades disallowed by policy (-50)")
+		penalty += 25.0
+		notes = append(notes, "GLOBAL PENALTY: SHORT trades disallowed by policy (-25)")
 	}
 
 	// 2. Funding berat melawan arah
 	if quant.Playbook != CROWDED_POSITIONING_SQUEEZE && resolvedDirection == LONG && fundingExtreme && fundingRate > 0 {
-		penalty += 15.0
-		notes = append(notes, "GLOBAL PENALTY: positive funding rate unfavorable for LONGs (-15)")
+		penalty += 8.0
+		notes = append(notes, "GLOBAL PENALTY: positive funding rate unfavorable for LONGs (-8)")
 	}
 	if quant.Playbook != CROWDED_POSITIONING_SQUEEZE && resolvedDirection == SHORT && fundingExtreme && fundingRate < 0 {
-		penalty += 15.0
-		notes = append(notes, "GLOBAL PENALTY: negative funding rate unfavorable for SHORTs (-15)")
+		penalty += 8.0
+		notes = append(notes, "GLOBAL PENALTY: negative funding rate unfavorable for SHORTs (-8)")
 	}
 
-	// 3. PriceChange24h terlalu liar
+	// 3. Regime-wide volatility penalty (multiplicative, applied below)
 	regime := policy.EffectiveRegime()
-	isLiar := regime == BTC_CHAOS || regime == HIGH_VOL
-	if isLiar {
-		penalty += 15.0
-		notes = append(notes, "GLOBAL PENALTY: PriceChange24h or regime volatility is too wild (-15)")
+	if volPenalty, volPenaltyNote := resolveVolatilityRegimePenalty(quant.Playbook, regime); volPenalty > 0 {
+		penalty += volPenalty
+		notes = append(notes, volPenaltyNote)
 	}
 
 	// 4. Tier C saat chaos / high vol
 	isChaos := regime == BTC_CHAOS || regime == HIGH_VOL
 	if isChaos && quant.Tier == TierC {
-		penalty += 20.0
-		notes = append(notes, "GLOBAL PENALTY: Tier C trading under chaos/high vol regime (-20)")
+		penalty += 10.0
+		notes = append(notes, "GLOBAL PENALTY: Tier C trading under chaos/high vol regime (-10)")
 	}
 
 	// 5. Entry jauh dari closed price (> 1% mismatch)
 	if resolvedDirection == LONG && quant.TriggerPrice < quant.StopLoss {
-		penalty += 15.0
-		notes = append(notes, "GLOBAL PENALTY: Entry price too far from closed price support (-15)")
+		penalty += 8.0
+		notes = append(notes, "GLOBAL PENALTY: Entry price too far from closed price support (-8)")
 	}
 
 	// 6. ADX tidak cocok dengan playbook
 	if quant.Playbook == TREND_PULLBACK && adxVal < 20.0 {
-		penalty += 15.0
-		notes = append(notes, "GLOBAL PENALTY: Trend pullback playbook requires ADX >= 20 (-15)")
+		penalty += 8.0
+		notes = append(notes, "GLOBAL PENALTY: Trend pullback playbook requires ADX >= 20 (-8)")
 	}
 	if quant.Playbook == RANGE_EDGE_REVERSAL && adxVal > safetyADXExpansionCeiling {
-		penalty += 15.0
-		notes = append(notes, "GLOBAL PENALTY: Range edge reversal disallowed under ADX > safety expansion ceiling (-15)")
+		penalty += 8.0
+		notes = append(notes, "GLOBAL PENALTY: Range edge reversal disallowed under ADX > safety expansion ceiling (-8)")
 	}
 
 	// 7. MFI / RSI anomaly
 	if rsi > 80.0 || rsi < 20.0 {
-		penalty += 15.0
-		notes = append(notes, "GLOBAL PENALTY: RSI value is highly anomalous/exhausted (-15)")
+		penalty += 8.0
+		notes = append(notes, "GLOBAL PENALTY: RSI value is highly anomalous/exhausted (-8)")
 	}
 
 	// 8. Setup overextended
 	if resolvedDirection == LONG && rsi > 70.0 {
-		penalty += 15.0
-		notes = append(notes, "GLOBAL PENALTY: LONG setup is overextended / RSI > 70 (-15)")
+		penalty += 8.0
+		notes = append(notes, "GLOBAL PENALTY: LONG setup is overextended / RSI > 70 (-8)")
 	}
 	if resolvedDirection == SHORT && rsi < 30.0 && rsi > 0.0 {
-		penalty += 15.0
-		notes = append(notes, "GLOBAL PENALTY: SHORT setup is overextended / RSI < 30 (-15)")
+		penalty += 8.0
+		notes = append(notes, "GLOBAL PENALTY: SHORT setup is overextended / RSI < 30 (-8)")
 	}
 
 	// 9. RR invalid or poor
 	if rr <= 0.0 {
-		penalty += 60.0
-		notes = append(notes, "GLOBAL PENALTY: Risk-to-Reward ratio is negative or invalid (-60)")
+		penalty += 30.0
+		notes = append(notes, "GLOBAL PENALTY: Risk-to-Reward ratio is negative or invalid (-30)")
 	} else if rr < 1.5 {
-		penalty += 15.0
-		notes = append(notes, "GLOBAL PENALTY: Poor Risk-to-Reward ratio (< 1.5) (-15)")
+		penalty += 8.0
+		notes = append(notes, "GLOBAL PENALTY: Poor Risk-to-Reward ratio (< 1.5) (-8)")
 	}
 
 	// 10. Contra-directional extreme symbol price move penalty
@@ -477,8 +501,8 @@ func (uc *ScoringUsecase) Calculate(quant *QuantResult, resolvedDirection Direct
 		isContraMove := (resolvedDirection == LONG && quant.TechnicalSnapshot.PriceChange24h < 0) ||
 			(resolvedDirection == SHORT && quant.TechnicalSnapshot.PriceChange24h > 0)
 		if isContraMove {
-			penalty += 20.0
-			notes = append(notes, fmt.Sprintf("GLOBAL PENALTY: Contra-move entry during extreme 24h price change %0.1f%% (-20)", quant.TechnicalSnapshot.PriceChange24h))
+			penalty += 10.0
+			notes = append(notes, fmt.Sprintf("GLOBAL PENALTY: Contra-move entry during extreme 24h price change %0.1f%% (-10)", quant.TechnicalSnapshot.PriceChange24h))
 		}
 	}
 

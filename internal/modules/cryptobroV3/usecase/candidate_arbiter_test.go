@@ -66,26 +66,26 @@ func TestCandidateArbiter_OpposingDirectionConflict(t *testing.T) {
 			Symbol:    "ETHUSDT",
 			Direction: LONG,
 			Playbook:  TREND_PULLBACK,
-			Score:     8.2,
+			Score:     7.0,
 			Tier:      TierA,
 		},
 		{
 			Symbol:    "ETHUSDT",
 			Direction: SHORT,
 			Playbook:  TREND_PULLBACK,
-			Score:     7.3, // Score difference is 0.9 (>= 0.7)
+			Score:     9.0, // Higher score but lower calibrated EV
 			Tier:      TierA,
 		},
 	}
 
-	// LONG should win since score difference is >= 0.7
+	// LONG should win by EV-based arbitration (score 7.0 has higher calibrated win rate than 9.0)
 	selected, rejected := arbiter.Arbitrate(candidates, policy)
 
 	if len(selected) != 1 {
 		t.Fatalf("Expected 1 selected candidate, got %d", len(selected))
 	}
 	if selected[0].Direction != LONG {
-		t.Errorf("Expected LONG direction to win, got %s", selected[0].Direction)
+		t.Errorf("Expected LONG direction to win by EV, got %s", selected[0].Direction)
 	}
 	if len(rejected) != 1 {
 		t.Fatalf("Expected 1 rejected candidate, got %d", len(rejected))

@@ -179,6 +179,9 @@ type MarketPolicy struct {
 	MinADXExecute          float64      `json:"min_adx_execute"`
 	RequireAIConfidence    AIConfidence `json:"require_ai_confidence"`
 	RequireFreshEntry      bool         `json:"require_fresh_entry"`
+	AllowLateStaleness     bool         `json:"allow_late_staleness"`
+	AllowAIQuotaWatch      bool         `json:"allow_ai_quota_watch"`
+	AllowAIDisabledWatch   bool         `json:"allow_ai_disabled_watch"`
 	StalenessATRMultiplier float64      `json:"staleness_atr_multiplier"`
 	CooldownMinutes        int          `json:"cooldown_minutes"`
 	BtcTrend               string       `json:"btc_trend"`

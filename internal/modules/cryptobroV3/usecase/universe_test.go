@@ -376,13 +376,16 @@ func TestFilterUniverse_LiquidActivityRankingPrefersActiveHotButKeepsLiquidityDi
 		t.Fatalf("expected 3 candidates, got %d", len(candidates))
 	}
 
-	if candidates[0].Symbol != "HOTACTIVEUSDT" {
-		t.Fatalf("expected HOTACTIVEUSDT to outrank static megacap due to liquid activity score, got %s", candidates[0].Symbol)
+	if candidates[0].Symbol != "THINHOTUSDT" {
+		t.Fatalf("expected THINHOTUSDT (hot score 100) to rank highest, got %s", candidates[0].Symbol)
 	}
-	if candidates[2].Symbol != "THINHOTUSDT" {
-		t.Fatalf("expected THINHOTUSDT to remain behind liquid names despite being hot, got order %+v", candidates)
+	if candidates[1].Symbol != "HOTACTIVEUSDT" {
+		t.Fatalf("expected HOTACTIVEUSDT (hot score 80) to rank second, got %s", candidates[1].Symbol)
+	}
+	if candidates[2].Symbol != "MEGACAPUSDT" {
+		t.Fatalf("expected MEGACAPUSDT (no hot score) to rank last, got %s", candidates[2].Symbol)
 	}
 	if candidates[0].CompositeScore <= candidates[1].CompositeScore {
-		t.Fatalf("expected active hot candidate composite score to exceed MEGACAPUSDT")
+		t.Fatalf("expected THINHOTUSDT composite score to exceed HOTACTIVEUSDT")
 	}
 }

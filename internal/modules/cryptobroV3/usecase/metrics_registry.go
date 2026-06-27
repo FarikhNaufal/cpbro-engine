@@ -53,6 +53,10 @@ type MetricsRegistry struct {
 	EvalRecCount                  uint64
 	GateBugCount                  uint64
 
+	// Rule-level metrics (protected by mu)
+	ruleRejectCount map[string]uint64
+	ruleWatchCount  map[string]uint64
+
 	// Timestamp trackers
 	LastScanTime               time.Time
 	LastSuccessScan            time.Time
@@ -316,4 +320,45 @@ func (m *MetricsRegistry) GetStalenessRate() float64 {
 	}
 	stale := atomic.LoadUint64(&m.StalenessCount)
 	return float64(stale) / float64(checked)
+}
+
+func (m *MetricsRegistry) initRuleMaps() {
+	if m.ruleRejectCount == nil {
+		m.ruleRejectCount = make(map[string]uint64)
+	}
+	if m.ruleWatchCount == nil {
+		m.ruleWatchCount = make(map[string]uint64)
+	}
+}
+
+func (m *MetricsRegistry) IncrementRuleReject(layer string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.initRuleMaps()
+	m.ruleRejectCount[layer]++
+}
+
+func (m *MetricsRegistry) IncrementRuleWatch(layer string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.initRuleMaps()
+	m.ruleWatchCount[layer]++
+}
+
+func (m *MetricsRegistry) GetRuleRejectCount(layer string) uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.ruleRejectCount == nil {
+		return 0
+	}
+	return m.ruleRejectCount[layer]
+}
+
+func (m *MetricsRegistry) GetRuleWatchCount(layer string) uint64 {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.ruleWatchCount == nil {
+		return 0
+	}
+	return m.ruleWatchCount[layer]
 }

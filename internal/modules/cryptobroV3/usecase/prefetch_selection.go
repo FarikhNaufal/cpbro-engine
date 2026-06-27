@@ -1,6 +1,9 @@
 package usecase
 
-import "math"
+import (
+	"math"
+	"sort"
+)
 
 type prefetchSelectionDebug struct {
 	HotSlots      int
@@ -27,6 +30,16 @@ func selectPrefetchCandidates(candidates []UniverseCandidate, prefetchLimit int,
 		}
 	}
 
+	// Hot-first: sort hot candidates by HotScore descending (highest hot score first)
+	sort.SliceStable(hotCandidates, func(i, j int) bool {
+		return hotCandidates[i].HotScore > hotCandidates[j].HotScore
+	})
+
+	// Sort rotation by activity score descending
+	sort.SliceStable(rotationCandidates, func(i, j int) bool {
+		return rotationCandidates[i].ActivityScore > rotationCandidates[j].ActivityScore
+	})
+
 	selected := make([]UniverseCandidate, 0, prefetchLimit)
 	selectedMap := make(map[string]struct{}, prefetchLimit)
 
@@ -41,12 +54,13 @@ func selectPrefetchCandidates(candidates []UniverseCandidate, prefetchLimit int,
 		selectedMap[candidate.Symbol] = struct{}{}
 	}
 
+	// Hot-first pipeline: allocate more slots to hot symbols (45% by default instead of 25%)
 	ratio := policy.HotPrefetchSlotRatio
 	if ratio <= 0 {
-		ratio = 0.25
+		ratio = 0.45 // Increased from 0.25 to prioritize hot coins
 	}
 	debug.HotSlots = int(math.Round(float64(prefetchLimit) * ratio))
-	if debug.HotSlots < 1 && len(hotCandidates) > 0 && prefetchLimit >= 3 {
+	if debug.HotSlots < 1 && len(hotCandidates) > 0 {
 		debug.HotSlots = 1
 	}
 	if debug.HotSlots > len(hotCandidates) {
@@ -55,6 +69,7 @@ func selectPrefetchCandidates(candidates []UniverseCandidate, prefetchLimit int,
 
 	debug.RotationSlots = resolveRotationPrefetchSlots(policy, prefetchLimit, len(rotationCandidates))
 
+	// Hot-first: allocate hot slots BEFORE rotation slots
 	for i := 0; i < debug.HotSlots; i++ {
 		candidate := hotCandidates[i]
 		candidate.HotOverlaySelected = true
@@ -65,6 +80,7 @@ func selectPrefetchCandidates(candidates []UniverseCandidate, prefetchLimit int,
 		appendIfMissing(rotationCandidates[i])
 	}
 
+	// Fill remaining with general candidates sorted by composite score (already sorted from universe)
 	for _, candidate := range candidates {
 		appendIfMissing(candidate)
 	}

@@ -55,7 +55,7 @@ func getRequireFreshEntryForExecute() bool {
 func effectiveRequiredAIConfidence(policy MarketPolicy, profile PlaybookThresholdProfile) AIConfidence {
 	required := policy.RequireAIConfidence
 	if required == "" {
-		required = AIConfidenceMedium
+		required = AIConfidenceHigh
 	}
 	if profile.RequireAIHigh {
 		return AIConfidenceHigh
@@ -66,7 +66,7 @@ func effectiveRequiredAIConfidence(policy MarketPolicy, profile PlaybookThreshol
 func effectiveRequiredAIConfidenceForPolicy(policy MarketPolicy) AIConfidence {
 	required := policy.RequireAIConfidence
 	if required == "" {
-		required = AIConfidenceMedium
+		required = AIConfidenceHigh
 	}
 	return required
 }
