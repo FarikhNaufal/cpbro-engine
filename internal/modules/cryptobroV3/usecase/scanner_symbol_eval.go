@@ -46,7 +46,7 @@ func (uc *ScannerUsecase) evaluateSelectedCandidate(
 		decision := "REJECT"
 		reason := "LOCAL_GATE_FAILED"
 		if localGateResult.Status == LOCAL_WATCH {
-			decision = "WAIT"
+			decision = ""
 			reason = "LOCAL_GATE_WATCH"
 		}
 		resolvedAudit = dto.AIAuditResponse{
@@ -66,7 +66,7 @@ func (uc *ScannerUsecase) evaluateSelectedCandidate(
 			resolvedAudit = dto.AIAuditResponse{
 				Symbol:     pair,
 				IsApproved: false,
-				Decision:   "WAIT",
+				Decision:   "",
 				Sentiment:  "NEUTRAL",
 				Reasoning:  "AI_SKIPPED: Exceeded policy MaxAICandidates quota limit",
 				Reason:     "AI_SKIPPED",

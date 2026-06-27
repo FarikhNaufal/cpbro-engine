@@ -8,26 +8,41 @@ type RolloutReadiness struct {
 }
 
 type HealthResponse struct {
-	AppName                  string           `json:"app_name"`
-	AppVersion               string           `json:"app_version"`
-	AppEnv                   string           `json:"app_env"`
-	Mode                     string           `json:"mode"`
-	AlertOnly                bool             `json:"alert_only"`
-	BinanceReadOnly          bool             `json:"binance_read_only"`
-	ScannerRunning           bool             `json:"scanner_running"`
-	LastScanTime             string           `json:"last_scan_time"`
-	LastEvaluationTime       string           `json:"last_evaluation_time"`
-	StorageAvailable         bool             `json:"storage_available"`
-	SwaggerEnabled           bool             `json:"swagger_enabled,omitempty"`
-	UptimeSeconds            float64          `json:"uptime_seconds,omitempty"`
-	Status                   string           `json:"status"`
-	Warnings                 []string         `json:"warnings,omitempty"`
-	WebsocketEnabled         bool             `json:"websocket_enabled,omitempty"`
-	WebsocketConnected       bool             `json:"websocket_connected,omitempty"`
-	WebsocketActiveSymbols   int              `json:"websocket_active_symbols,omitempty"`
-	WebsocketLastMessageTime string           `json:"websocket_last_message_time,omitempty"`
-	RolloutReadiness         RolloutReadiness `json:"rollout_readiness,omitempty"`
-	SafeConfig               map[string]any   `json:"safe_config,omitempty"`
+	AppName                  string                `json:"app_name"`
+	AppVersion               string                `json:"app_version"`
+	AppEnv                   string                `json:"app_env"`
+	Mode                     string                `json:"mode"`
+	AlertOnly                bool                  `json:"alert_only"`
+	BinanceReadOnly          bool                  `json:"binance_read_only"`
+	ScannerRunning           bool                  `json:"scanner_running"`
+	LastScanTime             string                `json:"last_scan_time"`
+	LastEvaluationTime       string                `json:"last_evaluation_time"`
+	StorageAvailable         bool                  `json:"storage_available"`
+	SwaggerEnabled           bool                  `json:"swagger_enabled,omitempty"`
+	UptimeSeconds            float64               `json:"uptime_seconds,omitempty"`
+	Status                   string                `json:"status"`
+	Warnings                 []string              `json:"warnings,omitempty"`
+	WebsocketEnabled         bool                  `json:"websocket_enabled,omitempty"`
+	WebsocketConnected       bool                  `json:"websocket_connected,omitempty"`
+	WebsocketActiveSymbols   int                   `json:"websocket_active_symbols,omitempty"`
+	WebsocketLastMessageTime string                `json:"websocket_last_message_time,omitempty"`
+	RolloutReadiness         RolloutReadiness      `json:"rollout_readiness,omitempty"`
+	LatestSnapshot           *HealthLatestSnapshot `json:"latest_snapshot,omitempty"`
+	SafeConfig               map[string]any        `json:"safe_config,omitempty"`
+}
+
+type HealthLatestSnapshot struct {
+	GeneratedAt                     string   `json:"generated_at,omitempty"`
+	ScanID                          string   `json:"scan_id,omitempty"`
+	MarketRegime                    string   `json:"market_regime,omitempty"`
+	MarketPolicy                    string   `json:"market_policy,omitempty"`
+	MacroVolatility                 string   `json:"macro_volatility,omitempty"`
+	MarketBreadth                   float64  `json:"market_breadth,omitempty"`
+	ActivePolicyLongMode            string   `json:"active_policy_long_mode,omitempty"`
+	ActivePolicyShortMode           string   `json:"active_policy_short_mode,omitempty"`
+	ActivePolicyRequireAIConfidence string   `json:"active_policy_require_ai_confidence,omitempty"`
+	ActivePolicyRequireFreshEntry   bool     `json:"active_policy_require_fresh_entry,omitempty"`
+	ActivePolicyAllowedPlaybooks    []string `json:"active_policy_allowed_playbooks,omitempty"`
 }
 
 type Signal struct {

@@ -192,18 +192,20 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 	t.Run("Fail Staleness LATE is WATCH", func(t *testing.T) {
 		st := baseStaleness
 		st.Status = LATE
+		pol := policy
+		pol.RequireFreshEntry = true
 
-		res := uc.Evaluate(baseQuant, baseLocalGate, baseAI, basePlanReview, st, policy, 50000, nil, nil, nil)
+		res := uc.Evaluate(baseQuant, baseLocalGate, baseAI, basePlanReview, st, pol, 50000, nil, nil, nil)
 		if res.Status != FINAL_WATCH {
 			t.Errorf("expected status %s, got %s", FINAL_WATCH, res.Status)
 		}
 	})
 
-	t.Run("Policy medium AI can execute when global HIGH override is disabled", func(t *testing.T) {
+	t.Run("Policy medium AI remains executable even if legacy global HIGH flag is enabled", func(t *testing.T) {
 		original := getRuntimeSettings()
 		t.Cleanup(func() { SetRuntimeSettings(original) })
 		settings := original
-		settings.RequireAIHighForExecute = false
+		settings.RequireAIHighForExecute = true
 		SetRuntimeSettings(settings)
 		pol := policy
 		pol.RequireAIConfidence = AIConfidenceMedium
@@ -216,11 +218,11 @@ func TestFinalGateUsecase_Evaluate(t *testing.T) {
 		}
 	})
 
-	t.Run("Policy allows LATE entry when global fresh override is disabled", func(t *testing.T) {
+	t.Run("Policy allows LATE entry even if legacy global fresh flag is enabled", func(t *testing.T) {
 		original := getRuntimeSettings()
 		t.Cleanup(func() { SetRuntimeSettings(original) })
 		settings := original
-		settings.RequireFreshEntryForExecute = false
+		settings.RequireFreshEntryForExecute = true
 		SetRuntimeSettings(settings)
 		pol := policy
 		pol.RequireFreshEntry = false

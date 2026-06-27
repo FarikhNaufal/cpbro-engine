@@ -6,7 +6,7 @@ import (
 	"cpbro-engine/internal/modules/cryptobroV3/entity"
 )
 
-func TestApplyPolicySnapshotToLatestResult_UsesEffectiveExecutionFlags(t *testing.T) {
+func TestApplyPolicySnapshotToLatestResult_UsesPolicyExecutionFlags(t *testing.T) {
 	original := SnapshotRuntimeSettings()
 	t.Cleanup(func() { SetRuntimeSettings(original) })
 
@@ -20,17 +20,17 @@ func TestApplyPolicySnapshotToLatestResult_UsesEffectiveExecutionFlags(t *testin
 		LongMode:            NORMAL,
 		ShortMode:           SWEEP_ONLY,
 		RequireAIConfidence: AIConfidenceMedium,
-		RequireFreshEntry:   false,
+		RequireFreshEntry:   true,
 		AllowedPlaybooks:    []Playbook{TREND_PULLBACK, LIQUIDITY_SWEEP_REVERSAL},
 	}
 
 	applyPolicySnapshotToLatestResult(latest, policy)
 
-	if latest.ActivePolicyRequireAIConfidence != string(AIConfidenceHigh) {
-		t.Fatalf("expected effective AI confidence HIGH, got %s", latest.ActivePolicyRequireAIConfidence)
+	if latest.ActivePolicyRequireAIConfidence != string(AIConfidenceMedium) {
+		t.Fatalf("expected policy AI confidence MEDIUM without global override, got %s", latest.ActivePolicyRequireAIConfidence)
 	}
 	if !latest.ActivePolicyRequireFreshEntry {
-		t.Fatal("expected effective fresh-entry requirement to be true")
+		t.Fatal("expected policy fresh-entry requirement to remain true")
 	}
 	if latest.ActivePolicyShortMode != string(SWEEP_ONLY) {
 		t.Fatalf("expected short mode snapshot, got %s", latest.ActivePolicyShortMode)

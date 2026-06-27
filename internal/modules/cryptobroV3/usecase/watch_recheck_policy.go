@@ -55,7 +55,7 @@ func resolveWatchRecheckPolicy() watchRecheckPolicy {
 
 	allowedReasonTokens := normalizeWatchRecheckTokens(settings.WatchRecheckAllowedReasonTokens)
 	if len(allowedReasonTokens) == 0 {
-		allowedReasonTokens = []string{"AI DECISION IS WAIT", "AI_SKIPPED", "WATCH_ONLY", "WAIT_RETEST", "AI CONFIDENCE", "LOCAL_GATE_WATCH", "M5"}
+		allowedReasonTokens = []string{"AI DECISION IS WAIT", "WATCH_ONLY", "WAIT_RETEST", "AI CONFIDENCE", "LOCAL GATE STATUS IS LOCAL_WATCH", "AI CANDIDATE SKIPPED DUE POLICY MAXAICANDIDATES QUOTA", "M5"}
 	}
 	blockedReasonTokens := normalizeWatchRecheckTokens(settings.WatchRecheckBlockedReasonTokens)
 	if len(blockedReasonTokens) == 0 {

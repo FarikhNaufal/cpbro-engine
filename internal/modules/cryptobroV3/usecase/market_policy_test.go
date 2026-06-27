@@ -29,11 +29,13 @@ func TestEvaluatePolicy_HighVolExcludesCompressionBreakout(t *testing.T) {
 	}
 
 	expected := map[Playbook]bool{
-		LIQUIDITY_SWEEP_REVERSAL: true,
-		TREND_PULLBACK:           true,
+		LIQUIDITY_SWEEP_REVERSAL:    true,
+		TREND_PULLBACK:              true,
+		RANGE_EDGE_REVERSAL:         true,
+		CROWDED_POSITIONING_SQUEEZE: true,
 	}
 	if len(policy.AllowedPlaybooks) != len(expected) {
-		t.Fatalf("expected %d HIGH_VOL playbooks, got %d", len(expected), len(policy.AllowedPlaybooks))
+		t.Fatalf("expected %d HIGH_VOL playbooks after compression exclusion, got %d", len(expected), len(policy.AllowedPlaybooks))
 	}
 	for _, playbook := range policy.AllowedPlaybooks {
 		if !expected[playbook] {

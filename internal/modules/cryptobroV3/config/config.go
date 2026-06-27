@@ -407,15 +407,15 @@ func LoadConfigFromEnv() (*Config, error) {
 			WeightHotDominance:         getEnvFloat("UNIVERSE_WEIGHT_HOT_DOMINANCE", 0.15),
 		},
 		Strategy: StrategyRuntimeConfig{
-			RequireAIHighForExecute:                  getEnvBoolWithFallback("STRATEGY_REQUIRE_AI_HIGH_FOR_EXECUTE", "REQUIRE_AI_HIGH_FOR_EXECUTE", true),
-			RequireFreshEntryForExecute:              getEnvBoolWithFallback("STRATEGY_REQUIRE_FRESH_ENTRY_FOR_EXECUTE", "REQUIRE_FRESH_ENTRY_FOR_EXECUTE", true),
+			RequireAIHighForExecute:                  getEnvBoolWithFallback("STRATEGY_REQUIRE_AI_HIGH_FOR_EXECUTE", "REQUIRE_AI_HIGH_FOR_EXECUTE", false),
+			RequireFreshEntryForExecute:              getEnvBoolWithFallback("STRATEGY_REQUIRE_FRESH_ENTRY_FOR_EXECUTE", "REQUIRE_FRESH_ENTRY_FOR_EXECUTE", false),
 			WatchCooldownMinutes:                     getEnvIntWithFallback("STRATEGY_WATCH_COOLDOWN_MINUTES", "WATCH_COOLDOWN_MINUTES", 30),
 			WatchDedupPriceToleranceBps:              getEnvIntWithFallback("STRATEGY_WATCH_DEDUP_PRICE_TOLERANCE_BPS", "WATCH_DEDUP_PRICE_TOLERANCE_BPS", 50),
 			WatchRecheckBoundaryMinutes:              getEnvInt("STRATEGY_WATCH_RECHECK_BOUNDARY_MINUTES", 5),
 			WatchRecheckMaxAgeMinutes:                getEnvInt("STRATEGY_WATCH_RECHECK_MAX_AGE_MINUTES", 12),
 			WatchRecheckBatchLimit:                   getEnvInt("STRATEGY_WATCH_RECHECK_BATCH_LIMIT", 6),
 			WatchRecheckAllowedPlaybooks:             getEnvCSV("STRATEGY_WATCH_RECHECK_ALLOWED_PLAYBOOKS", []string{"TREND_PULLBACK", "LIQUIDITY_SWEEP_REVERSAL", "COMPRESSION_BREAKOUT_RETEST"}),
-			WatchRecheckAllowedReasonTokens:          getEnvCSV("STRATEGY_WATCH_RECHECK_ALLOWED_REASON_TOKENS", []string{"AI DECISION IS WAIT", "AI_SKIPPED", "WATCH_ONLY", "WAIT_RETEST", "AI CONFIDENCE", "LOCAL_GATE_WATCH", "M5 "}),
+			WatchRecheckAllowedReasonTokens:          getEnvCSV("STRATEGY_WATCH_RECHECK_ALLOWED_REASON_TOKENS", []string{"AI DECISION IS WAIT", "WATCH_ONLY", "WAIT_RETEST", "AI CONFIDENCE", "LOCAL GATE STATUS IS LOCAL_WATCH", "AI CANDIDATE SKIPPED DUE POLICY MAXAICANDIDATES QUOTA", "M5"}),
 			WatchRecheckBlockedReasonTokens:          getEnvCSV("STRATEGY_WATCH_RECHECK_BLOCKED_REASON_TOKENS", []string{"ACTIVE_MONITORING_EXISTS", "OPPOSITE_SIGNAL_CONFLICT", "LOWER_PRIORITY_CONFLICT", "DUPLICATE_SIGNAL_BUCKET", "SYMBOL_COOLDOWN_ACTIVE", "MAX_FINAL_EXECUTE_LIMIT"}),
 			EvaluationMinSampleWarning:               getEnvIntWithFallback("STRATEGY_EVALUATION_MIN_SAMPLE_WARNING", "EVALUATION_MIN_SAMPLE_WARNING", 10),
 			EvaluationMinSampleMedium:                getEnvIntWithFallback("STRATEGY_EVALUATION_MIN_SAMPLE_MEDIUM", "EVALUATION_MIN_SAMPLE_MEDIUM", 20),
@@ -545,8 +545,8 @@ func LoadConfigFromEnv() (*Config, error) {
 			DisableBinanceOrderEndpoints: getEnvBool("DISABLE_BINANCE_ORDER_ENDPOINTS", true),
 			DisableAutoExecution:         getEnvBool("DISABLE_AUTO_EXECUTION", true),
 			DisableAutoThresholdApply:    getEnvBool("DISABLE_AUTO_THRESHOLD_APPLY", true),
-			RequireAIHighForExecute:      getEnvBool("REQUIRE_AI_HIGH_FOR_EXECUTE", true),
-			RequireFreshEntryForExecute:  getEnvBool("REQUIRE_FRESH_ENTRY_FOR_EXECUTE", true),
+			RequireAIHighForExecute:      getEnvBool("REQUIRE_AI_HIGH_FOR_EXECUTE", false),
+			RequireFreshEntryForExecute:  getEnvBool("REQUIRE_FRESH_ENTRY_FOR_EXECUTE", false),
 			AIAuditEnabled:               getEnvBool("AI_AUDIT_ENABLED", true),
 			DecisionAuditEnabled:         getEnvBool("DECISION_AUDIT_ENABLED", true),
 			HealthStorageCheck:           getEnvBool("HEALTH_STORAGE_CHECK", true),
@@ -621,8 +621,6 @@ func normalizeCompatibilityConfig(cfg *Config) {
 	cfg.Evaluation.MinSampleMedium = cfg.Strategy.EvaluationMinSampleMedium
 	cfg.Evaluation.MinSampleHigh = cfg.Strategy.EvaluationMinSampleHigh
 
-	cfg.Strategy.RequireAIHighForExecute = cfg.Safety.RequireAIHighForExecute
-	cfg.Strategy.RequireFreshEntryForExecute = cfg.Safety.RequireFreshEntryForExecute
 }
 
 // ValidateConfig audits config properties for safety and bounds correctness
@@ -962,12 +960,6 @@ func ValidateConfig(cfg *Config) error {
 	}
 	if !cfg.Safety.DisableAutoThresholdApply {
 		return fmt.Errorf("CRITICAL SAFETY VIOLATION: DISABLE_AUTO_THRESHOLD_APPLY must be true")
-	}
-	if !cfg.Safety.RequireAIHighForExecute {
-		return fmt.Errorf("CRITICAL SAFETY VIOLATION: REQUIRE_AI_HIGH_FOR_EXECUTE must be true")
-	}
-	if !cfg.Safety.RequireFreshEntryForExecute {
-		return fmt.Errorf("CRITICAL SAFETY VIOLATION: REQUIRE_FRESH_ENTRY_FOR_EXECUTE must be true")
 	}
 	if cfg.Evaluation.AutoApply {
 		return fmt.Errorf("CRITICAL SAFETY VIOLATION: EVALUATION_AUTO_APPLY must be false")

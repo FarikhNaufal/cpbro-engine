@@ -1,11 +1,17 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"cpbro-engine/internal/modules/cryptobroV3/entity"
+	"cpbro-engine/internal/modules/cryptobroV3/service"
 	"cpbro-engine/internal/modules/cryptobroV3/usecase"
+	"github.com/gin-gonic/gin"
 )
 
 func TestHealthResponse_DegradedWhenStorageUnavailable(t *testing.T) {
@@ -115,5 +121,99 @@ func TestHealthResponse_IncludesRolloutReadiness(t *testing.T) {
 	}
 	if len(resp.RolloutReadiness.RollbackCriteria) != 1 {
 		t.Fatalf("expected rollback criteria to be mapped, got %+v", resp.RolloutReadiness)
+	}
+}
+
+func TestBuildHealthLatestSnapshot_MapsLatestResultFields(t *testing.T) {
+	now := time.Date(2026, 6, 27, 10, 15, 0, 0, time.UTC)
+	snapshot := buildHealthLatestSnapshot(&entity.LatestResult{
+		GeneratedAt:                     now,
+		ScanID:                          "scheduled_20260627101500",
+		MarketRegime:                    "HIGH_VOL",
+		MarketPolicy:                    "HIGH_VOL active - strict risk reduction mode",
+		MacroVolatility:                 "HIGH",
+		MarketBreadth:                   0.81,
+		ActivePolicyLongMode:            "NORMAL",
+		ActivePolicyShortMode:           "NORMAL",
+		ActivePolicyRequireAIConfidence: "HIGH",
+		ActivePolicyRequireFreshEntry:   true,
+		ActivePolicyAllowedPlaybooks:    []string{"LIQUIDITY_SWEEP_REVERSAL", "TREND_PULLBACK"},
+	})
+
+	if snapshot == nil {
+		t.Fatal("expected latest snapshot")
+	}
+	if snapshot.MarketRegime != "HIGH_VOL" {
+		t.Fatalf("expected market regime HIGH_VOL, got %s", snapshot.MarketRegime)
+	}
+	if snapshot.GeneratedAt != now.Format(time.RFC3339) {
+		t.Fatalf("expected generated_at %s, got %s", now.Format(time.RFC3339), snapshot.GeneratedAt)
+	}
+	if len(snapshot.ActivePolicyAllowedPlaybooks) != 2 {
+		t.Fatalf("expected allowed playbooks to be copied, got %+v", snapshot.ActivePolicyAllowedPlaybooks)
+	}
+}
+
+func TestHealthEndpoint_IncludesLatestSnapshot(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir := t.TempDir()
+	st, err := service.NewJSONStorageService(dir)
+	if err != nil {
+		t.Fatalf("NewJSONStorageService: %v", err)
+	}
+	if err := st.SaveLatestResult(&entity.LatestResult{
+		GeneratedAt:                     time.Date(2026, 6, 27, 10, 15, 0, 0, time.UTC),
+		ScanID:                          "scheduled_20260627101500",
+		MarketRegime:                    "HIGH_VOL",
+		MarketPolicy:                    "HIGH_VOL active - strict risk reduction mode",
+		MacroVolatility:                 "HIGH",
+		MarketBreadth:                   0.81,
+		ActivePolicyRequireAIConfidence: "HIGH",
+		ActivePolicyRequireFreshEntry:   true,
+		ActivePolicyAllowedPlaybooks:    []string{"LIQUIDITY_SWEEP_REVERSAL", "TREND_PULLBACK"},
+	}); err != nil {
+		t.Fatalf("SaveLatestResult: %v", err)
+	}
+
+	h := &Handler{
+		storageUC:       usecase.NewStorageUsecase(st),
+		observabilityUC: &usecase.ObservabilityUsecase{},
+		startTime:       time.Now().Add(-5 * time.Second),
+	}
+	orig := healthAuditFn
+	healthAuditFn = func(uc *usecase.ObservabilityUsecase, ctx context.Context) (usecase.HealthStatus, error) {
+		return usecase.HealthStatus{
+			Status:              "UP",
+			Mode:                "alert-only",
+			BinanceConnectivity: "OK",
+			GeminiAvailability:  "OK",
+			StorageWritable:     "OK",
+		}, nil
+	}
+	defer func() { healthAuditFn = orig }()
+
+	r := gin.New()
+	r.GET("/health", h.GetHealth)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp APIResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	dataBytes, _ := json.Marshal(resp.Data)
+	var health map[string]any
+	_ = json.Unmarshal(dataBytes, &health)
+	latestSnapshot, ok := health["latest_snapshot"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected latest_snapshot object, got %T", health["latest_snapshot"])
+	}
+	if latestSnapshot["market_regime"] != "HIGH_VOL" {
+		t.Fatalf("expected market_regime HIGH_VOL, got %v", latestSnapshot["market_regime"])
 	}
 }

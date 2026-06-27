@@ -1139,6 +1139,25 @@ func TestResolveMarketDataPrefetchLimit_CHOPRangeBroadSamplingRespectsBudgetOver
 	}
 }
 
+func TestResolveMarketDataPrefetchLimit_HighVolSaturatedUniverseWidensSafely(t *testing.T) {
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.MaxMarketDataPrefetchSymbols = 0
+	settings.ScanRequestWeightBudget = 0
+	SetRuntimeSettings(settings)
+
+	limit := resolveMarketDataPrefetchLimit(MarketPolicy{
+		Regime:          HIGH_VOL,
+		MaxSymbols:      60,
+		MaxAICandidates: 3,
+		MaxFinalExecute: 5,
+	}, 50)
+	if limit != 20 {
+		t.Fatalf("expected HIGH_VOL saturated prefetch limit 20, got %d", limit)
+	}
+}
+
 func TestEstimateScanRequestWeight(t *testing.T) {
 	weight := estimateScanRequestWeight(20, 8)
 	expected := 40 + 10 + 20 + (8 * 4)
@@ -1182,6 +1201,28 @@ func TestResolveAdaptiveScanRequestGuard_BTCChaosTightensConcurrency(t *testing.
 	}
 	if guard.PipelineConcurrency != 2 {
 		t.Fatalf("expected BTC_CHAOS pipeline concurrency 2, got %d", guard.PipelineConcurrency)
+	}
+}
+
+func TestResolveAdaptiveScanRequestGuard_HighVolExpandedCoverageStillFitsBudget(t *testing.T) {
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+	settings := original
+	settings.ScanRequestWeightBudget = 0
+	SetRuntimeSettings(settings)
+
+	guard := resolveAdaptiveScanRequestGuard(MarketPolicy{Regime: HIGH_VOL}, 50, 20, 8)
+	if guard.ExpectedWeight > guard.Budget {
+		t.Fatalf("expected guarded weight <= budget, got weight=%d budget=%d", guard.ExpectedWeight, guard.Budget)
+	}
+	if guard.PrefetchLimit != 20 {
+		t.Fatalf("expected HIGH_VOL prefetch limit to remain 20, got %d", guard.PrefetchLimit)
+	}
+	if !guard.Applied {
+		t.Fatalf("expected HIGH_VOL guard to tighten concurrency at full budget utilization")
+	}
+	if guard.MarketDataConcurrency != 3 || guard.PipelineConcurrency != 3 {
+		t.Fatalf("expected HIGH_VOL concurrency to tighten to 3/3, got market=%d pipeline=%d", guard.MarketDataConcurrency, guard.PipelineConcurrency)
 	}
 }
 

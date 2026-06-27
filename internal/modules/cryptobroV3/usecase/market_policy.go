@@ -41,6 +41,25 @@ func normalizeLowVolPolicy(policy MarketPolicy, btcTrend string, reason string) 
 	return policy
 }
 
+func excludePlaybooks(source []Playbook, blocked ...Playbook) []Playbook {
+	if len(source) == 0 {
+		return nil
+	}
+	blockedSet := make(map[Playbook]struct{}, len(blocked))
+	for _, playbook := range blocked {
+		blockedSet[playbook] = struct{}{}
+	}
+
+	out := make([]Playbook, 0, len(source))
+	for _, playbook := range source {
+		if _, skip := blockedSet[playbook]; skip {
+			continue
+		}
+		out = append(out, playbook)
+	}
+	return out
+}
+
 func resolvePolicyBaseline(name string) (MarketPolicy, bool) {
 	reg := GetGlobalConfigRegistry()
 	if reg != nil {
@@ -141,9 +160,13 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 		policy.AllowedTiers = []Tier{TierA, TierB} // Tier C limited
 		policy.MaxFinalExecute = 2                 // limit executes
 		policy.StalenessATRMultiplier = 0.8        // stricter staleness
-		// High volatility: avoid admitting breakout-retest compression plays.
-		// Fresh production data shows they dominate rejects under HIGH_VOL instead of producing viable AI candidates.
-		policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, TREND_PULLBACK}
+		// High volatility: keep the regime defensive, but do not collapse it into only two playbooks.
+		// We strip compression breakout entries, which are the most fragile during expansion, while
+		// preserving other baseline plays so the engine does not lose all regime diversity.
+		policy.AllowedPlaybooks = excludePlaybooks(policy.AllowedPlaybooks, COMPRESSION_BREAKOUT_RETEST)
+		if len(policy.AllowedPlaybooks) == 0 {
+			policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, TREND_PULLBACK}
+		}
 		policy.RequireAIConfidence = AIConfidenceHigh
 		policy.RequireFreshEntry = true
 		policy.MaxPriceMove24hLong = 0.08

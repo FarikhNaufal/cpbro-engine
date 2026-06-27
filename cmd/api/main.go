@@ -584,6 +584,7 @@ func startWatchRecheckWorker(ctx context.Context, cfg *config.Config, scannerUC 
 			decision := evaluateWatchRecheckTick(now, lastRun, recheckBoundaryDuration, primaryBoundaryDuration, time.Duration(bufferSec)*time.Second)
 			if !decision.ShouldRun {
 				if decision.SkipReason == "primary_boundary" {
+					lastRun = decision.Boundary
 					slog.Info("Watch recheck skipped at primary boundary", "worker", "watch_recheck", "boundary", decision.Boundary.Format("15:04:05"), "primary_boundary_minutes", cfg.Scanner.BoundaryMinutes, "recheck_boundary_minutes", recheckBoundaryMinutes)
 				}
 				continue

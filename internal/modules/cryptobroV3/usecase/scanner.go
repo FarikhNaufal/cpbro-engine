@@ -1405,7 +1405,7 @@ func resolveMarketDataPrefetchLimit(policy MarketPolicy, totalCandidates int) in
 		floor = 10
 	case HIGH_VOL:
 		floor = 10
-		hardCeiling = 18
+		hardCeiling = 20
 	case CHOP_RANGE:
 		floor = 12
 	case BTC_DOMINANCE:
@@ -1464,7 +1464,7 @@ func resolveBudgetDrivenPrefetchCap(policy MarketPolicy) int {
 
 func shouldBroadenPrefetchSampling(policy MarketPolicy, totalCandidates int) bool {
 	switch policy.EffectiveRegime() {
-	case CHOP_RANGE, COMPRESSION, LOW_VOL:
+	case CHOP_RANGE, COMPRESSION, LOW_VOL, HIGH_VOL:
 	default:
 		return false
 	}
@@ -1547,7 +1547,7 @@ func resolveScanRequestWeightBudget(policy MarketPolicy) int {
 	case LOW_VOL:
 		return 125
 	case HIGH_VOL:
-		return 140
+		return 150
 	case CHOP_RANGE, COMPRESSION:
 		return 150
 	case BTC_DOMINANCE:

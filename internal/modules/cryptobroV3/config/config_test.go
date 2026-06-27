@@ -92,8 +92,8 @@ func TestConfig_NormalizeCompatibilityConfigAuthoritativeSectionsWin(t *testing.
 		t.Fatalf("LoadConfigFromEnv failed: %v", err)
 	}
 
-	if !cfg.Strategy.RequireAIHighForExecute || !cfg.Strategy.RequireFreshEntryForExecute {
-		t.Fatalf("expected strategy safety toggles to be normalized from safety layer: %+v", cfg.Strategy)
+	if cfg.Strategy.RequireAIHighForExecute || cfg.Strategy.RequireFreshEntryForExecute {
+		t.Fatalf("expected strategy execute overrides to respect strategy layer config without safety forcing them on: %+v", cfg.Strategy)
 	}
 	if cfg.Concurrency.MaxMarketDataConcurrency != 17 {
 		t.Fatalf("expected concurrency mirror to follow worker authoritative value, got %d", cfg.Concurrency.MaxMarketDataConcurrency)
@@ -151,8 +151,8 @@ func TestConfig_ValidateConfigNormalizesLegacyMirrors(t *testing.T) {
 	if cfg.Concurrency.MaxSymbolsDefault != 77 {
 		t.Fatalf("expected concurrency max symbols mirror to normalize to universe value, got %d", cfg.Concurrency.MaxSymbolsDefault)
 	}
-	if !cfg.Strategy.RequireAIHighForExecute || !cfg.Strategy.RequireFreshEntryForExecute {
-		t.Fatalf("expected strategy safety flags to normalize to true, got %+v", cfg.Strategy)
+	if cfg.Strategy.RequireAIHighForExecute || cfg.Strategy.RequireFreshEntryForExecute {
+		t.Fatalf("expected strategy execute overrides to remain independent from safety flags, got %+v", cfg.Strategy)
 	}
 	if cfg.Monitoring.MaxHoldM15Candles != 10 {
 		t.Fatalf("expected monitoring max hold candles to normalize from authoritative minutes, got %d", cfg.Monitoring.MaxHoldM15Candles)
@@ -303,19 +303,21 @@ func TestConfig_ValidationSafetyDisableAutoThresholdApply(t *testing.T) {
 	}
 }
 
-func TestConfig_ValidationSafetyRequireAIHighForExecute(t *testing.T) {
+func TestConfig_ValidationAllowsSafetyRequireAIHighForExecuteFalse(t *testing.T) {
 	cfg, _ := LoadConfigFromEnv()
+	cfg.Telegram.Enabled = false
 	cfg.Safety.RequireAIHighForExecute = false
-	if err := ValidateConfig(cfg); err == nil {
-		t.Errorf("Expected validation error for REQUIRE_AI_HIGH_FOR_EXECUTE=false, got nil")
+	if err := ValidateConfig(cfg); err != nil {
+		t.Errorf("expected no validation error for REQUIRE_AI_HIGH_FOR_EXECUTE=false, got %v", err)
 	}
 }
 
-func TestConfig_ValidationSafetyRequireFreshEntryForExecute(t *testing.T) {
+func TestConfig_ValidationAllowsSafetyRequireFreshEntryForExecuteFalse(t *testing.T) {
 	cfg, _ := LoadConfigFromEnv()
+	cfg.Telegram.Enabled = false
 	cfg.Safety.RequireFreshEntryForExecute = false
-	if err := ValidateConfig(cfg); err == nil {
-		t.Errorf("Expected validation error for REQUIRE_FRESH_ENTRY_FOR_EXECUTE=false, got nil")
+	if err := ValidateConfig(cfg); err != nil {
+		t.Errorf("expected no validation error for REQUIRE_FRESH_ENTRY_FOR_EXECUTE=false, got %v", err)
 	}
 }
 

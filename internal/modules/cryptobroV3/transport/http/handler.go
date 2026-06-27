@@ -45,6 +45,10 @@ type HandlerRuntimeConfig struct {
 
 const logStreamPingInterval = 15 * time.Second
 
+var healthAuditFn = func(uc *usecase.ObservabilityUsecase, ctx context.Context) (usecase.HealthStatus, error) {
+	return uc.PerformHealthAudit(ctx)
+}
+
 type scannerRunner interface {
 	Run(ctx context.Context, req dto.ScanRequest) (dto.ScanResult, error)
 }
@@ -173,6 +177,30 @@ func (h *Handler) mapHealthResponse(status usecase.HealthStatus) dto.HealthRespo
 	}
 }
 
+func buildHealthLatestSnapshot(res *entity.LatestResult) *dto.HealthLatestSnapshot {
+	if res == nil || strings.TrimSpace(res.ScanID) == "" {
+		return nil
+	}
+
+	snapshot := &dto.HealthLatestSnapshot{
+		ScanID:                          res.ScanID,
+		MarketRegime:                    strings.TrimSpace(res.MarketRegime),
+		MarketPolicy:                    strings.TrimSpace(res.MarketPolicy),
+		MacroVolatility:                 strings.TrimSpace(res.MacroVolatility),
+		MarketBreadth:                   res.MarketBreadth,
+		ActivePolicyLongMode:            strings.TrimSpace(res.ActivePolicyLongMode),
+		ActivePolicyShortMode:           strings.TrimSpace(res.ActivePolicyShortMode),
+		ActivePolicyRequireAIConfidence: strings.TrimSpace(res.ActivePolicyRequireAIConfidence),
+		ActivePolicyRequireFreshEntry:   res.ActivePolicyRequireFreshEntry,
+		ActivePolicyAllowedPlaybooks:    append([]string(nil), res.ActivePolicyAllowedPlaybooks...),
+	}
+	if !res.GeneratedAt.IsZero() {
+		snapshot.GeneratedAt = res.GeneratedAt.Format(time.RFC3339)
+	}
+
+	return snapshot
+}
+
 // GetHealth godoc
 // @Summary      Health check
 // @Description  Returns application health status, connectivity checks, and SRE metrics. Alert-only mode.
@@ -182,12 +210,18 @@ func (h *Handler) mapHealthResponse(status usecase.HealthStatus) dto.HealthRespo
 // @Failure      500 {object} dto.ErrorAPIResponse
 // @Router       /health [get]
 func (h *Handler) GetHealth(c *gin.Context) {
-	status, err := h.observabilityUC.PerformHealthAudit(c.Request.Context())
+	status, err := healthAuditFn(h.observabilityUC, c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, fail("failed to perform health audit", err.Error()))
 		return
 	}
-	c.JSON(http.StatusOK, ok("ok", h.mapHealthResponse(status)))
+	resp := h.mapHealthResponse(status)
+	if h.storageUC != nil {
+		if latest, loadErr := h.storageUC.LoadLatestResult(); loadErr == nil {
+			resp.LatestSnapshot = buildHealthLatestSnapshot(latest)
+		}
+	}
+	c.JSON(http.StatusOK, ok("ok", resp))
 }
 
 // GetLatest godoc
