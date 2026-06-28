@@ -424,7 +424,7 @@ func isFinalizedSignalJournalForEvaluation(item SignalJournal, now time.Time) bo
 
 func isFinalizedWatchJournalForEvaluation(item WatchJournal, now time.Time) bool {
 	switch item.Status {
-	case VIRTUAL_TP2_HIT, VIRTUAL_SL_HIT, VIRTUAL_EXPIRED, WATCH_RECHECK_INVALIDATED, WATCH_RECHECK_EXPIRED:
+	case VIRTUAL_TP2_HIT, VIRTUAL_SL_HIT, VIRTUAL_EXPIRED, WATCH_INVALIDATED, WATCH_EXPIRED:
 		return true
 	case VIRTUAL_TP1_HIT:
 		return isTP1FinalizedForJournal(SignalJournal(item), now)
@@ -1057,6 +1057,9 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	var watchSumMFE, watchSumMAE, watchTotalPnl float64
 	excludedWatchAnomalies := 0
 	var latestWatchEventAt time.Time
+	watchAgeDist := WatchAgeDistribution{}
+	promotionBlockers := PromotionBlockerStats{}
+	watchEligibleNotPromoted := 0
 
 	for _, item := range watchJournal {
 		if item.UpdatedAt.After(latestWatchEventAt) {
@@ -1071,10 +1074,45 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		switch item.Status {
 		case WATCH_PROMOTED:
 			watchPromotedCount++
-		case WATCH_RECHECK_EXPIRED:
+		case WATCH_EXPIRED:
 			watchRecheckExpiredCount++
-		case WATCH_RECHECK_INVALIDATED:
+			// Track watch age at expiry
+			ageMinutes := int(now.Sub(item.CreatedAt).Minutes())
+			switch {
+			case ageMinutes <= 5:
+				watchAgeDist.Bucket0to5++
+			case ageMinutes <= 15:
+				watchAgeDist.Bucket5to15++
+			case ageMinutes <= 30:
+				watchAgeDist.Bucket15to30++
+			case ageMinutes <= 60:
+				watchAgeDist.Bucket30to60++
+			case ageMinutes <= 120:
+				watchAgeDist.Bucket60to120++
+			default:
+				watchAgeDist.Bucket120plus++
+			}
+		case WATCH_INVALIDATED:
 			watchRecheckInvalidatedCount++
+		case WATCH_MONITORING:
+			// Active watches that haven't been promoted yet
+			watchEligibleNotPromoted++
+			// Categorize blockers based on reason
+			reasonLower := strings.ToLower(item.Reason + " " + item.AIReasoning)
+			switch {
+			case strings.Contains(reasonLower, "confidence") || strings.Contains(reasonLower, "ai_confidence"):
+				promotionBlockers.BlockedByAIConfidence++
+			case strings.Contains(reasonLower, "conflict"):
+				promotionBlockers.BlockedByConflict++
+			case strings.Contains(reasonLower, "cooldown"):
+				promotionBlockers.BlockedByCooldown++
+			case strings.Contains(reasonLower, "playbook"):
+				promotionBlockers.BlockedByPlaybook++
+			case strings.Contains(reasonLower, "tier"):
+				promotionBlockers.BlockedByTier++
+			default:
+				promotionBlockers.BlockedByOther++
+			}
 		}
 		if isJournalTimingAnomalous(SignalJournal(item), sanityProfile) {
 			excludedWatchAnomalies++
@@ -2391,6 +2429,9 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 		PlaybookDenganExpiredRate: pbMaxExp,
 		PlaybookDenganTP1Terbaik:  pbBestTP1,
 		PlaybookDenganTP2Follow:   pbBestTP2Follow,
+		WatchAgeDistribution:      watchAgeDist,
+		PromotionBlockerStats:     promotionBlockers,
+		WatchEligibleNotPromoted:  watchEligibleNotPromoted,
 		Notes:                     "Feedback Loop Revision generated successfully.",
 		Status:                    "COMPLETED",
 	}

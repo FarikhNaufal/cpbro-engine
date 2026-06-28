@@ -1,6 +1,8 @@
 package usecase_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"math"
 	"reflect"
 	"strings"
@@ -766,8 +768,8 @@ func TestFeedback_PromotedConversionAndFreshnessMetrics(t *testing.T) {
 		},
 		watch: []usecase.WatchJournal{
 			{ID: "w1", Status: usecase.WATCH_PROMOTED, CreatedAt: now.Add(-40 * time.Minute), UpdatedAt: now.Add(-10 * time.Minute)},
-			{ID: "w2", Status: usecase.WATCH_RECHECK_INVALIDATED, CreatedAt: now.Add(-50 * time.Minute), UpdatedAt: now.Add(-15 * time.Minute), ClosedAt: now.Add(-15 * time.Minute)},
-			{ID: "w3", Status: usecase.WATCH_RECHECK_EXPIRED, CreatedAt: now.Add(-60 * time.Minute), UpdatedAt: now.Add(-25 * time.Minute), ClosedAt: now.Add(-25 * time.Minute)},
+			{ID: "w2", Status: usecase.WATCH_INVALIDATED, CreatedAt: now.Add(-50 * time.Minute), UpdatedAt: now.Add(-15 * time.Minute), ClosedAt: now.Add(-15 * time.Minute)},
+			{ID: "w3", Status: usecase.WATCH_EXPIRED, CreatedAt: now.Add(-60 * time.Minute), UpdatedAt: now.Add(-25 * time.Minute), ClosedAt: now.Add(-25 * time.Minute)},
 		},
 		audits: []usecase.DecisionAudit{
 			{GeneratedAt: now.Add(-5 * time.Minute)},
@@ -1792,5 +1794,174 @@ func TestFeedback_SetupMemorySlicesIncludeLatestDecisionBrief(t *testing.T) {
 	}
 	if !frontend.LearningReviews[0].ReviewOnly || !frontend.LearningReviews[0].DoNotAutoApply {
 		t.Fatalf("expected review-only learning semantics, got %+v", frontend.LearningReviews[0])
+	}
+}
+
+// Test: Watch age distribution is calculated correctly from WATCH_EXPIRED entries
+func TestFeedback_WatchAgeDistribution_BucketsCorrectly(t *testing.T) {
+	repo := &mockFeedbackStorageRepo{journal: nil, audits: nil}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+	now := time.Now().UTC()
+
+	repo.watch = []usecase.WatchJournal{
+		// Expired at 3 minutes → Bucket0to5
+		{ID: "w1", Status: usecase.WATCH_EXPIRED, CreatedAt: now.Add(-3 * time.Minute), UpdatedAt: now, ClosedAt: now},
+		// Expired at 10 minutes → Bucket5to15
+		{ID: "w2", Status: usecase.WATCH_EXPIRED, CreatedAt: now.Add(-10 * time.Minute), UpdatedAt: now, ClosedAt: now},
+		// Expired at 20 minutes → Bucket15to30
+		{ID: "w3", Status: usecase.WATCH_EXPIRED, CreatedAt: now.Add(-20 * time.Minute), UpdatedAt: now, ClosedAt: now},
+		// Expired at 45 minutes → Bucket30to60
+		{ID: "w4", Status: usecase.WATCH_EXPIRED, CreatedAt: now.Add(-45 * time.Minute), UpdatedAt: now, ClosedAt: now},
+		// Expired at 90 minutes → Bucket60to120
+		{ID: "w5", Status: usecase.WATCH_EXPIRED, CreatedAt: now.Add(-90 * time.Minute), UpdatedAt: now, ClosedAt: now},
+		// Expired at 150 minutes → Bucket120plus
+		{ID: "w6", Status: usecase.WATCH_EXPIRED, CreatedAt: now.Add(-150 * time.Minute), UpdatedAt: now, ClosedAt: now},
+	}
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("GenerateEvaluationReport failed: %v", err)
+	}
+
+	dist := repo.report.WatchAgeDistribution
+	if dist.Bucket0to5 != 1 {
+		t.Errorf("expected Bucket0to5=1, got %d", dist.Bucket0to5)
+	}
+	if dist.Bucket5to15 != 1 {
+		t.Errorf("expected Bucket5to15=1, got %d", dist.Bucket5to15)
+	}
+	if dist.Bucket15to30 != 1 {
+		t.Errorf("expected Bucket15to30=1, got %d", dist.Bucket15to30)
+	}
+	if dist.Bucket30to60 != 1 {
+		t.Errorf("expected Bucket30to60=1, got %d", dist.Bucket30to60)
+	}
+	if dist.Bucket60to120 != 1 {
+		t.Errorf("expected Bucket60to120=1, got %d", dist.Bucket60to120)
+	}
+	if dist.Bucket120plus != 1 {
+		t.Errorf("expected Bucket120plus=1, got %d", dist.Bucket120plus)
+	}
+}
+
+// Test: Promotion blocker stats are categorized correctly from WATCH_MONITORING reasons
+func TestFeedback_PromotionBlockerStats_CategorizesReasons(t *testing.T) {
+	repo := &mockFeedbackStorageRepo{journal: nil, audits: nil}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+	now := time.Now().UTC()
+
+	repo.watch = []usecase.WatchJournal{
+		{ID: "w1", Status: usecase.WATCH_MONITORING, Reason: "AI confidence is below required threshold", CreatedAt: now.Add(-5 * time.Minute)},
+		{ID: "w2", Status: usecase.WATCH_MONITORING, Reason: "Opposing conflict detected", CreatedAt: now.Add(-5 * time.Minute)},
+		{ID: "w3", Status: usecase.WATCH_MONITORING, Reason: "Symbol cooldown active", CreatedAt: now.Add(-5 * time.Minute)},
+		{ID: "w4", Status: usecase.WATCH_MONITORING, Reason: "Playbook not allowed", CreatedAt: now.Add(-5 * time.Minute)},
+		{ID: "w5", Status: usecase.WATCH_MONITORING, Reason: "Tier not permitted", CreatedAt: now.Add(-5 * time.Minute)},
+		{ID: "w6", Status: usecase.WATCH_MONITORING, Reason: "Some other reason", CreatedAt: now.Add(-5 * time.Minute)},
+	}
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("GenerateEvaluationReport failed: %v", err)
+	}
+
+	stats := repo.report.PromotionBlockerStats
+	if stats.BlockedByAIConfidence != 1 {
+		t.Errorf("expected BlockedByAIConfidence=1, got %d", stats.BlockedByAIConfidence)
+	}
+	if stats.BlockedByConflict != 1 {
+		t.Errorf("expected BlockedByConflict=1, got %d", stats.BlockedByConflict)
+	}
+	if stats.BlockedByCooldown != 1 {
+		t.Errorf("expected BlockedByCooldown=1, got %d", stats.BlockedByCooldown)
+	}
+	if stats.BlockedByPlaybook != 1 {
+		t.Errorf("expected BlockedByPlaybook=1, got %d", stats.BlockedByPlaybook)
+	}
+	if stats.BlockedByTier != 1 {
+		t.Errorf("expected BlockedByTier=1, got %d", stats.BlockedByTier)
+	}
+	if stats.BlockedByOther != 1 {
+		t.Errorf("expected BlockedByOther=1, got %d", stats.BlockedByOther)
+	}
+}
+
+// Test: WatchEligibleNotPromoted counts active watches
+func TestFeedback_WatchEligibleNotPromoted_CountsActive(t *testing.T) {
+	repo := &mockFeedbackStorageRepo{journal: nil, audits: nil}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+	now := time.Now().UTC()
+
+	repo.watch = []usecase.WatchJournal{
+		{ID: "w1", Status: usecase.WATCH_MONITORING, CreatedAt: now.Add(-5 * time.Minute)},
+		{ID: "w2", Status: usecase.WATCH_MONITORING, CreatedAt: now.Add(-10 * time.Minute)},
+		{ID: "w3", Status: usecase.WATCH_PROMOTED, CreatedAt: now.Add(-15 * time.Minute)},
+		{ID: "w4", Status: usecase.WATCH_EXPIRED, CreatedAt: now.Add(-20 * time.Minute), ClosedAt: now},
+		{ID: "w5", Status: usecase.WATCH_MONITORING, CreatedAt: now.Add(-25 * time.Minute)},
+	}
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("GenerateEvaluationReport failed: %v", err)
+	}
+
+	if repo.report.WatchEligibleNotPromoted != 3 {
+		t.Errorf("expected WatchEligibleNotPromoted=3 (3 WATCH_MONITORING entries), got %d", repo.report.WatchEligibleNotPromoted)
+	}
+}
+
+// Test: Backward compatibility - JSON serialization works
+func TestFeedback_WatchMetrics_JSONSerialization(t *testing.T) {
+	repo := &mockFeedbackStorageRepo{journal: nil, audits: nil}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+	now := time.Now().UTC()
+
+	repo.watch = []usecase.WatchJournal{
+		{ID: "w1", Status: usecase.WATCH_EXPIRED, CreatedAt: now.Add(-10 * time.Minute), ClosedAt: now},
+		{ID: "w2", Status: usecase.WATCH_MONITORING, Reason: "AI confidence below required", CreatedAt: now.Add(-5 * time.Minute)},
+	}
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("GenerateEvaluationReport failed: %v", err)
+	}
+
+	// Verify JSON marshaling works
+	jsonBytes, err := json.Marshal(repo.report)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+	if !bytes.Contains(jsonBytes, []byte("watch_age_distribution")) {
+		t.Errorf("expected JSON to contain 'watch_age_distribution', got: %s", string(jsonBytes))
+	}
+	if !bytes.Contains(jsonBytes, []byte("promotion_blocker_stats")) {
+		t.Errorf("expected JSON to contain 'promotion_blocker_stats', got: %s", string(jsonBytes))
+	}
+	if !bytes.Contains(jsonBytes, []byte("watch_eligible_not_promoted")) {
+		t.Errorf("expected JSON to contain 'watch_eligible_not_promoted', got: %s", string(jsonBytes))
+	}
+}
+
+// Test: WATCH_RECHECK_EXPIRED status name is fully removed (no backward compatibility)
+func TestFeedback_NoRecheckStatusReferences(t *testing.T) {
+	repo := &mockFeedbackStorageRepo{journal: nil, audits: nil}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+	now := time.Now().UTC()
+
+	repo.watch = []usecase.WatchJournal{
+		// Old status name should not appear in current code
+		{ID: "w1", Status: usecase.WATCH_EXPIRED, CreatedAt: now.Add(-10 * time.Minute), ClosedAt: now},
+	}
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("GenerateEvaluationReport failed: %v", err)
+	}
+
+	jsonBytes, err := json.Marshal(repo.report)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+	if bytes.Contains(jsonBytes, []byte("WATCH_RECHECK_EXPIRED")) {
+		t.Errorf("JSON output should not contain 'WATCH_RECHECK_EXPIRED', got: %s", string(jsonBytes))
 	}
 }

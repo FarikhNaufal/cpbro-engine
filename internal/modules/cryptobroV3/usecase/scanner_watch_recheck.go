@@ -72,9 +72,9 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 	summary.EligibleWatches = len(shortlist)
 	for _, update := range terminalUpdates {
 		switch update.disposition.TerminalStatus {
-		case WATCH_RECHECK_EXPIRED:
+		case WATCH_EXPIRED:
 			summary.Expired++
-		case WATCH_RECHECK_INVALIDATED:
+		case WATCH_INVALIDATED:
 			summary.Invalidated++
 		}
 	}
@@ -138,12 +138,12 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 			if err := uc.applyWatchRecheckTerminalUpdates([]watchRecheckEvaluation{evaluated}, triggerTime); err != nil {
 				slog.Warn("Watch recheck failed to persist evaluated terminal state", "scan_id", scanID, "symbol", candidate.entry.Symbol, "error", err)
 			}
-			switch evaluated.disposition.TerminalStatus {
-			case WATCH_RECHECK_EXPIRED:
+		switch evaluated.disposition.TerminalStatus {
+			case WATCH_EXPIRED:
 				summary.Expired++
-			case WATCH_RECHECK_INVALIDATED:
+			case WATCH_INVALIDATED:
 				summary.Invalidated++
-			}
+		}
 			continue
 		}
 		if !evaluated.disposition.Eligible {
@@ -607,8 +607,8 @@ func classifyWatchRecheckDisposition(entry WatchJournal, now time.Time, policy w
 		return watchRecheckDisposition{
 			Eligible:       false,
 			Terminal:       true,
-			TerminalStatus: WATCH_RECHECK_INVALIDATED,
-			Reason:         fmt.Sprintf("Watch recheck invalidated: playbook %s is not allowlisted for recheck", entry.Playbook),
+			TerminalStatus: WATCH_INVALIDATED,
+			Reason:         fmt.Sprintf("Watch invalidated: playbook %s is not allowlisted for recheck", entry.Playbook),
 			OutcomeReason:  "Recheck invalidated because the playbook is no longer eligible for secondary recheck",
 		}
 	}
@@ -616,26 +616,46 @@ func classifyWatchRecheckDisposition(entry WatchJournal, now time.Time, policy w
 		return watchRecheckDisposition{
 			Eligible:       false,
 			Terminal:       true,
-			TerminalStatus: WATCH_RECHECK_INVALIDATED,
-			Reason:         "Watch recheck invalidated: missing created_at timestamp",
+			TerminalStatus: WATCH_INVALIDATED,
+			Reason:         "Watch invalidated: missing created_at timestamp",
 			OutcomeReason:  "Recheck invalidated because watch metadata is incomplete",
 		}
 	}
 	if !entry.ExpiresAt.IsZero() && now.After(entry.ExpiresAt) {
+		slog.Info("Watch expired diagnostic",
+			"symbol", entry.Symbol,
+			"playbook", entry.Playbook,
+			"age_seconds", now.Sub(entry.CreatedAt).Seconds(),
+			"direction", entry.Direction,
+			"tier", entry.Tier,
+			"ai_confidence", entry.AIConfidence,
+			"reason_at_create", entry.Reason,
+			"reason_type", "horizon_elapsed",
+		)
 		return watchRecheckDisposition{
 			Eligible:       false,
 			Terminal:       true,
-			TerminalStatus: WATCH_RECHECK_EXPIRED,
-			Reason:         "Watch recheck expired: watch horizon elapsed before promotion",
+			TerminalStatus: WATCH_EXPIRED,
+			Reason:         "Watch expired: watch horizon elapsed before promotion",
 			OutcomeReason:  "Recheck expired because watch horizon elapsed before a valid promotion",
 		}
 	}
 	if now.Sub(entry.CreatedAt) > policy.EffectiveHorizon {
+		slog.Info("Watch expired diagnostic",
+			"symbol", entry.Symbol,
+			"playbook", entry.Playbook,
+			"age_seconds", now.Sub(entry.CreatedAt).Seconds(),
+			"direction", entry.Direction,
+			"tier", entry.Tier,
+			"ai_confidence", entry.AIConfidence,
+			"reason_at_create", entry.Reason,
+			"reason_type", "max_age_elapsed",
+		)
 		return watchRecheckDisposition{
 			Eligible:       false,
 			Terminal:       true,
-			TerminalStatus: WATCH_RECHECK_EXPIRED,
-			Reason:         "Watch recheck expired: secondary recheck max-age elapsed",
+			TerminalStatus: WATCH_EXPIRED,
+			Reason:         "Watch expired: secondary recheck max-age elapsed",
 			OutcomeReason:  "Recheck expired because the secondary recheck window elapsed",
 		}
 	}
@@ -645,8 +665,8 @@ func classifyWatchRecheckDisposition(entry WatchJournal, now time.Time, policy w
 		return watchRecheckDisposition{
 			Eligible:       false,
 			Terminal:       true,
-			TerminalStatus: WATCH_RECHECK_INVALIDATED,
-			Reason:         "Watch recheck invalidated: watch has no reusable reason context",
+			TerminalStatus: WATCH_INVALIDATED,
+			Reason:         "Watch invalidated: watch has no reusable reason context",
 			OutcomeReason:  "Recheck invalidated because the watch no longer has reusable decision context",
 		}
 	}

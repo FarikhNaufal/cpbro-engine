@@ -899,8 +899,8 @@ func isTerminalWatchJournalStatus(status usecase.Status) bool {
 		usecase.VIRTUAL_SL_HIT,
 		usecase.VIRTUAL_EXPIRED,
 		usecase.WATCH_PROMOTED,
-		usecase.WATCH_RECHECK_INVALIDATED,
-		usecase.WATCH_RECHECK_EXPIRED:
+		usecase.WATCH_INVALIDATED,
+		usecase.WATCH_EXPIRED:
 		return true
 	default:
 		return false

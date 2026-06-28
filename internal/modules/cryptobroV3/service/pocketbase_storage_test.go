@@ -72,7 +72,7 @@ func TestPocketBaseStorageService_LoadWatchJournal_PrefersNewerLocalTerminalStat
 			Symbol:    "SOLUSDT",
 			Direction: usecase.LONG,
 			Playbook:  usecase.TREND_PULLBACK,
-			Status:    usecase.WATCH_RECHECK_EXPIRED,
+			Status:    usecase.WATCH_EXPIRED,
 			CreatedAt: now.Add(-20 * time.Minute),
 			UpdatedAt: now.Add(-2 * time.Minute),
 			ClosedAt:  now.Add(-2 * time.Minute),
@@ -100,7 +100,7 @@ func TestPocketBaseStorageService_LoadWatchJournal_PrefersNewerLocalTerminalStat
 	if len(journal) != 1 {
 		t.Fatalf("expected 1 watch journal row, got %d", len(journal))
 	}
-	if journal[0].Status != usecase.WATCH_RECHECK_EXPIRED {
+	if journal[0].Status != usecase.WATCH_EXPIRED {
 		t.Fatalf("expected local terminal status to win, got %+v", journal[0])
 	}
 	if journal[0].ClosedAt.IsZero() {

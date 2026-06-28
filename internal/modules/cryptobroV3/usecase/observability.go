@@ -358,9 +358,9 @@ func (uc *ObservabilityUsecase) PerformHealthAudit(ctx context.Context) (HealthS
 					watchCounts.VirtualTP1++
 				case WATCH_PROMOTED:
 					watchCounts.Promoted++
-				case WATCH_RECHECK_EXPIRED:
+				case WATCH_EXPIRED:
 					watchCounts.RecheckExpired++
-				case WATCH_RECHECK_INVALIDATED:
+				case WATCH_INVALIDATED:
 					watchCounts.RecheckInvalidated++
 				}
 			}

@@ -125,8 +125,8 @@ const (
 	VIRTUAL_SL_HIT            Status = "VIRTUAL_SL_HIT"
 	VIRTUAL_EXPIRED           Status = "VIRTUAL_EXPIRED"
 	WATCH_PROMOTED            Status = "WATCH_PROMOTED"
-	WATCH_RECHECK_INVALIDATED Status = "WATCH_RECHECK_INVALIDATED"
-	WATCH_RECHECK_EXPIRED     Status = "WATCH_RECHECK_EXPIRED"
+	WATCH_INVALIDATED         Status = "WATCH_INVALIDATED"
+	WATCH_EXPIRED             Status = "WATCH_EXPIRED"
 )
 
 type M5ConfirmationMode string
@@ -502,6 +502,28 @@ type SignalJournal struct {
 // but is stored and evaluated separately so FINAL_WATCH remains non-actionable.
 type WatchJournal = SignalJournal
 
+// WatchAgeDistribution tracks distribution of watch journal ages at terminal status.
+// Used to diagnose whether max age settings are appropriate.
+type WatchAgeDistribution struct {
+	Bucket0to5    int `json:"bucket_0_to_5_min"`   // 0-5 minutes (fresh)
+	Bucket5to15   int `json:"bucket_5_to_15_min"`  // 5-15 minutes
+	Bucket15to30  int `json:"bucket_15_to_30_min"` // 15-30 minutes
+	Bucket30to60  int `json:"bucket_30_to_60_min"` // 30-60 minutes
+	Bucket60to120 int `json:"bucket_60_to_120_min"` // 60-120 minutes
+	Bucket120plus int `json:"bucket_120_plus_min"`  // >120 minutes
+}
+
+// PromotionBlockerStats tracks why watch promotions were blocked.
+// Helps diagnose the root cause of 0% watch-to-execute conversion.
+type PromotionBlockerStats struct {
+	BlockedByAIConfidence int `json:"blocked_by_ai_confidence"` // AI confidence too low
+	BlockedByConflict      int `json:"blocked_by_conflict"`       // Opposing direction conflict
+	BlockedByCooldown      int `json:"blocked_by_cooldown"`       // Symbol cooldown active
+	BlockedByPlaybook      int `json:"blocked_by_playbook"`       // Playbook not in allowed list
+	BlockedByTier          int `json:"blocked_by_tier"`           // Tier restriction
+	BlockedByOther         int `json:"blocked_by_other"`          // Other reasons
+}
+
 type DecisionAudit struct {
 	SchemaVersion                   string    `json:"schema_version,omitempty"`
 	ConfigVersion                   string    `json:"config_version,omitempty"`
@@ -735,6 +757,9 @@ type EvaluationReport struct {
 	CooldownStats             map[string]int                       `json:"cooldown_stats,omitempty"`
 	GateBugFindings           []string                             `json:"gate_bug_findings"`
 	Recommendations           []ThresholdRecommendation            `json:"recommendations"`
+	WatchAgeDistribution      WatchAgeDistribution                `json:"watch_age_distribution"`
+	PromotionBlockerStats     PromotionBlockerStats               `json:"promotion_blocker_stats"`
+	WatchEligibleNotPromoted  int                                  `json:"watch_eligible_not_promoted"`
 	BestPlaybook              string                               `json:"best_playbook"`
 	WorstPlaybook             string                               `json:"worst_playbook"`
 	SetupYangSeringLangsungSL string                               `json:"setup_yang_sering_langsung_sl"`

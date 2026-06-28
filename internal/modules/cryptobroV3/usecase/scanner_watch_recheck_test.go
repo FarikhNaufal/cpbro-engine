@@ -107,7 +107,7 @@ func TestSelectWatchRecheckCandidates(t *testing.T) {
 	if shortlist[2].entry.Symbol != "XRPUSDT" {
 		t.Fatalf("expected safe compression recheck candidate third, got %s", shortlist[2].entry.Symbol)
 	}
-	if len(terminal) != 1 || terminal[0].origin.Symbol != "BTCUSDT" || terminal[0].disposition.TerminalStatus != WATCH_RECHECK_EXPIRED {
+	if len(terminal) != 1 || terminal[0].origin.Symbol != "BTCUSDT" || terminal[0].disposition.TerminalStatus != WATCH_EXPIRED {
 		t.Fatalf("expected BTCUSDT to be terminally expired, got %+v", terminal)
 	}
 }
