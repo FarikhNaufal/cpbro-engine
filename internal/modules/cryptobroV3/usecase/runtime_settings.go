@@ -116,7 +116,7 @@ var (
 		WatchRecheckMaxAgeMinutes:                120,
 		WatchRecheckBatchLimit:                   10,
 		WatchRecheckAllowedPlaybooks:             []string{"TREND_PULLBACK", "LIQUIDITY_SWEEP_REVERSAL", "COMPRESSION_BREAKOUT_RETEST", "RANGE_EDGE_REVERSAL", "CROWDED_POSITIONING_SQUEEZE"},
-		WatchRecheckAllowedReasonTokens:          []string{"AI DECISION IS WAIT", "WATCH_ONLY", "WAIT_RETEST", "AI CONFIDENCE", "LOCAL GATE STATUS IS LOCAL_WATCH", "AI CANDIDATE SKIPPED DUE POLICY MAXAICANDIDATES QUOTA", "M5"},
+		WatchRecheckAllowedReasonTokens:          []string{"AI DECISION IS WAIT", "AI_SKIPPED", "WATCH_ONLY", "WAIT_RETEST", "AI CONFIDENCE", "LOCAL_GATE_WATCH", "M5"},
 		WatchRecheckBlockedReasonTokens:          []string{"ACTIVE_MONITORING_EXISTS", "OPPOSITE_SIGNAL_CONFLICT", "LOWER_PRIORITY_CONFLICT", "DUPLICATE_SIGNAL_BUCKET", "SYMBOL_COOLDOWN_ACTIVE", "MAX_FINAL_EXECUTE_LIMIT"},
 		MaxMarketDataConcurrency:                 5,
 		MaxCandidatePipelineConcurrency:          0,
