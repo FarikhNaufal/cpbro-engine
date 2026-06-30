@@ -104,6 +104,48 @@ func TestJournal_FilterSymbolWorks(t *testing.T) {
 	}
 }
 
+func TestJournal_BreakevenRowsExposeOriginalAndActiveSL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir := t.TempDir()
+	raw := []byte(`[
+  {"signal_id":"1","symbol":"ETHUSDT","direction":"LONG","playbook":"TREND_PULLBACK","entry":100,"sl":100,"original_sl":95,"active_sl":100,"tp1":105,"tp2":110,"rr":2.0,"score":7.5,"created_at":"2026-05-24T00:00:00Z","status":"TP2_HIT","time_to_tp1":"10m"}
+]`)
+	_ = os.WriteFile(filepath.Join(dir, "signal_journal.json"), raw, 0644)
+
+	st, _ := service.NewJSONStorageService(dir)
+	h := &Handler{storageUC: usecase.NewStorageUsecase(st)}
+
+	r := gin.New()
+	r.GET("/journal", h.GetJournal)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/journal", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp APIResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	dataBytes, _ := json.Marshal(resp.Data)
+	var jr map[string]any
+	_ = json.Unmarshal(dataBytes, &jr)
+	items := jr["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	row := items[0].(map[string]any)
+	if row["sl"].(float64) != 95 {
+		t.Fatalf("expected display sl to stay original 95, got %v", row["sl"])
+	}
+	if row["active_sl"].(float64) != 100 {
+		t.Fatalf("expected active_sl 100, got %v", row["active_sl"])
+	}
+	if row["breakeven_armed"] != true {
+		t.Fatalf("expected breakeven_armed=true, got %v", row["breakeven_armed"])
+	}
+}
+
 func TestJournal_InvalidLimit_Returns400(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	dir := t.TempDir()

@@ -56,8 +56,11 @@ func TestSelectPrefetchCandidates_ReservesHotAndRotationSlots(t *testing.T) {
 }
 
 func TestResolveRotationPrefetchSlots_RegimeAware(t *testing.T) {
-	if slots := resolveRotationPrefetchSlots(MarketPolicy{Regime: RISK_OFF}, 10, 3); slots != 1 {
-		t.Fatalf("expected RISK_OFF to reserve 1 rotation slot, got %d", slots)
+	if slots := resolveRotationPrefetchSlots(MarketPolicy{Regime: RISK_OFF}, 10, 3); slots != 0 {
+		t.Fatalf("expected RISK_OFF to reserve 0 rotation slots, got %d", slots)
+	}
+	if slots := resolveRotationPrefetchSlots(MarketPolicy{Regime: HIGH_VOL}, 10, 3); slots != 0 {
+		t.Fatalf("expected HIGH_VOL to reserve 0 rotation slots, got %d", slots)
 	}
 	if slots := resolveRotationPrefetchSlots(MarketPolicy{Regime: ALT_SUPPORTIVE}, 10, 3); slots != 2 {
 		t.Fatalf("expected ALT_SUPPORTIVE to reserve 2 rotation slots, got %d", slots)

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -42,6 +43,10 @@ func notificationTime(t time.Time) string {
 		loc = time.Local
 	}
 	return t.In(loc).Format("2006-01-02 15:04:05 MST")
+}
+
+func logRecoveredWorkerPanic(worker string, recovered any) {
+	slog.Error("PANIC RECOVERY in "+worker, "panic", recovered, "stack", string(debug.Stack()))
 }
 
 // @title           cryptobroV3 API
@@ -96,18 +101,16 @@ func main() {
 
 	if cfg.PocketBase.Enabled {
 		timeout := time.Duration(cfg.PocketBase.RequestTimeoutSeconds) * time.Second
-		var pbClient *service.PocketBaseClient
-		retryMax := cfg.PocketBase.LoginRetryMax
-		switch {
-		case cfg.PocketBase.Token != "":
-			pbClient, err = service.NewPocketBaseClientWithHTTPClient(cfg.PocketBase.URL, nil, timeout, service.PocketBaseAuthModeToken, cfg.PocketBase.Token, "", "", retryMax)
-		case cfg.PocketBase.SuperuserEmail != "" && cfg.PocketBase.SuperuserPassword != "":
-			pbClient, err = service.NewPocketBaseClientWithHTTPClient(cfg.PocketBase.URL, nil, timeout, service.PocketBaseAuthModeSuperuser, "", cfg.PocketBase.SuperuserEmail, cfg.PocketBase.SuperuserPassword, retryMax)
-		case cfg.PocketBase.AdminEmail != "" && cfg.PocketBase.AdminPassword != "":
-			pbClient, err = service.NewPocketBaseClientWithHTTPClient(cfg.PocketBase.URL, nil, timeout, service.PocketBaseAuthModeAdmin, "", cfg.PocketBase.AdminEmail, cfg.PocketBase.AdminPassword, retryMax)
-		default:
-			err = nil
-		}
+		pbClient, err := service.NewPocketBaseClientFromCredentials(
+			cfg.PocketBase.URL,
+			timeout,
+			cfg.PocketBase.Token,
+			cfg.PocketBase.SuperuserEmail,
+			cfg.PocketBase.SuperuserPassword,
+			cfg.PocketBase.AdminEmail,
+			cfg.PocketBase.AdminPassword,
+			cfg.PocketBase.LoginRetryMax,
+		)
 		if err != nil {
 			slog.Error("failed to initialize pocketbase client", "error", err)
 			os.Exit(1)
@@ -373,7 +376,7 @@ func startStartupScan(ctx context.Context, cfg *config.Config, scannerUC *usecas
 
 		defer func() {
 			if r := recover(); r != nil {
-				slog.Error("PANIC RECOVERY in startup scan worker", "panic", r)
+				logRecoveredWorkerPanic("startup scan worker", r)
 			}
 		}()
 
@@ -453,7 +456,7 @@ func startBackgroundWorker(ctx context.Context, cfg *config.Config, scannerUC *u
 				go func(boundary time.Time) {
 					defer func() {
 						if r := recover(); r != nil {
-							slog.Error("PANIC RECOVERY in background scan worker", "panic", r)
+							logRecoveredWorkerPanic("background scan worker", r)
 						}
 					}()
 
@@ -530,7 +533,7 @@ func startMonitoringWorker(ctx context.Context, cfg *config.Config, monitoringUC
 				defer monitoringTickRunning.Store(false)
 				defer func() {
 					if r := recover(); r != nil {
-						slog.Error("PANIC RECOVERY in monitoring worker", "panic", r)
+						logRecoveredWorkerPanic("monitoring worker", r)
 					}
 				}()
 
@@ -596,7 +599,7 @@ func startWatchRecheckWorker(ctx context.Context, cfg *config.Config, scannerUC 
 			go func(boundary time.Time) {
 				defer func() {
 					if r := recover(); r != nil {
-						slog.Error("PANIC RECOVERY in watch recheck worker", "panic", r)
+						logRecoveredWorkerPanic("watch recheck worker", r)
 					}
 				}()
 
@@ -681,7 +684,7 @@ func startEvaluationWorker(ctx context.Context, cfg *config.Config, feedbackUC *
 				defer evaluationTickRunning.Store(false)
 				defer func() {
 					if r := recover(); r != nil {
-						slog.Error("PANIC RECOVERY in evaluation worker", "panic", r)
+						logRecoveredWorkerPanic("evaluation worker", r)
 					}
 				}()
 

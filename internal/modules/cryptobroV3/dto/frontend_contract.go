@@ -190,6 +190,7 @@ type SignalJournalResponse struct {
 	Playbook                  string   `json:"playbook"`
 	EntryPrice                float64  `json:"entry"`
 	StopLoss                  float64  `json:"sl"`
+	ActiveStopLoss            float64  `json:"active_sl,omitempty"`
 	TP1                       float64  `json:"tp1"`
 	TP2                       float64  `json:"tp2"`
 	RR                        float64  `json:"rr"`
@@ -228,6 +229,7 @@ type SignalJournalResponse struct {
 	UpdatedAt                 string   `json:"updated_at,omitempty"`
 	ClosedAt                  string   `json:"closed_at,omitempty"`
 	Reason                    string   `json:"reason,omitempty"`
+	BreakevenArmed            bool     `json:"breakeven_armed,omitempty"`
 	NotificationStatus        string   `json:"notification_status,omitempty"`
 	NotificationError         string   `json:"notification_error,omitempty"`
 }
@@ -255,6 +257,13 @@ type DataCompleteness struct {
 	CanEvaluateWatchMissedOpportunity bool `json:"can_evaluate_watch_missed_opportunity"`
 	CanEvaluateAIWait                 bool `json:"can_evaluate_ai_wait"`
 	CanEvaluateConflictDowngrade      bool `json:"can_evaluate_conflict_downgrade"`
+}
+
+type EvaluationFreshnessMarker struct {
+	Source      string  `json:"source"`
+	LastEventAt string  `json:"last_event_at"`
+	AgeMinutes  float64 `json:"age_minutes"`
+	Status      string  `json:"status"`
 }
 
 type ThresholdRecommendation struct {
@@ -389,38 +398,40 @@ type NamedIntStat struct {
 }
 
 type EvaluationResponse struct {
-	GeneratedAt               string                    `json:"generated_at"`
-	DataCompleteness          DataCompleteness          `json:"data_completeness"`
-	TotalSignals              int                       `json:"total_signals"`
-	Metrics                   map[string]float64        `json:"metrics"`
-	PlaybookStats             []NamedPlaybookStats      `json:"playbook_stats"`
-	RegimeStats               []NamedRegimeStats        `json:"regime_stats"`
-	TierStats                 []NamedTierStats          `json:"tier_stats"`
-	DirectionStats            []NamedDirectionStats     `json:"direction_stats"`
-	AIStats                   []NamedAIStats            `json:"ai_stats"`
-	StalenessStats            []NamedStalenessStats     `json:"staleness_stats"`
-	LongRegimePlaybookStats   []SetupDiagnosticStats    `json:"long_regime_playbook_stats"`
-	WeakLongSetups            []SetupDiagnosticStats    `json:"weak_long_setups"`
-	SetupMemorySlices         []SetupMemorySlice        `json:"setup_memory_slices"`
-	LearningReviews           []LearningReview          `json:"learning_reviews"`
-	ConflictStats             []NamedIntStat            `json:"conflict_stats"`
-	CooldownStats             []NamedIntStat            `json:"cooldown_stats"`
-	GateBugFindings           []GateBugFinding          `json:"gate_bug_findings"`
-	Recommendations           []ThresholdRecommendation `json:"recommendations"`
-	BestPlaybook              string                    `json:"best_playbook"`
-	WorstPlaybook             string                    `json:"worst_playbook"`
-	SetupYangSeringLangsungSL string                    `json:"setup_yang_sering_langsung_sl"`
-	SetupYangSeringExpired    string                    `json:"setup_yang_sering_expired"`
-	SetupYangSeringStale      string                    `json:"setup_yang_sering_stale"`
-	RegimeYangPalingBuruk     string                    `json:"regime_yang_paling_buruk"`
-	TierYangPalingBuruk       string                    `json:"tier_yang_paling_buruk"`
-	DirectionYangPalingBuruk  string                    `json:"direction_yang_paling_buruk"`
-	PlaybookDenganMAETerbesar string                    `json:"playbook_dengan_mae_terbesar"`
-	PlaybookDenganExpiredRate string                    `json:"playbook_dengan_expired_rate_terbesar"`
-	PlaybookDenganTP1Terbaik  string                    `json:"playbook_dengan_tp1_rate_terbaik"`
-	PlaybookDenganTP2Follow   string                    `json:"playbook_dengan_tp2_follow_through_terbaik"`
-	Notes                     []string                  `json:"notes"`
-	Status                    string                    `json:"status"`
+	GeneratedAt               string                               `json:"generated_at"`
+	SourceFilesUsed           []string                             `json:"source_files_used"`
+	DataCompleteness          DataCompleteness                     `json:"data_completeness"`
+	FreshnessMarkers          map[string]EvaluationFreshnessMarker `json:"freshness_markers"`
+	TotalSignals              int                                  `json:"total_signals"`
+	Metrics                   map[string]float64                   `json:"metrics"`
+	PlaybookStats             []NamedPlaybookStats                 `json:"playbook_stats"`
+	RegimeStats               []NamedRegimeStats                   `json:"regime_stats"`
+	TierStats                 []NamedTierStats                     `json:"tier_stats"`
+	DirectionStats            []NamedDirectionStats                `json:"direction_stats"`
+	AIStats                   []NamedAIStats                       `json:"ai_stats"`
+	StalenessStats            []NamedStalenessStats                `json:"staleness_stats"`
+	LongRegimePlaybookStats   []SetupDiagnosticStats               `json:"long_regime_playbook_stats"`
+	WeakLongSetups            []SetupDiagnosticStats               `json:"weak_long_setups"`
+	SetupMemorySlices         []SetupMemorySlice                   `json:"setup_memory_slices"`
+	LearningReviews           []LearningReview                     `json:"learning_reviews"`
+	ConflictStats             []NamedIntStat                       `json:"conflict_stats"`
+	CooldownStats             []NamedIntStat                       `json:"cooldown_stats"`
+	GateBugFindings           []GateBugFinding                     `json:"gate_bug_findings"`
+	Recommendations           []ThresholdRecommendation            `json:"recommendations"`
+	BestPlaybook              string                               `json:"best_playbook"`
+	WorstPlaybook             string                               `json:"worst_playbook"`
+	SetupYangSeringLangsungSL string                               `json:"setup_yang_sering_langsung_sl"`
+	SetupYangSeringExpired    string                               `json:"setup_yang_sering_expired"`
+	SetupYangSeringStale      string                               `json:"setup_yang_sering_stale"`
+	RegimeYangPalingBuruk     string                               `json:"regime_yang_paling_buruk"`
+	TierYangPalingBuruk       string                               `json:"tier_yang_paling_buruk"`
+	DirectionYangPalingBuruk  string                               `json:"direction_yang_paling_buruk"`
+	PlaybookDenganMAETerbesar string                               `json:"playbook_dengan_mae_terbesar"`
+	PlaybookDenganExpiredRate string                               `json:"playbook_dengan_expired_rate_terbesar"`
+	PlaybookDenganTP1Terbaik  string                               `json:"playbook_dengan_tp1_rate_terbaik"`
+	PlaybookDenganTP2Follow   string                               `json:"playbook_dengan_tp2_follow_through_terbaik"`
+	Notes                     []string                             `json:"notes"`
+	Status                    string                               `json:"status"`
 }
 
 type DecisionAuditRow struct {

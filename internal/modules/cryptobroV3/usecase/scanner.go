@@ -38,6 +38,11 @@ type ScannerUsecase struct {
 	hotSymbolProvider          HotSymbolProvider
 }
 
+type candlesCache struct {
+	data MarketData
+	err  error
+}
+
 func (uc *ScannerUsecase) SetHotSymbolProvider(provider HotSymbolProvider) {
 	uc.hotSymbolProvider = provider
 }
@@ -284,10 +289,6 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 		concurrencyLimit = 5
 	}
 
-	type candlesCache struct {
-		data MarketData
-		err  error
-	}
 	prefetchCandidates := candidates
 	prefetchDeferredSummary := []string{}
 	prefetchDebug := prefetchSelectionDebug{}
@@ -637,12 +638,32 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	selectedCandidates, arbiterRejected := uc.candidateArbiterUsecase.Arbitrate(allCandidates, policy)
 	slog.Info("Candidate arbiter completed", "scan_id", scanID, "selected_candidates", len(selectedCandidates), "rejected_candidates", len(arbiterRejected))
 	activeWatchSignals, _ := uc.storageUsecase.LoadWatchJournal()
+	usableSelectedCandidates := make([]QuantResult, 0, len(selectedCandidates))
+	selectedCandidateCache := make(map[string]candlesCache, len(selectedCandidates))
 	arbiterSelectedRankMap := make(map[string]int, len(selectedCandidates))
 	selectedSymbols := make([]string, 0, len(selectedCandidates))
 	for index, candidate := range selectedCandidates {
+		cache, exists := candlesMap[candidate.Symbol]
+		if !exists || cache.err != nil || len(cache.data.M15Candles) == 0 {
+			reason := "market data cache missing after arbiter selection"
+			switch {
+			case !exists:
+			case cache.err != nil:
+				reason = "market data cache fetch failed after arbiter selection"
+			default:
+				reason = "market data cache missing M15 candles after arbiter selection"
+			}
+			funnelSummary.Add(funnelStageLocalReject, reason)
+			playbookBlockers.Add(candidate.Playbook, funnelStageLocalReject, reason)
+			rejectedSummary = append(rejectedSummary, fmt.Sprintf("%s (%s %s): %s", candidate.Symbol, candidate.Playbook, candidate.Direction, reason))
+			continue
+		}
+		usableSelectedCandidates = append(usableSelectedCandidates, candidate)
+		selectedCandidateCache[candidate.Symbol] = cache
 		selectedSymbols = append(selectedSymbols, candidate.Symbol)
 		arbiterSelectedRankMap[candidate.Symbol] = index + 1
 	}
+	selectedCandidates = usableSelectedCandidates
 	activeSymbols := collectActiveJournalSymbols(activeSignals, activeWatchSignals)
 	_ = uc.stalenessUsecase.SyncSymbols(unionActiveSymbols(activeSymbols, selectedSymbols))
 
@@ -667,8 +688,9 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	localGateMap := make(map[string]LocalGateResult)
 	for _, qResult := range selectedCandidates {
 		pair := qResult.Symbol
-		cache := candlesMap[pair]
+		cache := selectedCandidateCache[pair]
 		lgRes := uc.localGateUsecase.EvaluateWithContext(ctx, qResult, policy, cache.data.M15Candles)
+		lgRes = uc.applyLiveActualRRGuard(ctx, qResult, policy, lgRes)
 		localGateMap[pair] = lgRes
 		if lgRes.Passed {
 			localCandidates = append(localCandidates, qResult)
@@ -729,7 +751,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			defer func() { <-aiSem }()
 
 			pair := qr.Symbol
-			cache := candlesMap[pair]
+			cache := selectedCandidateCache[pair]
 			aiStart := time.Now()
 
 			var auditResponse dto.AIAuditResponse
@@ -807,7 +829,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 	finalGateStart := time.Now()
 	for _, qResult := range selectedCandidates {
 		pair := qResult.Symbol
-		cache := candlesMap[pair]
+		cache := selectedCandidateCache[pair]
 		lgRes := localGateMap[pair]
 		auditResponse, audited := aiAuditsMap[pair]
 		evaluated := uc.evaluateSelectedCandidate(
@@ -1015,6 +1037,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				Playbook:                finalDecision.Playbook,
 				EntryPrice:              finalDecision.EntryPrice,
 				StopLoss:                finalDecision.StopLoss,
+				OriginalStopLoss:        finalDecision.StopLoss,
 				TP1:                     tp1,
 				TP2:                     tp2,
 				RR:                      finalDecision.RR,
@@ -1089,6 +1112,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 				Playbook:                finalDecision.Playbook,
 				EntryPrice:              finalDecision.EntryPrice,
 				StopLoss:                finalDecision.StopLoss,
+				OriginalStopLoss:        finalDecision.StopLoss,
 				TP1:                     tp1,
 				TP2:                     tp2,
 				RR:                      finalDecision.RR,

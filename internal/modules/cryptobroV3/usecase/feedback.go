@@ -1486,6 +1486,9 @@ func (uc *FeedbackUsecase) GenerateEvaluationReport() error {
 	}
 
 	setupYangSeringLangsungSL := findMaxKey(setupSLCounts)
+	if len(weakLongSetups) > 0 {
+		setupYangSeringLangsungSL = weakLongSetups[0].Direction + "_" + weakLongSetups[0].Playbook
+	}
 	setupYangSeringExpired := findMaxKey(setupExpiredCounts)
 	setupYangSeringStale := findMaxKey(setupStaleCounts)
 

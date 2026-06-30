@@ -126,6 +126,9 @@ func resolveRotationPrefetchSlots(policy MarketPolicy, prefetchLimit int, rotati
 	if prefetchLimit < 6 || rotationCount == 0 {
 		return 0
 	}
+	if policy.EffectiveRegime() == RISK_OFF || policy.EffectiveRegime() == HIGH_VOL || policy.EffectiveRegime() == BTC_CHAOS {
+		return 0
+	}
 
 	settings := getRuntimeSettings()
 	ratio := settings.RotationPrefetchRatioDefault

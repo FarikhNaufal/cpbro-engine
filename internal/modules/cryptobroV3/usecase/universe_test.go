@@ -238,15 +238,27 @@ func TestFilterUniverseTiers(t *testing.T) {
 }
 
 func TestFilterUniverseAbnormal(t *testing.T) {
+	original := SnapshotRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+
+	settings := original
+	settings.UniverseExcludedSymbols = []string{"QQQUSDT", "SPYUSDT", "XAUUSDT"}
+	SetRuntimeSettings(settings)
+
 	abnormals := []string{
 		"USDCUSDT", "BUSDUSDT", "FDUSDUSDT", "TUSDUSDT", "EURUSDT", "GBPUSDT",
 		"DAIUSDT", "AEURUSDT", "USDPUSDT", "ETHUPUSDT", "ETHDOWNUSDT", "BTCBULLUSDT", "BTCBEARUSDT",
+		"QQQUSDT", "SPYUSDT", "XAUUSDT",
 	}
 
 	for _, sym := range abnormals {
 		if !isAbnormal(sym) {
 			t.Errorf("Expected %s to be abnormal", sym)
 		}
+	}
+
+	if isAbnormal("EWZUSDT") {
+		t.Fatalf("expected EWZUSDT to require config exclusion, not built-in abnormal handling")
 	}
 }
 

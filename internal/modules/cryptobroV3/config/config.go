@@ -75,6 +75,7 @@ type UniverseConfig struct {
 	TierBMinQuoteVolume        float64  `json:"tier_b_min_quote_volume"`
 	TierCMinVolume             float64  `json:"tier_c_min_volume"`
 	DefaultSymbols             []string `json:"default_symbols"`
+	ExcludedSymbols            []string `json:"excluded_symbols"`
 	DefaultHotBoost            float64  `json:"default_hot_boost"`
 	MaxHotBoost                float64  `json:"max_hot_boost"`
 	DefaultMinFundingVolume    float64  `json:"default_min_funding_volume"`
@@ -102,6 +103,15 @@ type UniverseConfig struct {
 	WeightLiquidityDominance   float64  `json:"weight_liquidity_dominance"`
 	WeightActivityDominance    float64  `json:"weight_activity_dominance"`
 	WeightHotDominance         float64  `json:"weight_hot_dominance"`
+}
+
+var defaultUniverseExcludedSymbols = []string{
+	"QQQUSDT", "SPYUSDT", "EWZUSDT", "BRKBUSDT",
+	"TSLAUSDT", "AMDUSDT", "NVDAUSDT", "MSTRUSDT", "GOOGLUSDT", "AAPLUSDT", "MSFTUSDT", "IBMUSDT",
+	"SOXLUSDT", "SNDKUSDT", "KORUUSDT", "SKHYNIXUSDT", "INTCUSDT", "MRVLUSDT",
+	"CLUSDT", "EWYUSDT", "RKLBUSDT", "NBISUSDT", "CBRSUSDT", "GLWUSDT", "BZUSDT", "CRCLUSDT",
+	"SPCXUSDT", "DRAMUSDT", "WDCUSDT", "AAOIUSDT",
+	"XAUUSDT", "XAGUSDT",
 }
 
 // StrategyRuntimeConfig controls runtime gate and debug heuristics.
@@ -346,7 +356,7 @@ func LoadConfigFromEnv() (*Config, error) {
 			Port: getEnv("HTTP_PORT", "8080"),
 		},
 		Scanner: ScannerConfig{
-			Enabled:                  getEnvBool("SCAN_ENABLED", true),
+			Enabled:                  getEnvBoolWithFallback("SCAN_ENABLED", "SCANNER_ENABLED", true),
 			IntervalMode:             getEnv("SCAN_INTERVAL_MODE", ScanIntervalModeM15Close),
 			StartupDelaySeconds:      getEnvInt("SCAN_STARTUP_DELAY_SECONDS", 5),
 			ContextTimeoutSeconds:    getEnvInt("SCAN_CONTEXT_TIMEOUT_SECONDS", 120),
@@ -378,6 +388,7 @@ func LoadConfigFromEnv() (*Config, error) {
 			TierBMinQuoteVolume:        getEnvFloat("UNIVERSE_TIER_B_MIN_QUOTE_VOLUME", 50000000.0),
 			TierCMinVolume:             getEnvFloat("UNIVERSE_TIER_C_MIN_VOLUME", 15000000.0),
 			DefaultSymbols:             getEnvCSV("UNIVERSE_DEFAULT_SYMBOLS", []string{"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"}),
+			ExcludedSymbols:            getEnvCSV("UNIVERSE_EXCLUDED_SYMBOLS", defaultUniverseExcludedSymbols),
 			DefaultHotBoost:            getEnvFloat("UNIVERSE_DEFAULT_HOT_BOOST", 1.25),
 			MaxHotBoost:                getEnvFloat("UNIVERSE_MAX_HOT_BOOST", 1.5),
 			DefaultMinFundingVolume:    getEnvFloat("UNIVERSE_DEFAULT_MIN_FUNDING_VOLUME", 50000000.0),
@@ -587,6 +598,9 @@ func normalizeCompatibilityConfig(cfg *Config) {
 		return
 	}
 
+	cfg.Universe.DefaultSymbols = normalizeSymbolList(cfg.Universe.DefaultSymbols)
+	cfg.Universe.ExcludedSymbols = normalizeSymbolList(cfg.Universe.ExcludedSymbols)
+
 	switch strings.ToLower(strings.TrimSpace(cfg.Scanner.IntervalMode)) {
 	case "", ScanIntervalModeM15Close, "candle_close", "close_only":
 		cfg.Scanner.IntervalMode = ScanIntervalModeM15Close
@@ -621,6 +635,26 @@ func normalizeCompatibilityConfig(cfg *Config) {
 	cfg.Evaluation.MinSampleMedium = cfg.Strategy.EvaluationMinSampleMedium
 	cfg.Evaluation.MinSampleHigh = cfg.Strategy.EvaluationMinSampleHigh
 
+}
+
+func normalizeSymbolList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		normalized := strings.ToUpper(strings.TrimSpace(value))
+		if normalized == "" {
+			continue
+		}
+		if _, ok := seen[normalized]; ok {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out
 }
 
 // ValidateConfig audits config properties for safety and bounds correctness
@@ -1033,6 +1067,7 @@ func SafeConfigView(cfg *Config) map[string]any {
 			"tier_b_min_quote_volume":         cfg.Universe.TierBMinQuoteVolume,
 			"tier_c_min_volume":               cfg.Universe.TierCMinVolume,
 			"default_symbols":                 cfg.Universe.DefaultSymbols,
+			"excluded_symbols":                cfg.Universe.ExcludedSymbols,
 			"default_hot_boost":               cfg.Universe.DefaultHotBoost,
 			"max_hot_boost":                   cfg.Universe.MaxHotBoost,
 			"default_min_funding_volume":      cfg.Universe.DefaultMinFundingVolume,

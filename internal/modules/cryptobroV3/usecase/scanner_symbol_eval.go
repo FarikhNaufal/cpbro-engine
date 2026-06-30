@@ -2,6 +2,8 @@ package usecase
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"strings"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
@@ -23,6 +25,40 @@ type selectedCandidateEvaluation struct {
 	syntheticLocalGate bool
 	aiSkippedQuota     bool
 	recordAIFunnel     bool
+}
+
+func (uc *ScannerUsecase) applyLiveActualRRGuard(
+	ctx context.Context,
+	qResult QuantResult,
+	policy MarketPolicy,
+	localGateResult LocalGateResult,
+) LocalGateResult {
+	if !localGateResult.Passed || uc == nil || uc.stalenessUsecase == nil {
+		return localGateResult
+	}
+
+	latestPrice, ok := uc.stalenessUsecase.ResolveLatestPrice(ctx, qResult.Symbol)
+	if !ok || latestPrice <= 0 {
+		return localGateResult
+	}
+
+	minRRExecute := math.Max(policy.MinRRExecute, GetPlaybookThresholdProfile(qResult.Playbook, policy, qResult.Tier).MinRR)
+	rrActual := CalculateDirectionalRR(qResult.Direction, latestPrice, qResult.TradePlan.TakeProfit, qResult.TradePlan.StopLoss)
+	if rrActual >= minRRExecute {
+		return localGateResult
+	}
+
+	guarded := localGateResult
+	guarded.Passed = false
+	if rrActual >= 1.5 {
+		guarded.Status = LOCAL_WATCH
+		guarded.Reason = fmt.Sprintf("Actual RR %0.2f below policy requirement %0.2f but above hard minimum 1.50", rrActual, minRRExecute)
+		return guarded
+	}
+
+	guarded.Status = LOCAL_REJECT
+	guarded.Reason = fmt.Sprintf("Actual RR %0.2f below minimum required RR %0.2f", rrActual, minRRExecute)
+	return guarded
 }
 
 func (uc *ScannerUsecase) evaluateSelectedCandidate(

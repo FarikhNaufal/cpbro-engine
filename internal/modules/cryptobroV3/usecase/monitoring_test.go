@@ -281,6 +281,12 @@ func TestMonitoring_MonitorVirtualPositions_TP1andTP2Hit(t *testing.T) {
 	if item.Status != usecase.TP2_HIT {
 		t.Errorf("expected TP2_HIT status, got %s", item.Status)
 	}
+	if item.OriginalStopLoss != 95.0 {
+		t.Fatalf("expected original stop loss 95 to be preserved, got %v", item.OriginalStopLoss)
+	}
+	if item.StopLoss != item.EntryPrice {
+		t.Fatalf("expected active stop loss to move to breakeven, got sl=%v entry=%v", item.StopLoss, item.EntryPrice)
+	}
 	if item.MFE != 11.0 { // (111 - 100)/100 * 100
 		t.Errorf("expected MFE 11.0%%, got %0.2f%%", item.MFE)
 	}

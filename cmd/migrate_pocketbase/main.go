@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -76,18 +75,16 @@ func main() {
 
 func buildPBClient(cfg *config.Config) (*service.PocketBaseClient, error) {
 	timeout := time.Duration(cfg.PocketBase.RequestTimeoutSeconds) * time.Second
-	retryMax := cfg.PocketBase.LoginRetryMax
-
-	switch {
-	case cfg.PocketBase.Token != "":
-		return service.NewPocketBaseClientWithHTTPClient(cfg.PocketBase.URL, nil, timeout, service.PocketBaseAuthModeToken, cfg.PocketBase.Token, "", "", retryMax)
-	case cfg.PocketBase.SuperuserEmail != "" && cfg.PocketBase.SuperuserPassword != "":
-		return service.NewPocketBaseClientWithHTTPClient(cfg.PocketBase.URL, nil, timeout, service.PocketBaseAuthModeSuperuser, "", cfg.PocketBase.SuperuserEmail, cfg.PocketBase.SuperuserPassword, retryMax)
-	case cfg.PocketBase.AdminEmail != "" && cfg.PocketBase.AdminPassword != "":
-		return service.NewPocketBaseClientWithHTTPClient(cfg.PocketBase.URL, nil, timeout, service.PocketBaseAuthModeAdmin, "", cfg.PocketBase.AdminEmail, cfg.PocketBase.AdminPassword, retryMax)
-	default:
-		return nil, errors.New("no pocketbase auth configured")
-	}
+	return service.NewPocketBaseClientFromCredentials(
+		cfg.PocketBase.URL,
+		timeout,
+		cfg.PocketBase.Token,
+		cfg.PocketBase.SuperuserEmail,
+		cfg.PocketBase.SuperuserPassword,
+		cfg.PocketBase.AdminEmail,
+		cfg.PocketBase.AdminPassword,
+		cfg.PocketBase.LoginRetryMax,
+	)
 }
 
 func migrateSignalJournal(ctx context.Context, cfg *config.Config, jsonStorage *service.JSONStorageService, pbStorage *service.PocketBaseStorageService, dryRun bool) error {

@@ -48,6 +48,9 @@ func TestConfig_LoadDefaultsEmptyEnv(t *testing.T) {
 	if cfg.Universe.TierAMinQuoteVolume != 150000000.0 || cfg.Universe.TierBMinQuoteVolume != 50000000.0 {
 		t.Errorf("unexpected universe tier defaults: %+v", cfg.Universe)
 	}
+	if len(cfg.Universe.ExcludedSymbols) == 0 {
+		t.Errorf("expected default universe excluded symbols to be populated")
+	}
 	if cfg.Universe.DefaultHotBoost != 1.25 || cfg.Universe.MaxHotBoost != 1.5 {
 		t.Errorf("unexpected universe hot boost defaults: %+v", cfg.Universe)
 	}
@@ -118,6 +121,28 @@ func TestConfig_NormalizeCompatibilityConfigAuthoritativeSectionsWin(t *testing.
 	}
 }
 
+func TestConfig_ScanEnabledAlias(t *testing.T) {
+	os.Clearenv()
+	t.Setenv("SCANNER_ENABLED", "false")
+
+	cfg, err := LoadConfigFromEnv()
+	if err != nil {
+		t.Fatalf("LoadConfigFromEnv failed: %v", err)
+	}
+	if cfg.Scanner.Enabled {
+		t.Fatalf("expected SCANNER_ENABLED=false alias to disable scanner")
+	}
+
+	t.Setenv("SCAN_ENABLED", "true")
+	cfg, err = LoadConfigFromEnv()
+	if err != nil {
+		t.Fatalf("LoadConfigFromEnv failed with primary override: %v", err)
+	}
+	if !cfg.Scanner.Enabled {
+		t.Fatalf("expected SCAN_ENABLED to override SCANNER_ENABLED alias")
+	}
+}
+
 func TestConfig_ValidateConfigNormalizesLegacyMirrors(t *testing.T) {
 	cfg, _ := LoadConfigFromEnv()
 	cfg.Telegram.Enabled = false
@@ -168,6 +193,21 @@ func TestConfig_NormalizeCompatibilityConfigDerivesMinutesFromCandles(t *testing
 
 	if cfg.Monitoring.MaxHoldMinutes != 90 {
 		t.Fatalf("expected monitoring max hold minutes derived from candle count, got %d", cfg.Monitoring.MaxHoldMinutes)
+	}
+}
+
+func TestConfig_NormalizeCompatibilityConfigNormalizesUniverseSymbolLists(t *testing.T) {
+	cfg, _ := LoadConfigFromEnv()
+	cfg.Universe.DefaultSymbols = []string{" btcusdt ", "ETHUSDT", "btcusdt"}
+	cfg.Universe.ExcludedSymbols = []string{" spyusdt ", "SPYUSDT", ""}
+
+	normalizeCompatibilityConfig(cfg)
+
+	if len(cfg.Universe.DefaultSymbols) != 2 || cfg.Universe.DefaultSymbols[0] != "BTCUSDT" || cfg.Universe.DefaultSymbols[1] != "ETHUSDT" {
+		t.Fatalf("unexpected normalized default symbols: %+v", cfg.Universe.DefaultSymbols)
+	}
+	if len(cfg.Universe.ExcludedSymbols) != 1 || cfg.Universe.ExcludedSymbols[0] != "SPYUSDT" {
+		t.Fatalf("unexpected normalized excluded symbols: %+v", cfg.Universe.ExcludedSymbols)
 	}
 }
 

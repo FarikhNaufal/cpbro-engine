@@ -201,6 +201,102 @@ func buildHealthLatestSnapshot(res *entity.LatestResult) *dto.HealthLatestSnapsh
 	return snapshot
 }
 
+func evaluationFreshnessMarker(source string, lastEventAt, now time.Time) usecase.EvaluationFreshnessMarker {
+	freshThreshold := time.Duration(maxInt(usecase.SnapshotRuntimeSettings().WatchRecheckBoundaryMinutes, 1)) * time.Minute
+	agingThreshold := time.Duration(maxInt(usecase.SnapshotRuntimeSettings().MonitoringMaxHoldMinutes, maxInt(usecase.SnapshotRuntimeSettings().WatchRecheckMaxAgeMinutes, 1))) * time.Minute
+	if agingThreshold < freshThreshold {
+		agingThreshold = freshThreshold
+	}
+
+	marker := usecase.EvaluationFreshnessMarker{
+		Source:      source,
+		LastEventAt: lastEventAt,
+		AgeMinutes:  -1,
+		Status:      "MISSING",
+	}
+	if lastEventAt.IsZero() {
+		return marker
+	}
+
+	age := now.Sub(lastEventAt)
+	marker.AgeMinutes = age.Minutes()
+	switch {
+	case age <= freshThreshold:
+		marker.Status = "FRESH"
+	case age <= agingThreshold:
+		marker.Status = "AGING"
+	default:
+		marker.Status = "STALE"
+	}
+	return marker
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func appendEvaluationNote(notes, note string) string {
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return notes
+	}
+	if strings.Contains(notes, note) {
+		return notes
+	}
+	if strings.TrimSpace(notes) == "" {
+		return note
+	}
+	return strings.TrimSpace(notes) + " " + note
+}
+
+func latestDecisionAuditTime(audits []usecase.DecisionAudit) time.Time {
+	var latest time.Time
+	for _, audit := range audits {
+		if audit.GeneratedAt.After(latest) {
+			latest = audit.GeneratedAt
+		}
+		if audit.CreatedAt.After(latest) {
+			latest = audit.CreatedAt
+		}
+	}
+	return latest
+}
+
+func (h *Handler) decorateEvaluationReport(report *usecase.EvaluationReport) *usecase.EvaluationReport {
+	if report == nil {
+		return nil
+	}
+
+	clone := *report
+	clone.SourceFilesUsed = append([]string(nil), report.SourceFilesUsed...)
+	clone.FreshnessMarkers = make(map[string]usecase.EvaluationFreshnessMarker, len(report.FreshnessMarkers)+2)
+	for key, marker := range report.FreshnessMarkers {
+		clone.FreshnessMarkers[key] = marker
+	}
+
+	now := time.Now()
+	if latestRes, err := h.storageUC.LoadLatestResult(); err == nil && latestRes != nil && !latestRes.GeneratedAt.IsZero() {
+		clone.FreshnessMarkers["latest_result"] = evaluationFreshnessMarker("latest_result", latestRes.GeneratedAt, now)
+		if !clone.GeneratedAt.IsZero() && latestRes.GeneratedAt.After(clone.GeneratedAt) {
+			clone.Notes = appendEvaluationNote(clone.Notes, fmt.Sprintf("Evaluation report is older than latest_result by %.1f minutes; run /api/v3/evaluation/run for current assessment.", latestRes.GeneratedAt.Sub(clone.GeneratedAt).Minutes()))
+		}
+	}
+
+	if audits, err := h.storageUC.LoadDecisionAudits(); err == nil {
+		if latestAuditAt := latestDecisionAuditTime(audits); !latestAuditAt.IsZero() {
+			clone.FreshnessMarkers["decision_audit_current"] = evaluationFreshnessMarker("decision_audit_current", latestAuditAt, now)
+			if !clone.GeneratedAt.IsZero() && latestAuditAt.After(clone.GeneratedAt) {
+				clone.Notes = appendEvaluationNote(clone.Notes, fmt.Sprintf("Evaluation report is older than current decision_audit by %.1f minutes; run /api/v3/evaluation/run for current assessment.", latestAuditAt.Sub(clone.GeneratedAt).Minutes()))
+			}
+		}
+	}
+
+	return &clone
+}
+
 // GetHealth godoc
 // @Summary      Health check
 // @Description  Returns application health status, connectivity checks, and SRE metrics. Alert-only mode.
@@ -605,7 +701,7 @@ func (h *Handler) GetEvaluation(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, ok("evaluation report retrieved successfully", usecase.NormalizeEvaluationForFrontend(report)))
+	c.JSON(http.StatusOK, ok("evaluation report retrieved successfully", usecase.NormalizeEvaluationForFrontend(h.decorateEvaluationReport(report))))
 }
 
 // PostEvaluationRun godoc

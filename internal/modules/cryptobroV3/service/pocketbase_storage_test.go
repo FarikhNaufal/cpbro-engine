@@ -276,6 +276,7 @@ func TestPocketBaseStorageService_SignalJournalAppendAndLoad(t *testing.T) {
 		Playbook:                  usecase.TREND_PULLBACK,
 		EntryPrice:                100,
 		StopLoss:                  98,
+		OriginalStopLoss:          95,
 		TP1:                       105,
 		TP2:                       110,
 		RR:                        2.5,
@@ -304,11 +305,17 @@ func TestPocketBaseStorageService_SignalJournalAppendAndLoad(t *testing.T) {
 	if journal[0].ID != "sig_1" || journal[0].Symbol != "BTCUSDT" {
 		t.Fatalf("unexpected journal row: %+v", journal[0])
 	}
+	if journal[0].OriginalStopLoss != 95 {
+		t.Fatalf("expected original stop loss roundtrip, got %+v", journal[0])
+	}
 	if createdSignal["policy_long_mode"] != string(usecase.NORMAL) || createdSignal["policy_short_mode"] != string(usecase.SWEEP_ONLY) {
 		t.Fatalf("expected PB payload to include policy mode snapshot, got %+v", createdSignal)
 	}
 	if createdSignal["policy_require_ai_confidence"] != string(usecase.AIConfidenceHigh) {
 		t.Fatalf("expected PB payload to include effective AI confidence snapshot, got %+v", createdSignal)
+	}
+	if createdSignal["original_sl"] != 95.0 {
+		t.Fatalf("expected PB payload to include original_sl, got %+v", createdSignal)
 	}
 }
 

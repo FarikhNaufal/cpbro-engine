@@ -1,6 +1,7 @@
 package usecase
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -8,6 +9,33 @@ import (
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
 	"cpbro-engine/internal/modules/cryptobroV3/entity"
 )
+
+func latestResultFreshnessWarnings(res *entity.LatestResult) []string {
+	if res == nil {
+		return nil
+	}
+
+	lastUpdatedAt := res.GeneratedAt
+	if lastUpdatedAt.IsZero() {
+		lastUpdatedAt = res.LastScanTime
+	}
+	if lastUpdatedAt.IsZero() {
+		return nil
+	}
+
+	settings := getRuntimeSettings()
+	boundaryMinutes := settings.ScanBoundaryMinutes
+	if boundaryMinutes < 1 {
+		boundaryMinutes = 15
+	}
+
+	age := time.Since(lastUpdatedAt)
+	if age < time.Duration(boundaryMinutes*2)*time.Minute {
+		return nil
+	}
+
+	return []string{fmt.Sprintf("latest_result_stale=%dm", int(age/time.Minute))}
+}
 
 func NormalizeSignalForFrontend(sig dto.SignalResponse) dto.Signal {
 	var tStr string
@@ -238,6 +266,7 @@ func NormalizeLatestResultForFrontend(res *entity.LatestResult) dto.LatestResult
 
 	out.Warnings = []string{}
 	out.PartialErrors = []string{}
+	out.Warnings = append(out.Warnings, latestResultFreshnessWarnings(res)...)
 
 	return out
 }
@@ -259,6 +288,12 @@ func NormalizeJournalForFrontend(items []SignalJournal, limit int, offset int, f
 			closedStr = item.ClosedAt.Format(time.RFC3339)
 		}
 
+		displayStopLoss := item.StopLoss
+		if item.OriginalStopLoss > 0 {
+			displayStopLoss = item.OriginalStopLoss
+		}
+		breakevenArmed := item.TimeToTP1 != "" && item.EntryPrice > 0 && absFloat(item.StopLoss-item.EntryPrice) < 1e-9
+
 		outItems = append(outItems, dto.SignalJournalResponse{
 			SchemaVersion:             item.SchemaVersion,
 			ConfigVersion:             item.ConfigVersion,
@@ -267,7 +302,8 @@ func NormalizeJournalForFrontend(items []SignalJournal, limit int, offset int, f
 			Direction:                 string(item.Direction),
 			Playbook:                  string(item.Playbook),
 			EntryPrice:                item.EntryPrice,
-			StopLoss:                  item.StopLoss,
+			StopLoss:                  displayStopLoss,
+			ActiveStopLoss:            item.StopLoss,
 			TP1:                       item.TP1,
 			TP2:                       item.TP2,
 			RR:                        item.RR,
@@ -302,6 +338,7 @@ func NormalizeJournalForFrontend(items []SignalJournal, limit int, offset int, f
 			UpdatedAt:                 updatedStr,
 			ClosedAt:                  closedStr,
 			Reason:                    item.Reason,
+			BreakevenArmed:            breakevenArmed,
 			NotificationStatus:        item.NotificationStatus,
 			NotificationError:         item.NotificationError,
 			BreakoutLevel:             item.BreakoutLevel,
@@ -334,6 +371,18 @@ func NormalizeEvaluationForFrontend(report *EvaluationReport) dto.EvaluationResp
 			CanEvaluateWatchMissedOpportunity: dc.CanEvaluateWatchMissedOpportunity,
 			CanEvaluateAIWait:                 dc.CanEvaluateAIWait,
 			CanEvaluateConflictDowngrade:      dc.CanEvaluateConflictDowngrade,
+		}
+	}
+	toDTOFreshnessMarker := func(marker EvaluationFreshnessMarker) dto.EvaluationFreshnessMarker {
+		var lastEventAt string
+		if !marker.LastEventAt.IsZero() {
+			lastEventAt = marker.LastEventAt.Format(time.RFC3339)
+		}
+		return dto.EvaluationFreshnessMarker{
+			Source:      marker.Source,
+			LastEventAt: lastEventAt,
+			AgeMinutes:  marker.AgeMinutes,
+			Status:      marker.Status,
 		}
 	}
 
@@ -451,7 +500,9 @@ func NormalizeEvaluationForFrontend(report *EvaluationReport) dto.EvaluationResp
 
 	out := dto.EvaluationResponse{
 		GeneratedAt:             "",
+		SourceFilesUsed:         []string{},
 		DataCompleteness:        toDTODataCompleteness(report.DataCompleteness),
+		FreshnessMarkers:        map[string]dto.EvaluationFreshnessMarker{},
 		TotalSignals:            report.TotalSignals,
 		Metrics:                 map[string]float64{},
 		PlaybookStats:           []dto.NamedPlaybookStats{},
@@ -474,6 +525,10 @@ func NormalizeEvaluationForFrontend(report *EvaluationReport) dto.EvaluationResp
 
 	if !report.GeneratedAt.IsZero() {
 		out.GeneratedAt = report.GeneratedAt.Format(time.RFC3339)
+	}
+	out.SourceFilesUsed = append(out.SourceFilesUsed, report.SourceFilesUsed...)
+	for key, marker := range report.FreshnessMarkers {
+		out.FreshnessMarkers[key] = toDTOFreshnessMarker(marker)
 	}
 
 	for k, v := range report.Metrics {

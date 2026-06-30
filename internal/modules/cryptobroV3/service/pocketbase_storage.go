@@ -1130,6 +1130,7 @@ func encodeSignalJournal(e usecase.SignalJournal) map[string]any {
 		"playbook":                     string(e.Playbook),
 		"entry":                        e.EntryPrice,
 		"sl":                           e.StopLoss,
+		"original_sl":                  e.OriginalStopLoss,
 		"tp1":                          e.TP1,
 		"tp2":                          e.TP2,
 		"rr":                           e.RR,
@@ -1207,6 +1208,7 @@ func decodeSignalJournal(m map[string]any) (usecase.SignalJournal, error) {
 	}
 	out.EntryPrice = toFloat(m["entry"])
 	out.StopLoss = toFloat(m["sl"])
+	out.OriginalStopLoss = toFloat(m["original_sl"])
 	out.TP1 = toFloat(m["tp1"])
 	out.TP2 = toFloat(m["tp2"])
 	out.RR = toFloat(m["rr"])

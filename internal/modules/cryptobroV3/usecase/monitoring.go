@@ -243,7 +243,7 @@ func monitorJournalEntries(ctx context.Context, uc *MonitoringUsecase, provider 
 					item.Status = profile.TP1Hit
 					item.TimeToTP1 = c.Time.Sub(item.CreatedAt).String()
 					item.OutcomeReason = profile.CandleTP1Reason
-					item.StopLoss = item.EntryPrice // Move SL to entry price (breakeven)
+					armJournalBreakeven(&item)
 				}
 
 				if item.Status == profile.TP1Hit && isTP2Hit(item.Direction, c, item.TP2) {
@@ -281,7 +281,7 @@ func monitorJournalEntries(ctx context.Context, uc *MonitoringUsecase, provider 
 						item.Status = profile.TP1Hit
 						item.TimeToTP1 = elapsed.String()
 						item.OutcomeReason = profile.LiveTP1Reason
-						item.StopLoss = item.EntryPrice // Move SL to entry price (breakeven)
+						armJournalBreakeven(&item)
 						if price >= item.TP2 {
 							item.Status = profile.TP2Hit
 							item.TimeToTP2 = elapsed.String()
@@ -307,7 +307,7 @@ func monitorJournalEntries(ctx context.Context, uc *MonitoringUsecase, provider 
 						item.Status = profile.TP1Hit
 						item.TimeToTP1 = elapsed.String()
 						item.OutcomeReason = profile.LiveTP1Reason
-						item.StopLoss = item.EntryPrice // Move SL to entry price (breakeven)
+						armJournalBreakeven(&item)
 						if price <= item.TP2 {
 							item.Status = profile.TP2Hit
 							item.TimeToTP2 = elapsed.String()
@@ -365,6 +365,16 @@ func monitorJournalEntries(ctx context.Context, uc *MonitoringUsecase, provider 
 	}
 
 	return journal, changedEntries
+}
+
+func armJournalBreakeven(item *SignalJournal) {
+	if item == nil {
+		return
+	}
+	if item.OriginalStopLoss <= 0 {
+		item.OriginalStopLoss = item.StopLoss
+	}
+	item.StopLoss = item.EntryPrice
 }
 
 func loadMonitoringCandles(ctx context.Context, uc *MonitoringUsecase, provider MarketDataProvider, symbol string, now time.Time) ([]dto.Candle, error) {

@@ -1,10 +1,12 @@
 package usecase
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"cpbro-engine/internal/modules/cryptobroV3/dto"
+	"cpbro-engine/internal/modules/cryptobroV3/entity"
 )
 
 func TestNormalizeWatchSignalForFrontend_PreservesReasonsAndHotInfo(t *testing.T) {
@@ -88,5 +90,26 @@ func TestBuildDecisionBrief(t *testing.T) {
 	expected := "FINAL_EXECUTE | LIQUIDITY_SWEEP_REVERSAL | layer=AI_CONFIRM | ai=CONFIRM/HIGH | stale=FRESH | m5=CONFIRMED | reason=AI and local gates aligned"
 	if brief != expected {
 		t.Fatalf("unexpected brief\nwant: %s\ngot:  %s", expected, brief)
+	}
+}
+
+func TestNormalizeLatestResultForFrontend_AddsStaleWarning(t *testing.T) {
+	original := getRuntimeSettings()
+	t.Cleanup(func() { SetRuntimeSettings(original) })
+
+	settings := original
+	settings.ScanBoundaryMinutes = 15
+	SetRuntimeSettings(settings)
+
+	out := NormalizeLatestResultForFrontend(&entity.LatestResult{
+		ScanID:      "scan-1",
+		GeneratedAt: time.Now().UTC().Add(-time.Hour),
+	})
+
+	if len(out.Warnings) == 0 {
+		t.Fatal("expected stale warning")
+	}
+	if !strings.HasPrefix(out.Warnings[0], "latest_result_stale=") {
+		t.Fatalf("expected latest_result_stale warning, got %v", out.Warnings)
 	}
 }

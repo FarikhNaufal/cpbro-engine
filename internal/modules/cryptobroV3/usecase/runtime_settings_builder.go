@@ -43,6 +43,7 @@ func BuildRuntimeSettings(cfg *config.Config) RuntimeSettings {
 		UniverseTierBMinQuoteVolume:              cfg.Universe.TierBMinQuoteVolume,
 		UniverseTierCMinVolume:                   cfg.Universe.TierCMinVolume,
 		UniverseDefaultSymbols:                   append([]string(nil), cfg.Universe.DefaultSymbols...),
+		UniverseExcludedSymbols:                  append([]string(nil), cfg.Universe.ExcludedSymbols...),
 		UniverseDefaultHotBoost:                  cfg.Universe.DefaultHotBoost,
 		UniverseMaxHotBoost:                      cfg.Universe.MaxHotBoost,
 		UniverseDefaultMinFundingVolume:          cfg.Universe.DefaultMinFundingVolume,

@@ -795,6 +795,17 @@ func TestFeedback_PromotedConversionAndFreshnessMetrics(t *testing.T) {
 	if repo.report.FreshnessMarkers["decision_audit"].Status == "" {
 		t.Fatalf("expected decision_audit freshness marker, got %+v", repo.report.FreshnessMarkers)
 	}
+
+	frontend := usecase.NormalizeEvaluationForFrontend(repo.report)
+	if !reflect.DeepEqual(frontend.SourceFilesUsed, []string{"signal_journal.json", "watch_journal.json", "decision_audit.json"}) {
+		t.Fatalf("unexpected frontend source files: %+v", frontend.SourceFilesUsed)
+	}
+	if frontend.FreshnessMarkers["signal_journal"].Status == "" {
+		t.Fatalf("expected frontend signal_journal freshness marker, got %+v", frontend.FreshnessMarkers)
+	}
+	if frontend.FreshnessMarkers["signal_journal"].LastEventAt == "" {
+		t.Fatalf("expected frontend signal_journal last_event_at to be formatted")
+	}
 }
 
 // 5. Test Trend Pullback many SL with low ADX
@@ -1841,6 +1852,33 @@ func TestFeedback_WatchAgeDistribution_BucketsCorrectly(t *testing.T) {
 	}
 	if dist.Bucket120plus != 1 {
 		t.Errorf("expected Bucket120plus=1, got %d", dist.Bucket120plus)
+	}
+}
+
+func TestFeedback_SetupYangSeringLangsungSL_PrefersWeakLongSetup(t *testing.T) {
+	repo := &mockFeedbackStorageRepo{}
+	storage := usecase.NewStorageUsecase(repo)
+	fb := usecase.NewFeedbackUsecase(storage)
+	now := time.Now().UTC()
+
+	repo.journal = []usecase.SignalJournal{
+		{ID: "l1", Symbol: "A", Direction: usecase.LONG, Playbook: usecase.LIQUIDITY_SWEEP_REVERSAL, Status: usecase.SL_HIT, MarketRegime: string(usecase.RISK_OFF), CreatedAt: now.Add(-6 * time.Hour), ClosedAt: now.Add(-5 * time.Hour), UpdatedAt: now.Add(-5 * time.Hour), EntryTiming: "FRESH"},
+		{ID: "l2", Symbol: "B", Direction: usecase.LONG, Playbook: usecase.LIQUIDITY_SWEEP_REVERSAL, Status: usecase.SL_HIT, MarketRegime: string(usecase.RISK_OFF), CreatedAt: now.Add(-5 * time.Hour), ClosedAt: now.Add(-4 * time.Hour), UpdatedAt: now.Add(-4 * time.Hour), EntryTiming: "FRESH"},
+		{ID: "l3", Symbol: "C", Direction: usecase.LONG, Playbook: usecase.LIQUIDITY_SWEEP_REVERSAL, Status: usecase.SL_HIT, MarketRegime: string(usecase.RISK_OFF), CreatedAt: now.Add(-4 * time.Hour), ClosedAt: now.Add(-3 * time.Hour), UpdatedAt: now.Add(-3 * time.Hour), EntryTiming: "FRESH"},
+		{ID: "s1", Symbol: "D", Direction: usecase.SHORT, Playbook: usecase.COMPRESSION_BREAKOUT_RETEST, Status: usecase.SL_HIT, MarketRegime: string(usecase.DEFAULT), CreatedAt: now.Add(-6 * time.Hour), ClosedAt: now.Add(-5 * time.Hour), UpdatedAt: now.Add(-5 * time.Hour), EntryTiming: "FRESH"},
+		{ID: "s2", Symbol: "E", Direction: usecase.SHORT, Playbook: usecase.COMPRESSION_BREAKOUT_RETEST, Status: usecase.SL_HIT, MarketRegime: string(usecase.DEFAULT), CreatedAt: now.Add(-5 * time.Hour), ClosedAt: now.Add(-4 * time.Hour), UpdatedAt: now.Add(-4 * time.Hour), EntryTiming: "FRESH"},
+		{ID: "s3", Symbol: "F", Direction: usecase.SHORT, Playbook: usecase.COMPRESSION_BREAKOUT_RETEST, Status: usecase.SL_HIT, MarketRegime: string(usecase.DEFAULT), CreatedAt: now.Add(-4 * time.Hour), ClosedAt: now.Add(-3 * time.Hour), UpdatedAt: now.Add(-3 * time.Hour), EntryTiming: "FRESH"},
+		{ID: "s4", Symbol: "G", Direction: usecase.SHORT, Playbook: usecase.COMPRESSION_BREAKOUT_RETEST, Status: usecase.SL_HIT, MarketRegime: string(usecase.DEFAULT), CreatedAt: now.Add(-3 * time.Hour), ClosedAt: now.Add(-2 * time.Hour), UpdatedAt: now.Add(-2 * time.Hour), EntryTiming: "FRESH"},
+	}
+
+	if err := fb.GenerateEvaluationReport(); err != nil {
+		t.Fatalf("GenerateEvaluationReport failed: %v", err)
+	}
+	if repo.report == nil {
+		t.Fatal("expected report")
+	}
+	if repo.report.SetupYangSeringLangsungSL != "LONG_LIQUIDITY_SWEEP_REVERSAL" {
+		t.Fatalf("expected weak long setup label, got %q", repo.report.SetupYangSeringLangsungSL)
 	}
 }
 

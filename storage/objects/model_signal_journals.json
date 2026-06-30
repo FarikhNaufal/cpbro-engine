@@ -1597,8 +1597,8 @@
           "VIRTUAL_TP2_HIT",
           "VIRTUAL_SL_HIT",
           "VIRTUAL_EXPIRED",
-          "WATCH_RECHECK_INVALIDATED",
-          "WATCH_RECHECK_EXPIRED",
+          "WATCH_INVALIDATED",
+          "WATCH_EXPIRED",
           "BREAKEVEN"
         ]
       },

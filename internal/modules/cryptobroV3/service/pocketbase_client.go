@@ -49,10 +49,6 @@ type pocketBaseAuthResponse struct {
 	Token string `json:"token"`
 }
 
-func NewPocketBaseClient(baseURL string, timeout time.Duration, authMode PocketBaseAuthMode, token, identity, password string) (*PocketBaseClient, error) {
-	return NewPocketBaseClientWithHTTPClient(baseURL, nil, timeout, authMode, token, identity, password, 1)
-}
-
 func NewPocketBaseClientWithHTTPClient(baseURL string, httpClient *http.Client, timeout time.Duration, authMode PocketBaseAuthMode, token, identity, password string, loginRetryMax int) (*PocketBaseClient, error) {
 	if strings.TrimSpace(baseURL) == "" {
 		return nil, errors.New("pocketbase baseURL is empty")
@@ -92,6 +88,19 @@ func NewPocketBaseClientWithHTTPClient(baseURL string, httpClient *http.Client, 
 		password:      password,
 		loginRetryMax: loginRetryMax,
 	}, nil
+}
+
+func NewPocketBaseClientFromCredentials(baseURL string, timeout time.Duration, token, superuserEmail, superuserPassword, adminEmail, adminPassword string, loginRetryMax int) (*PocketBaseClient, error) {
+	switch {
+	case strings.TrimSpace(token) != "":
+		return NewPocketBaseClientWithHTTPClient(baseURL, nil, timeout, PocketBaseAuthModeToken, token, "", "", loginRetryMax)
+	case strings.TrimSpace(superuserEmail) != "" && strings.TrimSpace(superuserPassword) != "":
+		return NewPocketBaseClientWithHTTPClient(baseURL, nil, timeout, PocketBaseAuthModeSuperuser, "", superuserEmail, superuserPassword, loginRetryMax)
+	case strings.TrimSpace(adminEmail) != "" && strings.TrimSpace(adminPassword) != "":
+		return NewPocketBaseClientWithHTTPClient(baseURL, nil, timeout, PocketBaseAuthModeAdmin, "", adminEmail, adminPassword, loginRetryMax)
+	default:
+		return nil, errors.New("no pocketbase auth configured")
+	}
 }
 
 func (c *PocketBaseClient) ensureToken(ctx context.Context) (string, error) {

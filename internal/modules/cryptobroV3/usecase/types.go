@@ -87,46 +87,46 @@ const (
 type Status string
 
 const (
-	RAW_SYMBOL                Status = "RAW_SYMBOL"
-	UNIVERSE_PASS             Status = "UNIVERSE_PASS"
-	UNIVERSE_REJECT           Status = "UNIVERSE_REJECT"
-	STRATEGY_SELECTED         Status = "STRATEGY_SELECTED"
-	PLAYBOOK_ELIGIBLE         Status = "PLAYBOOK_ELIGIBLE"
-	PLAYBOOK_REJECTED         Status = "PLAYBOOK_REJECTED"
-	QUANT_CANDIDATE           Status = "QUANT_CANDIDATE"
-	ARBITER_SELECTED          Status = "ARBITER_SELECTED"
-	ARBITER_REJECTED          Status = "ARBITER_REJECTED"
-	LOCAL_REJECT              Status = "LOCAL_REJECT"
-	LOCAL_WATCH               Status = "LOCAL_WATCH"
-	AI_CANDIDATE              Status = "AI_CANDIDATE"
-	AI_CONFIRM                Status = "AI_CONFIRM"
-	AI_WAIT                   Status = "AI_WAIT"
-	AI_REJECT                 Status = "AI_REJECT"
-	AI_ERROR                  Status = "AI_ERROR"
-	PLAN_VALID                Status = "PLAN_VALID"
-	PLAN_NEED_RETEST          Status = "PLAN_NEED_RETEST"
-	PLAN_CONFLICT             Status = "PLAN_CONFLICT"
-	FRESH                     Status = "FRESH"
-	LATE                      Status = "LATE"
-	MISSED                    Status = "MISSED"
-	FINAL_EXECUTE             Status = "FINAL_EXECUTE"
-	FINAL_WATCH               Status = "FINAL_WATCH"
-	FINAL_REJECT              Status = "FINAL_REJECT"
-	AI_ERROR_REVIEW           Status = "AI_ERROR_REVIEW"
-	MONITORING                Status = "MONITORING"
-	WATCH_MONITORING          Status = "WATCH_MONITORING"
-	TP1_HIT                   Status = "TP1_HIT"
-	TP2_HIT                   Status = "TP2_HIT"
-	SL_HIT                    Status = "SL_HIT"
-	EXPIRED                   Status = "EXPIRED"
-	BREAKEVEN                 Status = "BREAKEVEN"
-	VIRTUAL_TP1_HIT           Status = "VIRTUAL_TP1_HIT"
-	VIRTUAL_TP2_HIT           Status = "VIRTUAL_TP2_HIT"
-	VIRTUAL_SL_HIT            Status = "VIRTUAL_SL_HIT"
-	VIRTUAL_EXPIRED           Status = "VIRTUAL_EXPIRED"
-	WATCH_PROMOTED            Status = "WATCH_PROMOTED"
-	WATCH_INVALIDATED         Status = "WATCH_INVALIDATED"
-	WATCH_EXPIRED             Status = "WATCH_EXPIRED"
+	RAW_SYMBOL        Status = "RAW_SYMBOL"
+	UNIVERSE_PASS     Status = "UNIVERSE_PASS"
+	UNIVERSE_REJECT   Status = "UNIVERSE_REJECT"
+	STRATEGY_SELECTED Status = "STRATEGY_SELECTED"
+	PLAYBOOK_ELIGIBLE Status = "PLAYBOOK_ELIGIBLE"
+	PLAYBOOK_REJECTED Status = "PLAYBOOK_REJECTED"
+	QUANT_CANDIDATE   Status = "QUANT_CANDIDATE"
+	ARBITER_SELECTED  Status = "ARBITER_SELECTED"
+	ARBITER_REJECTED  Status = "ARBITER_REJECTED"
+	LOCAL_REJECT      Status = "LOCAL_REJECT"
+	LOCAL_WATCH       Status = "LOCAL_WATCH"
+	AI_CANDIDATE      Status = "AI_CANDIDATE"
+	AI_CONFIRM        Status = "AI_CONFIRM"
+	AI_WAIT           Status = "AI_WAIT"
+	AI_REJECT         Status = "AI_REJECT"
+	AI_ERROR          Status = "AI_ERROR"
+	PLAN_VALID        Status = "PLAN_VALID"
+	PLAN_NEED_RETEST  Status = "PLAN_NEED_RETEST"
+	PLAN_CONFLICT     Status = "PLAN_CONFLICT"
+	FRESH             Status = "FRESH"
+	LATE              Status = "LATE"
+	MISSED            Status = "MISSED"
+	FINAL_EXECUTE     Status = "FINAL_EXECUTE"
+	FINAL_WATCH       Status = "FINAL_WATCH"
+	FINAL_REJECT      Status = "FINAL_REJECT"
+	AI_ERROR_REVIEW   Status = "AI_ERROR_REVIEW"
+	MONITORING        Status = "MONITORING"
+	WATCH_MONITORING  Status = "WATCH_MONITORING"
+	TP1_HIT           Status = "TP1_HIT"
+	TP2_HIT           Status = "TP2_HIT"
+	SL_HIT            Status = "SL_HIT"
+	EXPIRED           Status = "EXPIRED"
+	BREAKEVEN         Status = "BREAKEVEN"
+	VIRTUAL_TP1_HIT   Status = "VIRTUAL_TP1_HIT"
+	VIRTUAL_TP2_HIT   Status = "VIRTUAL_TP2_HIT"
+	VIRTUAL_SL_HIT    Status = "VIRTUAL_SL_HIT"
+	VIRTUAL_EXPIRED   Status = "VIRTUAL_EXPIRED"
+	WATCH_PROMOTED    Status = "WATCH_PROMOTED"
+	WATCH_INVALIDATED Status = "WATCH_INVALIDATED"
+	WATCH_EXPIRED     Status = "WATCH_EXPIRED"
 )
 
 type M5ConfirmationMode string
@@ -446,6 +446,7 @@ type SignalJournal struct {
 	Playbook                  Playbook  `json:"playbook"`
 	EntryPrice                float64   `json:"entry"`
 	StopLoss                  float64   `json:"sl"`
+	OriginalStopLoss          float64   `json:"original_sl,omitempty"`
 	TP1                       float64   `json:"tp1"`
 	TP2                       float64   `json:"tp2"`
 	RR                        float64   `json:"rr"`
@@ -505,10 +506,10 @@ type WatchJournal = SignalJournal
 // WatchAgeDistribution tracks distribution of watch journal ages at terminal status.
 // Used to diagnose whether max age settings are appropriate.
 type WatchAgeDistribution struct {
-	Bucket0to5    int `json:"bucket_0_to_5_min"`   // 0-5 minutes (fresh)
-	Bucket5to15   int `json:"bucket_5_to_15_min"`  // 5-15 minutes
-	Bucket15to30  int `json:"bucket_15_to_30_min"` // 15-30 minutes
-	Bucket30to60  int `json:"bucket_30_to_60_min"` // 30-60 minutes
+	Bucket0to5    int `json:"bucket_0_to_5_min"`    // 0-5 minutes (fresh)
+	Bucket5to15   int `json:"bucket_5_to_15_min"`   // 5-15 minutes
+	Bucket15to30  int `json:"bucket_15_to_30_min"`  // 15-30 minutes
+	Bucket30to60  int `json:"bucket_30_to_60_min"`  // 30-60 minutes
 	Bucket60to120 int `json:"bucket_60_to_120_min"` // 60-120 minutes
 	Bucket120plus int `json:"bucket_120_plus_min"`  // >120 minutes
 }
@@ -517,11 +518,11 @@ type WatchAgeDistribution struct {
 // Helps diagnose the root cause of 0% watch-to-execute conversion.
 type PromotionBlockerStats struct {
 	BlockedByAIConfidence int `json:"blocked_by_ai_confidence"` // AI confidence too low
-	BlockedByConflict      int `json:"blocked_by_conflict"`       // Opposing direction conflict
-	BlockedByCooldown      int `json:"blocked_by_cooldown"`       // Symbol cooldown active
-	BlockedByPlaybook      int `json:"blocked_by_playbook"`       // Playbook not in allowed list
-	BlockedByTier          int `json:"blocked_by_tier"`           // Tier restriction
-	BlockedByOther         int `json:"blocked_by_other"`          // Other reasons
+	BlockedByConflict     int `json:"blocked_by_conflict"`      // Opposing direction conflict
+	BlockedByCooldown     int `json:"blocked_by_cooldown"`      // Symbol cooldown active
+	BlockedByPlaybook     int `json:"blocked_by_playbook"`      // Playbook not in allowed list
+	BlockedByTier         int `json:"blocked_by_tier"`          // Tier restriction
+	BlockedByOther        int `json:"blocked_by_other"`         // Other reasons
 }
 
 type DecisionAudit struct {
@@ -757,8 +758,8 @@ type EvaluationReport struct {
 	CooldownStats             map[string]int                       `json:"cooldown_stats,omitempty"`
 	GateBugFindings           []string                             `json:"gate_bug_findings"`
 	Recommendations           []ThresholdRecommendation            `json:"recommendations"`
-	WatchAgeDistribution      WatchAgeDistribution                `json:"watch_age_distribution"`
-	PromotionBlockerStats     PromotionBlockerStats               `json:"promotion_blocker_stats"`
+	WatchAgeDistribution      WatchAgeDistribution                 `json:"watch_age_distribution"`
+	PromotionBlockerStats     PromotionBlockerStats                `json:"promotion_blocker_stats"`
 	WatchEligibleNotPromoted  int                                  `json:"watch_eligible_not_promoted"`
 	BestPlaybook              string                               `json:"best_playbook"`
 	WorstPlaybook             string                               `json:"worst_playbook"`

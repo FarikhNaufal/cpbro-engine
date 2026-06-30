@@ -10,6 +10,45 @@ import (
 	"time"
 )
 
+func TestNewPocketBaseClientFromCredentials(t *testing.T) {
+	t.Run("token wins", func(t *testing.T) {
+		c, err := NewPocketBaseClientFromCredentials("http://pocketbase.local", time.Second, "token", "super@example.com", "pass", "admin@example.com", "pass", 1)
+		if err != nil {
+			t.Fatalf("NewPocketBaseClientFromCredentials: %v", err)
+		}
+		if c.authMode != PocketBaseAuthModeToken {
+			t.Fatalf("expected token auth mode, got %s", c.authMode)
+		}
+	})
+
+	t.Run("superuser fallback", func(t *testing.T) {
+		c, err := NewPocketBaseClientFromCredentials("http://pocketbase.local", time.Second, "", "super@example.com", "pass", "admin@example.com", "pass", 1)
+		if err != nil {
+			t.Fatalf("NewPocketBaseClientFromCredentials: %v", err)
+		}
+		if c.authMode != PocketBaseAuthModeSuperuser {
+			t.Fatalf("expected superuser auth mode, got %s", c.authMode)
+		}
+	})
+
+	t.Run("admin fallback", func(t *testing.T) {
+		c, err := NewPocketBaseClientFromCredentials("http://pocketbase.local", time.Second, "", "", "", "admin@example.com", "pass", 1)
+		if err != nil {
+			t.Fatalf("NewPocketBaseClientFromCredentials: %v", err)
+		}
+		if c.authMode != PocketBaseAuthModeAdmin {
+			t.Fatalf("expected admin auth mode, got %s", c.authMode)
+		}
+	})
+
+	t.Run("missing auth", func(t *testing.T) {
+		_, err := NewPocketBaseClientFromCredentials("http://pocketbase.local", time.Second, "", "", "", "", "", 1)
+		if err == nil || err.Error() != "no pocketbase auth configured" {
+			t.Fatalf("expected missing auth error, got %v", err)
+		}
+	})
+}
+
 func TestPocketBaseClient_RetryReLoginOn401(t *testing.T) {
 	loginCount := 0
 	resourceCount := 0

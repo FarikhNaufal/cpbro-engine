@@ -138,12 +138,12 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 			if err := uc.applyWatchRecheckTerminalUpdates([]watchRecheckEvaluation{evaluated}, triggerTime); err != nil {
 				slog.Warn("Watch recheck failed to persist evaluated terminal state", "scan_id", scanID, "symbol", candidate.entry.Symbol, "error", err)
 			}
-		switch evaluated.disposition.TerminalStatus {
+			switch evaluated.disposition.TerminalStatus {
 			case WATCH_EXPIRED:
 				summary.Expired++
 			case WATCH_INVALIDATED:
 				summary.Invalidated++
-		}
+			}
 			continue
 		}
 		if !evaluated.disposition.Eligible {
@@ -321,6 +321,7 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 			Playbook:                finalDecision.Playbook,
 			EntryPrice:              finalDecision.EntryPrice,
 			StopLoss:                finalDecision.StopLoss,
+			OriginalStopLoss:        finalDecision.StopLoss,
 			TP1:                     tp1,
 			TP2:                     tp2,
 			RR:                      finalDecision.RR,
@@ -490,6 +491,7 @@ func (uc *ScannerUsecase) evaluateWatchRecheckCandidate(
 	_ = uc.scoringUsecase.Calculate(&quantResult, reconciliationDir, policy)
 
 	localGateResult := uc.localGateUsecase.EvaluateWithContext(ctx, quantResult, policy, fullData.M15Candles)
+	localGateResult = uc.applyLiveActualRRGuard(ctx, quantResult, policy, localGateResult)
 
 	var auditResponse dto.AIAuditResponse
 	hasAuditedResponse := false

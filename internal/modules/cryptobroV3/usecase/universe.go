@@ -415,5 +415,10 @@ func isAbnormal(sym string) bool {
 			return true
 		}
 	}
+	for _, excluded := range getRuntimeSettings().UniverseExcludedSymbols {
+		if sym == excluded {
+			return true
+		}
+	}
 	return false
 }

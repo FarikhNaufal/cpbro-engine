@@ -45,6 +45,7 @@ type RuntimeSettings struct {
 	UniverseTierBMinQuoteVolume              float64
 	UniverseTierCMinVolume                   float64
 	UniverseDefaultSymbols                   []string
+	UniverseExcludedSymbols                  []string
 	UniverseDefaultHotBoost                  float64
 	UniverseMaxHotBoost                      float64
 	UniverseDefaultMinFundingVolume          float64
@@ -143,6 +144,7 @@ var (
 		UniverseTierBMinQuoteVolume:              50000000.0,
 		UniverseTierCMinVolume:                   15000000.0,
 		UniverseDefaultSymbols:                   []string{"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"},
+		UniverseExcludedSymbols:                  []string{},
 		UniverseDefaultHotBoost:                  1.25,
 		UniverseMaxHotBoost:                      1.5,
 		UniverseDefaultMinFundingVolume:          50000000.0,
@@ -204,6 +206,7 @@ func SetRuntimeSettings(settings RuntimeSettings) {
 	runtimeSettingsMu.Lock()
 	defer runtimeSettingsMu.Unlock()
 	settings.UniverseDefaultSymbols = append([]string(nil), settings.UniverseDefaultSymbols...)
+	settings.UniverseExcludedSymbols = append([]string(nil), settings.UniverseExcludedSymbols...)
 	settings.WatchRecheckAllowedPlaybooks = append([]string(nil), settings.WatchRecheckAllowedPlaybooks...)
 	settings.WatchRecheckAllowedReasonTokens = append([]string(nil), settings.WatchRecheckAllowedReasonTokens...)
 	settings.WatchRecheckBlockedReasonTokens = append([]string(nil), settings.WatchRecheckBlockedReasonTokens...)
@@ -215,6 +218,7 @@ func getRuntimeSettings() RuntimeSettings {
 	settings := runtimeSettings
 	runtimeSettingsMu.RUnlock()
 	settings.UniverseDefaultSymbols = append([]string(nil), settings.UniverseDefaultSymbols...)
+	settings.UniverseExcludedSymbols = append([]string(nil), settings.UniverseExcludedSymbols...)
 	settings.WatchRecheckAllowedPlaybooks = append([]string(nil), settings.WatchRecheckAllowedPlaybooks...)
 	settings.WatchRecheckAllowedReasonTokens = append([]string(nil), settings.WatchRecheckAllowedReasonTokens...)
 	settings.WatchRecheckBlockedReasonTokens = append([]string(nil), settings.WatchRecheckBlockedReasonTokens...)

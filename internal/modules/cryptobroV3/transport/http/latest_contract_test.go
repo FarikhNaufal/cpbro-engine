@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -308,5 +309,47 @@ func TestLatest_NewTelemetryFields_AreExposed(t *testing.T) {
 	row := arbiter[0].(map[string]any)
 	if row["ai_confidence"] != "HIGH" {
 		t.Fatalf("expected ai_confidence=HIGH, got %v", row["ai_confidence"])
+	}
+}
+
+func TestLatest_StaleSnapshot_EmitsWarning(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dir := t.TempDir()
+	st, err := service.NewJSONStorageService(dir)
+	if err != nil {
+		t.Fatalf("NewJSONStorageService: %v", err)
+	}
+
+	raw := []byte(`{
+  "scan_id":"20260618093000",
+  "generated_at":"` + time.Now().UTC().Add(-time.Hour).Format(time.RFC3339) + `"
+}`)
+	if err := os.WriteFile(filepath.Join(dir, "latest_result.json"), raw, 0644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	h := &Handler{storageUC: usecase.NewStorageUsecase(st)}
+	r := gin.New()
+	r.GET("/latest", h.GetLatest)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/latest", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var resp APIResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	dataBytes, _ := json.Marshal(resp.Data)
+	var latest map[string]any
+	_ = json.Unmarshal(dataBytes, &latest)
+
+	warnings, ok := latest["warnings"].([]any)
+	if !ok || len(warnings) == 0 {
+		t.Fatalf("expected warnings array with stale marker, got %T %v", latest["warnings"], latest["warnings"])
+	}
+	if warning, _ := warnings[0].(string); !strings.HasPrefix(warning, "latest_result_stale=") {
+		t.Fatalf("expected stale warning, got %v", warnings)
 	}
 }
