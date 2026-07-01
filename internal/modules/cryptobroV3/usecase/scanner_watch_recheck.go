@@ -238,7 +238,7 @@ func (uc *ScannerUsecase) RunWatchRecheck(ctx context.Context, req dto.ScanReque
 			Playbook:                  finalDecision.Playbook,
 			SetupType:                 candCtx.quantResult.SetupType,
 			Tier:                      finalDecision.Tier,
-			Grade:                     getGrade(finalDecision.Score),
+			Grade:                     GetGrade(finalDecision.Score),
 			Score:                     finalDecision.Score,
 			RR:                        finalDecision.RR,
 			RRPlan:                    finalDecision.PlannedRR,
@@ -604,6 +604,15 @@ func classifyWatchRecheckDisposition(entry WatchJournal, now time.Time, policy w
 	}
 	if !entry.ClosedAt.IsZero() {
 		return watchRecheckDisposition{Eligible: false, Reason: "Watch recheck skipped: watch is already closed"}
+	}
+	if entry.MarketRegime == string(HIGH_VOL) && entry.Playbook == TREND_PULLBACK {
+		return watchRecheckDisposition{
+			Eligible:       false,
+			Terminal:       true,
+			TerminalStatus: WATCH_INVALIDATED,
+			Reason:         "Watch invalidated: HIGH_VOL no longer allows TREND_PULLBACK recheck",
+			OutcomeReason:  "Recheck invalidated because HIGH_VOL now only allows reversal/squeeze setups",
+		}
 	}
 	if !isWatchRecheckAllowedPlaybook(entry.Playbook, policy) {
 		return watchRecheckDisposition{

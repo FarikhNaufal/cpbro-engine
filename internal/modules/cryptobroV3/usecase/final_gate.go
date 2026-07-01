@@ -103,7 +103,7 @@ func (uc *FinalGateUsecase) Evaluate(
 	profile := GetPlaybookThresholdProfile(quant.Playbook, policy, quant.Tier)
 	minScoreExecute := math.Max(policy.MinScoreExecute, profile.MinScoreExecute)
 	minRRExecute := math.Max(policy.MinRRExecute, profile.MinRR)
-	plannedRR := CalculateDirectionalRR(quant.Direction, quant.TradePlan.EntryPrice, quant.TradePlan.TakeProfit, quant.TradePlan.StopLoss)
+	plannedRR := CalculateTradePlanRR(quant)
 
 	// Keep track of check failures
 	var rejectReasons []string
@@ -126,7 +126,7 @@ func (uc *FinalGateUsecase) Evaluate(
 		GetGlobalMetrics().IncrementRuleReject(layer)
 	}
 
-addWatch := func(layer string, reason string) {
+	addWatch := func(layer string, reason string) {
 		watchReasons = append(watchReasons, reason)
 		watchBreakdown = append(watchBreakdown, FormatReasonBreakdown(layer, reason))
 		if primaryWatchLayer == "" {

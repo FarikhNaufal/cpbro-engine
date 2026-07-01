@@ -61,8 +61,8 @@ func (uc *AICandidateSelectorUsecase) SelectCandidates(candidates []QuantResult,
 			return sorted[i].Score > sorted[j].Score
 		}
 		// RR DESC
-		rrI := uc.calculateRR(sorted[i])
-		rrJ := uc.calculateRR(sorted[j])
+		rrI := CalculateTradePlanRR(sorted[i])
+		rrJ := CalculateTradePlanRR(sorted[j])
 		if rrI != rrJ {
 			return rrI > rrJ
 		}
@@ -151,11 +151,6 @@ func (uc *AICandidateSelectorUsecase) calculateVolumeRatio(candles []dto.Candle)
 		return 1.0
 	}
 	return lastCandle.Vol / avg
-}
-
-// calculateRR extracts Risk-to-Reward ratio from TradePlan parameters
-func (uc *AICandidateSelectorUsecase) calculateRR(cand QuantResult) float64 {
-	return CalculateDirectionalRR(cand.Direction, cand.TradePlan.EntryPrice, cand.TradePlan.TakeProfit, cand.TradePlan.StopLoss)
 }
 
 // getPlaybookPriorityIndex maps playbook priority index based on the regime

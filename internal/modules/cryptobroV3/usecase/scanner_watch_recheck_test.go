@@ -63,6 +63,17 @@ func TestSelectWatchRecheckCandidates(t *testing.T) {
 			AIReasoning: "AI decision is WAIT",
 		},
 		{
+			ID:           "watch_ltc_high_vol_pullback",
+			Symbol:       "LTCUSDT",
+			Direction:    LONG,
+			Playbook:     TREND_PULLBACK,
+			MarketRegime: string(HIGH_VOL),
+			Status:       WATCH_MONITORING,
+			CreatedAt:    now.Add(-4 * time.Minute),
+			Reason:       "AI decision is WAIT",
+			AIReasoning:  "AI decision is WAIT",
+		},
+		{
 			ID:          "watch_eth_bad_reason",
 			Symbol:      "ETHUSDT",
 			Direction:   LONG,
@@ -107,8 +118,18 @@ func TestSelectWatchRecheckCandidates(t *testing.T) {
 	if shortlist[2].entry.Symbol != "XRPUSDT" {
 		t.Fatalf("expected safe compression recheck candidate third, got %s", shortlist[2].entry.Symbol)
 	}
-	if len(terminal) != 1 || terminal[0].origin.Symbol != "BTCUSDT" || terminal[0].disposition.TerminalStatus != WATCH_EXPIRED {
+	if len(terminal) != 2 {
+		t.Fatalf("expected 2 terminal updates, got %+v", terminal)
+	}
+	terminalBySymbol := map[string]Status{}
+	for _, item := range terminal {
+		terminalBySymbol[item.origin.Symbol] = item.disposition.TerminalStatus
+	}
+	if terminalBySymbol["BTCUSDT"] != WATCH_EXPIRED {
 		t.Fatalf("expected BTCUSDT to be terminally expired, got %+v", terminal)
+	}
+	if terminalBySymbol["LTCUSDT"] != WATCH_INVALIDATED {
+		t.Fatalf("expected HIGH_VOL TREND_PULLBACK watch to be invalidated, got %+v", terminal)
 	}
 }
 

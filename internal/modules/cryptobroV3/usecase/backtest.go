@@ -772,7 +772,7 @@ func (uc *BacktestEngineUsecase) RunBacktest(ctx context.Context, req BacktestRe
 					Status:                  MONITORING,
 					MFE:                     0.0,
 					MAE:                     0.0,
-					Grade:                   getGrade(fd.Score),
+					Grade:                   GetGrade(fd.Score),
 					ThresholdProfileSummary: fd.ThresholdProfileSummary,
 				}
 

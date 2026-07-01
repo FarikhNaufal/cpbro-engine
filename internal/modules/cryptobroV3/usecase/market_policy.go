@@ -160,12 +160,10 @@ func (uc *MarketPolicyUsecase) EvaluatePolicy(
 		policy.AllowedTiers = []Tier{TierA, TierB} // Tier C limited
 		policy.MaxFinalExecute = 2                 // limit executes
 		policy.StalenessATRMultiplier = 0.8        // stricter staleness
-		// High volatility: keep the regime defensive, but do not collapse it into only two playbooks.
-		// We strip compression breakout entries, which are the most fragile during expansion, while
-		// preserving other baseline plays so the engine does not lose all regime diversity.
-		policy.AllowedPlaybooks = excludePlaybooks(policy.AllowedPlaybooks, COMPRESSION_BREAKOUT_RETEST)
+		// High volatility punishes continuation plays; keep only reversal/squeeze setups.
+		policy.AllowedPlaybooks = excludePlaybooks(policy.AllowedPlaybooks, COMPRESSION_BREAKOUT_RETEST, TREND_PULLBACK)
 		if len(policy.AllowedPlaybooks) == 0 {
-			policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, TREND_PULLBACK}
+			policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, RANGE_EDGE_REVERSAL}
 		}
 		policy.RequireAIConfidence = AIConfidenceHigh
 		policy.RequireFreshEntry = true

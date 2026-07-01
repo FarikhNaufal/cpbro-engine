@@ -170,8 +170,8 @@ func (uc *CandidateArbiterUsecase) Arbitrate(candidates []QuantResult, policy Ma
 				}
 
 				// Tie-breaker 2: Risk-to-Reward ratio
-				rrI := uc.calculateRR(cands[i])
-				rrJ := uc.calculateRR(cands[j])
+				rrI := CalculateTradePlanRR(cands[i])
+				rrJ := CalculateTradePlanRR(cands[j])
 				if math.Abs(rrI-rrJ) > 0.01 {
 					return rrI > rrJ
 				}
@@ -246,43 +246,43 @@ func (uc *CandidateArbiterUsecase) Arbitrate(candidates []QuantResult, policy Ma
 				continue
 			}
 
-// EV-based comparison using calibrated score probability
-		calibration := NewScoreProbabilityCalibration()
-		rrLong := uc.calculateRR(*winningLong)
-		rrShort := uc.calculateRR(*winningShort)
-		evLong := calibration.ExpectedValue(winningLong.Score, rrLong)
-		evShort := calibration.ExpectedValue(winningShort.Score, rrShort)
-		evDiff := evLong - evShort
-		if math.Abs(evDiff) >= 0.15 { // EV threshold for arbitration
-			if evDiff > 0 {
-				// LONG wins by EV
-				winningShort.Status = ARBITER_REJECTED
-				winningShort.Reason = fmt.Sprintf("Opposing conflict: LONG EV (%0.2f) is significantly higher than SHORT (%0.2f)", evLong, evShort)
-				rejected = append(rejected, *winningShort)
+			// EV-based comparison using calibrated score probability
+			calibration := NewScoreProbabilityCalibration()
+			rrLong := CalculateTradePlanRR(*winningLong)
+			rrShort := CalculateTradePlanRR(*winningShort)
+			evLong := calibration.ExpectedValue(winningLong.Score, rrLong)
+			evShort := calibration.ExpectedValue(winningShort.Score, rrShort)
+			evDiff := evLong - evShort
+			if math.Abs(evDiff) >= 0.15 { // EV threshold for arbitration
+				if evDiff > 0 {
+					// LONG wins by EV
+					winningShort.Status = ARBITER_REJECTED
+					winningShort.Reason = fmt.Sprintf("Opposing conflict: LONG EV (%0.2f) is significantly higher than SHORT (%0.2f)", evLong, evShort)
+					rejected = append(rejected, *winningShort)
 
-				winningLong.Status = ARBITER_SELECTED
-				winningLong.Reason = fmt.Sprintf("Arbiter selected LONG (score %0.1f, EV %0.2f) over SHORT (score %0.1f, EV %0.2f)", winningLong.Score, evLong, winningShort.Score, evShort)
-				selected = append(selected, *winningLong)
+					winningLong.Status = ARBITER_SELECTED
+					winningLong.Reason = fmt.Sprintf("Arbiter selected LONG (score %0.1f, EV %0.2f) over SHORT (score %0.1f, EV %0.2f)", winningLong.Score, evLong, winningShort.Score, evShort)
+					selected = append(selected, *winningLong)
+				} else {
+					// SHORT wins by EV
+					winningLong.Status = ARBITER_REJECTED
+					winningLong.Reason = fmt.Sprintf("Opposing conflict: SHORT EV (%0.2f) is significantly higher than LONG (%0.2f)", evShort, evLong)
+					rejected = append(rejected, *winningLong)
+
+					winningShort.Status = ARBITER_SELECTED
+					winningShort.Reason = fmt.Sprintf("Arbiter selected SHORT (score %0.1f, EV %0.2f) over LONG (score %0.1f, EV %0.2f)", winningShort.Score, evShort, winningLong.Score, evLong)
+					selected = append(selected, *winningShort)
+				}
 			} else {
-				// SHORT wins by EV
+				// EV difference too small, reject both
 				winningLong.Status = ARBITER_REJECTED
-				winningLong.Reason = fmt.Sprintf("Opposing conflict: SHORT EV (%0.2f) is significantly higher than LONG (%0.2f)", evShort, evLong)
+				winningLong.Reason = fmt.Sprintf("Opposing conflict: EV difference too small (LONG %0.2f vs SHORT %0.2f, diff %0.2f < 0.15)", evLong, evShort, math.Abs(evDiff))
 				rejected = append(rejected, *winningLong)
 
-				winningShort.Status = ARBITER_SELECTED
-				winningShort.Reason = fmt.Sprintf("Arbiter selected SHORT (score %0.1f, EV %0.2f) over LONG (score %0.1f, EV %0.2f)", winningShort.Score, evShort, winningLong.Score, evLong)
-				selected = append(selected, *winningShort)
+				winningShort.Status = ARBITER_REJECTED
+				winningShort.Reason = fmt.Sprintf("Opposing conflict: EV difference too small (LONG %0.2f vs SHORT %0.2f, diff %0.2f < 0.15)", evLong, evShort, math.Abs(evDiff))
+				rejected = append(rejected, *winningShort)
 			}
-		} else {
-			// EV difference too small, reject both
-			winningLong.Status = ARBITER_REJECTED
-			winningLong.Reason = fmt.Sprintf("Opposing conflict: EV difference too small (LONG %0.2f vs SHORT %0.2f, diff %0.2f < 0.15)", evLong, evShort, math.Abs(evDiff))
-			rejected = append(rejected, *winningLong)
-
-			winningShort.Status = ARBITER_REJECTED
-			winningShort.Reason = fmt.Sprintf("Opposing conflict: EV difference too small (LONG %0.2f vs SHORT %0.2f, diff %0.2f < 0.15)", evLong, evShort, math.Abs(evDiff))
-			rejected = append(rejected, *winningShort)
-		}
 		} else {
 			// Only one direction is present for this symbol
 			if winningLong != nil {
@@ -304,11 +304,6 @@ func (uc *CandidateArbiterUsecase) Arbitrate(candidates []QuantResult, policy Ma
 // getPlaybookPriorityIndex returns priority ordering index (lower = higher priority).
 func (uc *CandidateArbiterUsecase) getPlaybookPriorityIndex(playbook Playbook, dir Direction, regime MarketRegime) int {
 	return resolvePlaybookPriority(regime, dir, playbook)
-}
-
-// calculateRR extracts Risk-to-Reward ratio from TradePlan parameters
-func (uc *CandidateArbiterUsecase) calculateRR(cand QuantResult) float64 {
-	return CalculateDirectionalRR(cand.Direction, cand.TradePlan.EntryPrice, cand.TradePlan.TakeProfit, cand.TradePlan.StopLoss)
 }
 
 // getGradeWeight converts grade inside Reason to weight for comparison

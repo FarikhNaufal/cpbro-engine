@@ -935,7 +935,7 @@ func (uc *ScannerUsecase) Run(ctx context.Context, req dto.ScanRequest) (dto.Sca
 			Playbook:                  finalDecision.Playbook,
 			SetupType:                 candCtx.quantResult.SetupType,
 			Tier:                      finalDecision.Tier,
-			Grade:                     getGrade(finalDecision.Score),
+			Grade:                     GetGrade(finalDecision.Score),
 			Score:                     finalDecision.Score,
 			RR:                        finalDecision.RR,
 			RRPlan:                    finalDecision.PlannedRR,

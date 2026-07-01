@@ -52,7 +52,16 @@ func main() {
 		log.Fatalf("failed to init JSON storage: %v", err)
 	}
 
-	pbClient, err := buildPBClient(cfg)
+	pbClient, err := service.NewPocketBaseClientFromCredentials(
+		cfg.PocketBase.URL,
+		time.Duration(cfg.PocketBase.RequestTimeoutSeconds)*time.Second,
+		cfg.PocketBase.Token,
+		cfg.PocketBase.SuperuserEmail,
+		cfg.PocketBase.SuperuserPassword,
+		cfg.PocketBase.AdminEmail,
+		cfg.PocketBase.AdminPassword,
+		cfg.PocketBase.LoginRetryMax,
+	)
 	if err != nil {
 		log.Fatalf("failed to init PocketBase client: %v", err)
 	}
@@ -71,20 +80,6 @@ func main() {
 	}
 
 	slog.Info("PocketBase migration completed successfully")
-}
-
-func buildPBClient(cfg *config.Config) (*service.PocketBaseClient, error) {
-	timeout := time.Duration(cfg.PocketBase.RequestTimeoutSeconds) * time.Second
-	return service.NewPocketBaseClientFromCredentials(
-		cfg.PocketBase.URL,
-		timeout,
-		cfg.PocketBase.Token,
-		cfg.PocketBase.SuperuserEmail,
-		cfg.PocketBase.SuperuserPassword,
-		cfg.PocketBase.AdminEmail,
-		cfg.PocketBase.AdminPassword,
-		cfg.PocketBase.LoginRetryMax,
-	)
 }
 
 func migrateSignalJournal(ctx context.Context, cfg *config.Config, jsonStorage *service.JSONStorageService, pbStorage *service.PocketBaseStorageService, dryRun bool) error {

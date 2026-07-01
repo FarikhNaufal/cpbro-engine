@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestEvaluatePolicy_HighVolExcludesCompressionBreakout(t *testing.T) {
+func TestEvaluatePolicy_HighVolExcludesContinuationPlaybooks(t *testing.T) {
 	uc := NewMarketPolicyUsecase()
 
 	policy := uc.EvaluatePolicy(
@@ -26,11 +26,13 @@ func TestEvaluatePolicy_HighVolExcludesCompressionBreakout(t *testing.T) {
 		if playbook == COMPRESSION_BREAKOUT_RETEST {
 			t.Fatalf("HIGH_VOL policy should not allow %s", COMPRESSION_BREAKOUT_RETEST)
 		}
+		if playbook == TREND_PULLBACK {
+			t.Fatalf("HIGH_VOL policy should not allow %s", TREND_PULLBACK)
+		}
 	}
 
 	expected := map[Playbook]bool{
 		LIQUIDITY_SWEEP_REVERSAL:    true,
-		TREND_PULLBACK:              true,
 		RANGE_EDGE_REVERSAL:         true,
 		CROWDED_POSITIONING_SQUEEZE: true,
 	}

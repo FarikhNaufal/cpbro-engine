@@ -436,7 +436,7 @@ func (uc *LocalGateUsecase) EvaluateWithContext(ctx context.Context, quant Quant
 				Reason: fmt.Sprintf("BTCChaos: playbook %s is not permitted under chaos regime", quant.Playbook),
 			}
 		}
-		chaosRR := uc.calculateRR(quant)
+		chaosRR := CalculateTradePlanRR(quant)
 		chaosMinRR := math.Max(policy.MinRRExecute, profile.MinRR)
 		if chaosRR < chaosMinRR {
 			return LocalGateResult{
@@ -727,9 +727,4 @@ func recentM5DirectionalWickConfirmation(candles []dto.Candle, direction Directi
 	}
 
 	return false, bestWickRatio
-}
-
-// calculateRR extracts Risk-to-Reward ratio from TradePlan parameters
-func (uc *LocalGateUsecase) calculateRR(cand QuantResult) float64 {
-	return CalculateDirectionalRR(cand.Direction, cand.TradePlan.EntryPrice, cand.TradePlan.TakeProfit, cand.TradePlan.StopLoss)
 }

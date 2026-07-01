@@ -173,7 +173,10 @@ func resolveFeedbackPolicyForRegime(label string) MarketPolicy {
 		policy.AllowedTiers = []Tier{TierA, TierB}
 		policy.MaxFinalExecute = 2
 		policy.StalenessATRMultiplier = 0.8
-		policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, TREND_PULLBACK}
+		policy.AllowedPlaybooks = excludePlaybooks(policy.AllowedPlaybooks, COMPRESSION_BREAKOUT_RETEST, TREND_PULLBACK)
+		if len(policy.AllowedPlaybooks) == 0 {
+			policy.AllowedPlaybooks = []Playbook{LIQUIDITY_SWEEP_REVERSAL, RANGE_EDGE_REVERSAL}
+		}
 		policy.RequireAIConfidence = AIConfidenceHigh
 		policy.RequireFreshEntry = true
 		policy.MaxPriceMove24hLong = 0.08

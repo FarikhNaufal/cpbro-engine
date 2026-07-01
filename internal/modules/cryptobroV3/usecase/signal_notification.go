@@ -116,7 +116,7 @@ func (uc *SignalNotificationUsecase) SendV3Signals(
 			escapedRegime = fmt.Sprintf("%s ⚠️ <b>[HIGH RISK]</b>", escapedRegime)
 		}
 
-		grade := getGrade(dec.Score)
+		grade := GetGrade(dec.Score)
 
 		aiReason := audit.Reason
 		if aiReason == "" {

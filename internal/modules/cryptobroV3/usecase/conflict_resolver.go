@@ -294,7 +294,7 @@ func (uc *ConflictResolverUsecase) GetDynamicCooldownMinutes(score float64, poli
 
 	// S/S+ grades (score >= 7.8) can get 2 mins cooldown if policy is not chaos,
 	// but never below an explicit policy cooldown.
-	grade := getGrade(score)
+	grade := GetGrade(score)
 	if (grade == "S" || grade == "S+") && regime != BTC_CHAOS {
 		if policyCooldown > 0 {
 			cooldown = maxInt(policyCooldown, 2)
@@ -423,19 +423,6 @@ func (uc *ConflictResolverUsecase) getPlaybookPriorityIndex(playbook Playbook, r
 		return 4
 	}
 	return 100
-}
-
-func getGrade(score float64) string {
-	if score >= 8.5 {
-		return "S+"
-	}
-	if score >= 7.8 {
-		return "S"
-	}
-	if score >= 7.0 {
-		return "A"
-	}
-	return "B"
 }
 
 func getConfidenceWeight(conf string) int {

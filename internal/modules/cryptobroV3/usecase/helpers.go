@@ -29,6 +29,10 @@ func CalculateDirectionalRR(direction Direction, entry, takeProfit, stopLoss flo
 	return 0.0
 }
 
+func CalculateTradePlanRR(cand QuantResult) float64 {
+	return CalculateDirectionalRR(cand.Direction, cand.TradePlan.EntryPrice, cand.TradePlan.TakeProfit, cand.TradePlan.StopLoss)
+}
+
 func NormalizeAIAuditSource(source string) string {
 	normalized := strings.ToUpper(strings.TrimSpace(source))
 	if normalized == "" {

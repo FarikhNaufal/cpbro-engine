@@ -19,18 +19,18 @@ type GateDecision struct {
 type GateLayer string
 
 const (
-	LayerPolicy      GateLayer = "POLICY"
-	LayerPlaybook    GateLayer = "PLAYBOOK"
-	LayerTier        GateLayer = "TIER"
-	LayerTradePlan   GateLayer = "TRADE_PLAN"
-	LayerRR          GateLayer = "RR"
-	LayerADX         GateLayer = "ADX"
-	LayerVolume      GateLayer = "VOLUME"
-	LayerRejection   GateLayer = "REJECTION"
-	LayerConfirm     GateLayer = "CONFIRMATION"
-	LayerRetest      GateLayer = "RETEST"
-	LayerCrowding    GateLayer = "CROWDING"
-	LayerIndicator   GateLayer = "INDICATOR"
+	LayerPolicy    GateLayer = "POLICY"
+	LayerPlaybook  GateLayer = "PLAYBOOK"
+	LayerTier      GateLayer = "TIER"
+	LayerTradePlan GateLayer = "TRADE_PLAN"
+	LayerRR        GateLayer = "RR"
+	LayerADX       GateLayer = "ADX"
+	LayerVolume    GateLayer = "VOLUME"
+	LayerRejection GateLayer = "REJECTION"
+	LayerConfirm   GateLayer = "CONFIRMATION"
+	LayerRetest    GateLayer = "RETEST"
+	LayerCrowding  GateLayer = "CROWDING"
+	LayerIndicator GateLayer = "INDICATOR"
 )
 
 // ValidateCorePolicy checks policy-level constraints shared between Local and Final gates.
@@ -123,7 +123,7 @@ func ValidateTradePlan(quant QuantResult) GateDecision {
 // ValidateRR checks Risk-to-Reward ratio against profile minimum.
 func ValidateRR(quant QuantResult, profile PlaybookThresholdProfile, policy MarketPolicy) GateDecision {
 	d := GateDecision{Pass: true}
-	rr := CalculateDirectionalRR(quant.Direction, quant.TradePlan.EntryPrice, quant.TradePlan.TakeProfit, quant.TradePlan.StopLoss)
+	rr := CalculateTradePlanRR(quant)
 	minRR := math.Max(policy.MinRRExecute, profile.MinRR)
 
 	if rr <= 0 {
